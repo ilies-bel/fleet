@@ -1,0 +1,41 @@
+#!/bin/bash
+# fleet — QA Fleet CLI
+# Usage: fleet <command> [options]
+set -euo pipefail
+
+GATEWAY="${FLEET_GATEWAY:-http://localhost:4000}"
+
+cmd="${1:-}"
+case "$cmd" in
+  sync)
+    name="${2:-}"
+    if [ -z "$name" ]; then
+      echo "Usage: fleet sync <name> [--regenerate-sources]"
+      echo "  name                 Feature name (as shown in dashboard)"
+      echo "  --regenerate-sources Also regenerate jOOQ DSL (needed after Liquibase migrations)"
+      exit 1
+    fi
+
+    regen=false
+    for arg in "${@:3}"; do
+      [ "$arg" = "--regenerate-sources" ] && regen=true
+    done
+
+    url="${GATEWAY}/_qa/api/features/${name}/sync"
+    [ "$regen" = true ] && url="${url}?regenerateSources=true"
+
+    echo "[fleet] Syncing '${name}'$([ "$regen" = true ] && echo ' (with jOOQ source regen)' || true)..."
+    curl -sf -X POST "$url" | python3 -m json.tool
+    echo "[fleet] Sync started — open logs in dashboard to follow progress"
+    ;;
+  *)
+    echo "Usage: fleet <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  sync <name> [--regenerate-sources]   Pull latest code, rebuild and restart backend"
+    echo ""
+    echo "Environment:"
+    echo "  FLEET_GATEWAY   Gateway base URL (default: http://localhost:4000)"
+    exit 1
+    ;;
+esac

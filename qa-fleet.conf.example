@@ -1,0 +1,48 @@
+# ─── QA Fleet — project configuration ────────────────────────────────────────
+# Copy this file to your project root as:  qa-fleet.conf
+# Then run:  ./scripts/qa-init.sh /path/to/your/project feature/my-branch
+#
+# Alternatively, run qa-init.sh without a qa-fleet.conf present and it will
+# walk you through creating one interactively.
+
+# ── Project identity (optional) ──────────────────────────────────────────────
+# How this project appears in the QA Fleet dashboard when multiple projects
+# share one gateway. Defaults to the APP_ROOT folder name (or its parent if
+# the folder is named "app").
+# PROJECT_NAME="my-project"
+
+# ── Frontend (required) ───────────────────────────────────────────────────────
+# Directory name relative to the project root containing the frontend source.
+# Must have a package.json with a "build" script.
+FRONTEND_DIR="my-frontend"
+
+# Directory that the build script outputs static files into (relative to FRONTEND_DIR).
+# Next.js static export → out    |    Vite → dist
+FRONTEND_OUT_DIR="out"
+
+# ── Backend (optional — leave BACKEND_DIR blank for frontend-only) ────────────
+BACKEND_DIR="my-backend"
+
+# Shell command to build the backend, run from inside BACKEND_DIR.
+# Spring Boot:  "mvn package -DskipTests -q"
+# Go:           "go build -o server ./cmd/server"
+BACKEND_BUILD_CMD="mvn package -DskipTests -q"
+
+# Command to start the backend process at runtime.
+# Spring Boot:  "java -jar /home/developer/backend.jar"
+# Go:           "/app/my-backend/server"
+# Node:         "node /app/my-backend/dist/index.js"
+BACKEND_RUN_CMD="java -jar /home/developer/backend.jar"
+
+# Port the backend process listens on inside the container.
+BACKEND_PORT="8081"
+
+# ── Database (optional — leave DB_NAME blank to skip PostgreSQL entirely) ─────
+DB_NAME="myapp_db"
+DB_USER="myapp_user"
+DB_PASSWORD="changeme"
+
+# ── Backend runtime environment ───────────────────────────────────────────────
+# Injected as environment variables into the running backend process.
+JWT_SECRET="changeme-replace-with-a-256-bit-secret-string-1234567890ab"
+JWT_ISSUER="myapp"

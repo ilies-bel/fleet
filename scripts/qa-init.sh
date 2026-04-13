@@ -1,0 +1,341 @@
+#!/bin/bash
+set -e
+
+# ─── Color helpers ──────────────────────────────────────────────────────────
+if [ -t 1 ]; then
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  RED='\033[0;31m'
+  RESET='\033[0m'
+else
+  GREEN='' YELLOW='' RED='' RESET=''
+fi
+
+info()  { echo -e "${GREEN}[qa-init]${RESET} $*"; }
+warn()  { echo -e "${YELLOW}[qa-init]${RESET} $*"; }
+error() { echo -e "${RED}[qa-init] ERROR:${RESET} $*" >&2; exit 1; }
+
+# ─── Args ────────────────────────────────────────────────────────────────────
+if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
+  echo "Usage: $0 <app-root-folder> <branch>"
+  echo ""
+  echo "  app-root-folder — path to your project root"
+  echo "  branch          — first feature branch to spin up"
+  echo ""
+  echo "Example:"
+  echo "  $0 /path/to/my/project feature/my-branch"
+  echo ""
+  echo "If qa-fleet.conf does not exist in the project root, the script will"
+  echo "scan the project and walk you through creating one."
+  exit 1
+fi
+
+APP_ROOT_ARG="$1"
+BRANCH="$2"
+
+# ─── Resolve paths ───────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+QA_FLEET_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$QA_FLEET_ROOT"
+
+APP_ROOT="$(cd "${APP_ROOT_ARG}" && pwd)" \
+  || error "Folder '${APP_ROOT_ARG}' does not exist"
+
+FLEET_CONF="${APP_ROOT}/qa-fleet.conf"
+
+# ─── Helpers for interactive setup ───────────────────────────────────────────
+
+# Prompt the user for a value. Reads from /dev/tty so it works even when
+# stdin is piped. Result lands in the global $_PROMPT_RESULT.
+_PROMPT_RESULT=""
+ask() {
+  local label="$1" default="$2"
+  if [ -n "$default" ]; then
+    printf "  %-38s [%s]: " "${label}" "${default}"
+  else
+    printf "  %-38s: " "${label}"
+  fi
+  read -r _PROMPT_RESULT </dev/tty
+  _PROMPT_RESULT="${_PROMPT_RESULT:-${default}}"
+}
+
+# Generate a random 48-char hex secret, no external tools required.
+gen_secret() {
+  python3 -c "import secrets; print(secrets.token_hex(24))" 2>/dev/null \
+    || LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c 48 \
+    || echo "changeme-replace-with-a-256-bit-secret-1234567890ab"
+}
+
+# Detect if a directory looks like a frontend (has package.json with build script).
+has_build_script() {
+  local pkg="${1}/package.json"
+  [ -f "$pkg" ] && grep -q '"build"' "$pkg" 2>/dev/null
+}
+
+# ─── Interactive config wizard ────────────────────────────────────────────────
+setup_fleet_conf() {
+  # Derive a slug from the project folder name for use as default DB/JWT names.
+  local project_slug
+  project_slug=$(basename "${APP_ROOT}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g')
+
+  echo ""
+  echo -e "${GREEN}── QA Fleet: first-time project setup ──────────────────────────${RESET}"
+  echo "   Project root : ${APP_ROOT}"
+  echo "   Scanning for frontend and backend directories..."
+  echo ""
+
+  # ── Auto-detect frontend ──────────────────────────────────────────────────
+  local det_frontend="" det_out="dist"
+  for dir in "${APP_ROOT}"/*/; do
+    [ -d "$dir" ] || continue
+    local dname; dname=$(basename "$dir")
+    if has_build_script "$dir"; then
+      # Prefer dirs that look like a frontend (next/vite config present)
+      if ls "${dir}"next.config.* >/dev/null 2>&1; then
+        det_frontend="$dname"; det_out="out"; break
+      elif ls "${dir}"vite.config.* >/dev/null 2>&1; then
+        det_frontend="$dname"; det_out="dist"; break
+      else
+        # Take the first one with a build script as fallback
+        [ -z "$det_frontend" ] && det_frontend="$dname"
+      fi
+    fi
+  done
+
+  # ── Auto-detect backend ───────────────────────────────────────────────────
+  local det_backend="" det_build="" det_run="" det_port="8081"
+  for dir in "${APP_ROOT}"/*/; do
+    [ -d "$dir" ] || continue
+    local dname; dname=$(basename "$dir")
+    [ "$dname" = "$det_frontend" ] && continue   # skip the frontend dir
+    if [ -f "${dir}pom.xml" ]; then
+      det_backend="$dname"
+      det_build="mvn package -DskipTests -q"
+      det_run="java -jar /home/developer/backend.jar"
+      break
+    elif [ -f "${dir}go.mod" ]; then
+      det_backend="$dname"
+      det_build="go build -o server ."
+      det_run="/app/${dname}/server"
+      break
+    elif has_build_script "$dir"; then
+      # Node backend: only pick up if we already found the frontend elsewhere
+      [ -n "$det_frontend" ] && [ "$dname" != "$det_frontend" ] || continue
+      det_backend="$dname"
+      det_build="npm run build"
+      det_run="node /app/${dname}/dist/index.js"
+      break
+    fi
+  done
+
+  # ── Print detection summary ───────────────────────────────────────────────
+  if [ -n "$det_frontend" ]; then
+    echo -e "   ${GREEN}✓${RESET} Frontend detected : ${det_frontend} (output dir: ${det_out})"
+  else
+    echo -e "   ${YELLOW}?${RESET} No frontend detected automatically"
+  fi
+  if [ -n "$det_backend" ]; then
+    echo -e "   ${GREEN}✓${RESET} Backend detected  : ${det_backend}"
+  else
+    echo -e "   ${YELLOW}-${RESET} No backend detected (frontend-only mode)"
+  fi
+  echo ""
+  echo -e "   ${YELLOW}Answer each question — press Enter to accept the detected value.${RESET}"
+  echo ""
+
+  # ── Frontend prompts ──────────────────────────────────────────────────────
+  local v_frontend v_out
+  echo -e "   ${GREEN}── Frontend${RESET}"
+  ask "Frontend directory" "$det_frontend";  v_frontend="$_PROMPT_RESULT"
+  ask "Build output directory" "$det_out";   v_out="$_PROMPT_RESULT"
+  [ -n "$v_frontend" ] || error "FRONTEND_DIR cannot be empty"
+
+  # ── Backend prompts ───────────────────────────────────────────────────────
+  local v_backend v_build v_run v_port
+  echo ""
+  echo -e "   ${GREEN}── Backend${RESET}  (press Enter on directory to skip — frontend-only)"
+  ask "Backend directory" "$det_backend"; v_backend="$_PROMPT_RESULT"
+
+  if [ -n "$v_backend" ]; then
+    ask "Backend build command"    "$det_build"; v_build="$_PROMPT_RESULT"
+    ask "Backend run command"      "$det_run";   v_run="$_PROMPT_RESULT"
+    ask "Backend port"             "$det_port";  v_port="$_PROMPT_RESULT"
+  else
+    v_build="" v_run="" v_port=""
+  fi
+
+  # ── Database prompts ──────────────────────────────────────────────────────
+  local v_db_name v_db_user v_db_password
+  echo ""
+  echo -e "   ${GREEN}── Database${RESET}  (press Enter on name to skip PostgreSQL)"
+  ask "Database name" "${project_slug}_db"; v_db_name="$_PROMPT_RESULT"
+
+  if [ -n "$v_db_name" ]; then
+    ask "Database user"     "${project_slug}_user"; v_db_user="$_PROMPT_RESULT"
+    ask "Database password" "changeme";             v_db_password="$_PROMPT_RESULT"
+  else
+    v_db_user="" v_db_password=""
+  fi
+
+  # ── Runtime env prompts ───────────────────────────────────────────────────
+  local v_jwt_secret v_jwt_issuer
+  echo ""
+  echo -e "   ${GREEN}── Backend runtime environment${RESET}"
+  local default_secret; default_secret=$(gen_secret)
+  ask "JWT secret"  "$default_secret";   v_jwt_secret="$_PROMPT_RESULT"
+  ask "JWT issuer"  "$project_slug";     v_jwt_issuer="$_PROMPT_RESULT"
+
+  # ── Write qa-fleet.conf ───────────────────────────────────────────────────
+  echo ""
+  cat > "${FLEET_CONF}" <<CONF
+# QA Fleet project configuration
+# Generated by qa-init.sh on $(date '+%Y-%m-%d')
+
+# ── Frontend ─────────────────────────────────────────────────────────────────
+FRONTEND_DIR="${v_frontend}"
+FRONTEND_OUT_DIR="${v_out}"
+
+# ── Backend ───────────────────────────────────────────────────────────────────
+BACKEND_DIR="${v_backend}"
+BACKEND_BUILD_CMD="${v_build}"
+BACKEND_RUN_CMD="${v_run}"
+BACKEND_PORT="${v_port:-8081}"
+
+# ── Database ──────────────────────────────────────────────────────────────────
+DB_NAME="${v_db_name}"
+DB_USER="${v_db_user}"
+DB_PASSWORD="${v_db_password}"
+
+# ── Backend runtime environment ───────────────────────────────────────────────
+JWT_SECRET="${v_jwt_secret}"
+JWT_ISSUER="${v_jwt_issuer}"
+CONF
+
+  info "Written: ${FLEET_CONF}"
+  echo ""
+}
+
+# ─── Load or create qa-fleet.conf ────────────────────────────────────────────
+if [ ! -f "${FLEET_CONF}" ]; then
+  if [ ! -t 0 ] && [ ! -t 1 ]; then
+    error "qa-fleet.conf not found in ${APP_ROOT} and no terminal available for interactive setup.
+  Copy ${QA_FLEET_ROOT}/qa-fleet.conf.example to ${APP_ROOT}/qa-fleet.conf and fill it in."
+  fi
+  setup_fleet_conf
+else
+  info "Found existing ${FLEET_CONF}"
+fi
+
+# shellcheck source=/dev/null
+source "${FLEET_CONF}"
+
+# ─── Validate config ──────────────────────────────────────────────────────────
+[ -n "${FRONTEND_DIR:-}" ] \
+  || error "FRONTEND_DIR is not set in qa-fleet.conf"
+[ -d "${APP_ROOT}/${FRONTEND_DIR}" ] \
+  || error "'${FRONTEND_DIR}' directory not found in ${APP_ROOT} (check FRONTEND_DIR in qa-fleet.conf)"
+
+if [ -n "${BACKEND_DIR:-}" ]; then
+  [ -d "${APP_ROOT}/${BACKEND_DIR}" ] \
+    || error "'${BACKEND_DIR}' directory not found in ${APP_ROOT} (check BACKEND_DIR in qa-fleet.conf)"
+fi
+
+# ─── Prerequisites ───────────────────────────────────────────────────────────
+command -v docker >/dev/null 2>&1 || error "docker is not installed"
+
+# ─── Persist APP_ROOT ────────────────────────────────────────────────────────
+printf 'APP_ROOT=%s\n' "${APP_ROOT}" > "${QA_FLEET_ROOT}/.qa-config"
+info "Saved APP_ROOT=${APP_ROOT} to .qa-config"
+
+# ─── Create worktrees directory ───────────────────────────────────────────────
+mkdir -p "${APP_ROOT}/.qa-worktrees"
+info "Created ${APP_ROOT}/.qa-worktrees"
+
+# ─── Create .qa-shared template if not present ───────────────────────────────
+SHARED_EXAMPLE="${QA_FLEET_ROOT}/.qa-shared.example"
+if [ ! -f "${APP_ROOT}/.qa-shared" ] && [ -f "${SHARED_EXAMPLE}" ]; then
+  cp "${SHARED_EXAMPLE}" "${APP_ROOT}/.qa-shared"
+  info "Created ${APP_ROOT}/.qa-shared — edit to list non-tracked files to share with containers"
+fi
+
+# ─── Start host runner (AppleScript relay) ───────────────────────────────────
+info "Starting host runner (osascript relay on port 4001)..."
+bash "${SCRIPT_DIR}/qa-host-runner.sh"
+
+# ─── Network ─────────────────────────────────────────────────────────────────
+if docker network inspect qa-net >/dev/null 2>&1; then
+  warn "Network 'qa-net' already exists — skipping"
+else
+  info "Creating Docker network 'qa-net'..."
+  docker network create qa-net
+fi
+
+# ─── Build gateway image ─────────────────────────────────────────────────────
+info "Building gateway image (includes dashboard)..."
+docker build \
+  --load \
+  -f gateway/Dockerfile \
+  -t qa-gateway \
+  .
+
+# ─── Build feature base image ─────────────────────────────────────────────────
+info "Building qa-feature-base image (done once, reused for all features)..."
+docker build \
+  --load \
+  -f Dockerfile.feature-base \
+  -t qa-feature-base \
+  .
+
+# ─── Stop existing gateway container if present ──────────────────────────────
+if docker inspect qa-gateway-container >/dev/null 2>&1; then
+  warn "Stopping existing gateway container..."
+  docker rm -f qa-gateway-container
+fi
+
+# ─── Start gateway ───────────────────────────────────────────────────────────
+info "Starting gateway container..."
+docker run -d \
+  --name qa-gateway-container \
+  --network qa-net \
+  -p 3000:3000 \
+  -p 4000:4000 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --security-opt label=disable \
+  --restart unless-stopped \
+  qa-gateway
+
+# ─── Wait for gateway to respond ─────────────────────────────────────────────
+info "Waiting for gateway to be ready..."
+ATTEMPTS=0
+MAX=30
+until curl -sf http://localhost:4000/_qa/api/status >/dev/null 2>&1; do
+  ATTEMPTS=$((ATTEMPTS + 1))
+  if [ "$ATTEMPTS" -ge "$MAX" ]; then
+    error "Gateway did not start within ${MAX}s"
+  fi
+  sleep 1
+done
+info "Gateway is up."
+
+# ─── Spin up first feature ────────────────────────────────────────────────────
+# Derive a safe container name from the branch (slashes → hyphens, strip unsafe chars)
+NAME="${BRANCH//\//-}"
+NAME="${NAME//[^a-z0-9-]/}"
+NAME="${NAME:0:30}"
+NAME="${NAME#-}"   # ensure it starts with a letter or digit
+
+if [ -z "$NAME" ]; then
+  error "Could not derive a valid container name from branch '${BRANCH}'"
+fi
+
+info "Spinning up first feature: ${NAME} (branch: ${BRANCH})..."
+bash "${SCRIPT_DIR}/qa-add.sh" "${NAME}" "${BRANCH}"
+
+# ─── Success banner ──────────────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}┌──────────────────────────────────────────────┐${RESET}"
+echo -e "${GREEN}│  QA Fleet ready                              │${RESET}"
+echo -e "${GREEN}│  Dashboard  → http://localhost:4000          │${RESET}"
+echo -e "${GREEN}│  Proxy      → http://localhost:3000          │${RESET}"
+echo -e "${GREEN}│  Active     → ${NAME} (${BRANCH})${RESET}"
+echo -e "${GREEN}└──────────────────────────────────────────────┘${RESET}"

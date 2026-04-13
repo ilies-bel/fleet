@@ -1,0 +1,10 @@
+# .qa-shared — list non-tracked files to mount read-only into QA containers
+# Copy this file to your APP_ROOT as .qa-shared and uncomment what applies.
+# Paths are relative to your project root (APP_ROOT).
+# Lines starting with # are comments; blank lines are ignored.
+#
+# Common entries:
+# d2r2-frontend/.env.local
+# d2r2-frontend/.npmrc
+# d2r2-backend/.env
+# .env

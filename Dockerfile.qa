@@ -1,0 +1,56 @@
+# Frontend is pre-built on the host by qa-add.sh (avoids npm ARM/Docker bugs).
+# This Dockerfile only builds the backend and assembles the runtime image.
+
+# ── Stage 1: Backend ─────────────────────────────────────────────────────────
+FROM maven:3.9.6-eclipse-temurin-21-alpine AS backend-builder
+WORKDIR /build
+
+# git-build-hook-maven-plugin requires a git repo
+RUN apk add --no-cache git \
+ && git init \
+ && git config user.email "qa@local" \
+ && git config user.name "QA Build"
+
+COPY backend/pom.xml ./
+RUN mvn dependency:go-offline -P jooq-codegen -q 2>/dev/null || true
+
+COPY backend/src ./src
+# jooq-codegen: Liquibase → H2 → jOOQ generate → compile → package
+RUN mvn package -DskipTests -P jooq-codegen -q
+
+# ── Stage 2: Runtime ─────────────────────────────────────────────────────────
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-21-jre-headless \
+    postgresql-16 \
+    nginx \
+    supervisor \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Backend jar
+COPY --from=backend-builder /build/target/*.jar /app/backend.jar
+
+# Frontend static export — pre-built on host by qa-add.sh
+COPY frontend-out/ /var/www/html/
+
+# Config
+COPY nginx.conf /etc/nginx/sites-available/qa
+RUN rm -f /etc/nginx/sites-enabled/default \
+ && ln -s /etc/nginx/sites-available/qa /etc/nginx/sites-enabled/qa
+
+COPY supervisord.conf /etc/supervisor/conf.d/qa.conf
+COPY wait-for-pg.sh /app/wait-for-pg.sh
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /app/wait-for-pg.sh /entrypoint.sh
+
+RUN mkdir -p /var/lib/postgresql/16/main \
+ && chown -R postgres:postgres /var/lib/postgresql \
+ && chmod 700 /var/lib/postgresql/16/main \
+ && mkdir -p /var/log/supervisor
+
+EXPOSE 3000
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,9 @@
+.qa-ports
+.qa/*/
+!.qa/.gitkeep
+.qa-runner.pid
+.qa-config
+node_modules/
+gateway/node_modules/
+dashboard/node_modules/
+dashboard/dist/
