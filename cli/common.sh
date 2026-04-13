@@ -120,6 +120,26 @@ gateway_delete() {
   curl -s -o /dev/null -w "%{http_code}" -X DELETE "${GATEWAY_URL}/$1"
 }
 
+# ─── Stack Dockerfile templating ─────────────────────────────────────────────
+# apply_stack_template SRC DEST
+# Copy a stack Dockerfile template, substituting whitelisted qa-fleet.conf vars.
+# The explicit whitelist is critical: a bare `envsubst` would eat ${PATH},
+# ${HOME}, etc. in RUN steps. Only the listed vars are substituted; everything
+# else passes through verbatim.
+#
+# Falls back to plain `cp` with a warning when `envsubst` (from gettext) is
+# missing — callers still get a working Dockerfile with hardcoded defaults.
+apply_stack_template() {
+  local src="$1" dest="$2"
+  if command -v envsubst >/dev/null 2>&1; then
+    envsubst '${POSTGRES_VERSION} ${NODE_VERSION} ${JAVA_VERSION} ${GO_VERSION} ${BACKEND_PORT} ${FRONTEND_PORT} ${PROXY_PORT}' < "$src" > "$dest"
+  else
+    warn "envsubst not found (install 'gettext') — copying ${src##*/} without variable substitution"
+    cp "$src" "$dest"
+  fi
+}
+export -f apply_stack_template
+
 # ─── Help ─────────────────────────────────────────────────────────────────────
 show_help() {
   echo ""

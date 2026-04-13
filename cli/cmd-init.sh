@@ -379,13 +379,13 @@ detect_and_configure_stack() {
         "$(basename "${src_dockerfile}")"
       [ -t 0 ] && read -r _ans </dev/tty || { _ans="n"; echo "n (no tty)"; }
       if [[ "${_ans}" =~ ^[Yy]$ ]]; then
-        cp "${src_dockerfile}" "${dest_dockerfile}"
+        apply_stack_template "${src_dockerfile}" "${dest_dockerfile}"
         info "Copied $(basename "${src_dockerfile}") → Dockerfile.feature-base"
       else
         info "Keeping existing Dockerfile.feature-base"
       fi
     else
-      cp "${src_dockerfile}" "${dest_dockerfile}"
+      apply_stack_template "${src_dockerfile}" "${dest_dockerfile}"
       info "Copied $(basename "${src_dockerfile}") → Dockerfile.feature-base"
     fi
   fi

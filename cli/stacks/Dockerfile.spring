@@ -5,14 +5,14 @@ ARG DEBIAN_FRONTEND=noninteractive
 # ── System packages ────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg git \
-    openjdk-21-jdk \
-    postgresql-16 \
+    openjdk-${JAVA_VERSION}-jdk \
+    postgresql-${POSTGRES_VERSION} \
     nginx \
     supervisor \
  && rm -rf /var/lib/apt/lists/*
 
-# ── Node 20 (NodeSource — Ubuntu 24.04 ships Node 18) ─────────────────────────
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+# ── Node (NodeSource — Ubuntu 24.04 ships Node 18) ───────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
  && apt-get install -y nodejs \
  && rm -rf /var/lib/apt/lists/*
 
@@ -30,12 +30,12 @@ RUN curl -fsSL "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/b
 # scripts, leaving a partial cluster at the default path. Drop it so the
 # entrypoint's own initdb runs from scratch (config ends up in the data dir,
 # where `postgres -D` expects to find it).
-RUN pg_dropcluster --stop 16 main 2>/dev/null || true \
- && rm -rf /var/lib/postgresql/16/main \
+RUN pg_dropcluster --stop ${POSTGRES_VERSION} main 2>/dev/null || true \
+ && rm -rf /var/lib/postgresql/${POSTGRES_VERSION}/main \
  && mkdir -p /build /app /var/www/html /var/log/supervisor \
- && mkdir -p /var/lib/postgresql/16/main \
+ && mkdir -p /var/lib/postgresql/${POSTGRES_VERSION}/main \
  && chown -R postgres:postgres /var/lib/postgresql \
- && chmod 700 /var/lib/postgresql/16/main
+ && chmod 700 /var/lib/postgresql/${POSTGRES_VERSION}/main
 
 # ── Config files ──────────────────────────────────────────────────────────────
 COPY config/nginx.conf       /etc/nginx/sites-available/qa
@@ -48,5 +48,5 @@ RUN rm -f /etc/nginx/sites-enabled/default \
  && chmod +x /usr/local/bin/wait-for-pg.sh /entrypoint.sh
 
 # /source is the read-only project volume mounted at runtime
-EXPOSE 3000
+EXPOSE ${PROXY_PORT}
 ENTRYPOINT ["/entrypoint.sh"]

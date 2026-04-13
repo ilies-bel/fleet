@@ -1,4 +1,4 @@
-FROM golang:1.22-bookworm
+FROM golang:${GO_VERSION}-bookworm
 
 RUN apt-get update && apt-get install -y \
     curl git postgresql postgresql-client nginx supervisor \
@@ -8,5 +8,5 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://raw.githubusercontent.com/air-verse/air/master/install.sh | sh
 
 WORKDIR /app
-EXPOSE 8080
+EXPOSE ${BACKEND_PORT}
 CMD ["air"]
