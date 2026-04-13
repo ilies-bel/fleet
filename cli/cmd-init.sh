@@ -277,8 +277,8 @@ detect_and_configure_stack() {
   info "Stack detected: backend=${STACK_BACKEND}, frontend=${STACK_FRONTEND}"
   export STACK_BACKEND STACK_FRONTEND
 
-  # Copy matching Dockerfile template if not already present (or confirm overwrite)
-  local src_dockerfile="" dest_dockerfile="${APP_ROOT}/Dockerfile.feature-base"
+  # Copy matching Dockerfile template into FLEET_ROOT (used by docker build -f Dockerfile.feature-base)
+  local src_dockerfile="" dest_dockerfile="${FLEET_ROOT}/Dockerfile.feature-base"
   case "${STACK_BACKEND}" in
     spring)  src_dockerfile="${FLEET_ROOT}/cli/stacks/Dockerfile.spring" ;;
     gradle)  src_dockerfile="${FLEET_ROOT}/cli/stacks/Dockerfile.spring" ;;
