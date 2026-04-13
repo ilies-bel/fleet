@@ -1,5 +1,5 @@
 /**
- * @typedef {{ branch: string, worktreePath: string|null, addedAt: Date }} FeatureEntry
+ * @typedef {{ branch: string, worktreePath: string|null, project: string|null, addedAt: Date, status: string }} FeatureEntry
  * @type {Map<string, FeatureEntry>}
  */
 const features = new Map();
@@ -13,10 +13,23 @@ let activeFeature = null;
  * @param {string} branch
  * @param {string|null} worktreePath - absolute path on the host Mac
  * @param {string|null} project - project name shown in the dashboard
+ * @param {string} status - lifecycle status: 'running' | 'not_started' | 'stopped'
  */
-export function register(name, branch, worktreePath = null, project = null) {
-  features.set(name, { branch, worktreePath, project, addedAt: new Date() });
-  if (activeFeature === null) activeFeature = name;
+export function register(name, branch, worktreePath = null, project = null, status = 'running') {
+  features.set(name, { branch, worktreePath, project, addedAt: new Date(), status });
+  // Only auto-activate if the feature is actually running
+  if (activeFeature === null && status === 'running') activeFeature = name;
+}
+
+/**
+ * Update the status of a registered feature.
+ * @param {string} name
+ * @param {string} status
+ */
+export function updateStatus(name, status) {
+  const entry = features.get(name);
+  if (!entry) throw new Error(`Feature '${name}' is not registered`);
+  features.set(name, { ...entry, status });
 }
 
 /**

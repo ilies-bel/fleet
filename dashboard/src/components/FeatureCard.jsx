@@ -101,14 +101,17 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     }
   }
 
+  const isNotStarted = feature.status === 'not_started';
   const effectiveHealth = isStarting && health !== 'up' ? 'starting' : health;
-  const healthDot = effectiveHealth === 'up'
-    ? { color: 'var(--color-accent)', label: '● UP' }
-    : effectiveHealth === 'starting'
-      ? { color: 'var(--color-warning)', label: '● STARTING' }
-      : effectiveHealth === 'down'
-        ? { color: 'var(--color-danger)', label: '● DOWN' }
-        : { color: 'var(--color-warning)', label: '● ...' };
+  const healthDot = isNotStarted
+    ? { color: '#555', label: '● NOT STARTED' }
+    : effectiveHealth === 'up'
+      ? { color: 'var(--color-accent)', label: '● UP' }
+      : effectiveHealth === 'starting'
+        ? { color: 'var(--color-warning)', label: '● STARTING' }
+        : effectiveHealth === 'down'
+          ? { color: 'var(--color-danger)', label: '● DOWN' }
+          : { color: 'var(--color-warning)', label: '● ...' };
 
   return (
     <div
@@ -118,6 +121,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
         borderLeft: isActive ? '3px solid var(--color-accent)' : '3px solid transparent',
         borderBottom: '1px solid #222',
         transition: 'background 0.1s',
+        opacity: isNotStarted ? 0.7 : 1,
       }}
       onMouseEnter={e => { if (!isActive && !isPreview) e.currentTarget.style.background = '#161616'; }}
       onMouseLeave={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'transparent'; }}
@@ -151,13 +155,23 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           color: healthDot.color,
           fontFamily: 'var(--font-mono)',
           fontSize: '0.68rem',
-          animation: health === 'checking' || effectiveHealth === 'starting' ? 'blink 1s step-start infinite' : 'none',
+          animation: !isNotStarted && (health === 'checking' || effectiveHealth === 'starting') ? 'blink 1s step-start infinite' : 'none',
         }}>
           {healthDot.label}
         </span>
       </div>
 
       {/* Action buttons */}
+      {isNotStarted ? (
+        <div style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.65rem',
+          color: '#555',
+          marginTop: '0.25rem',
+        }}>
+          Start: <span style={{ color: '#888' }}>fleet add {name} {branch}</span>
+        </div>
+      ) : (
       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
         <button
           onClick={handleActivate}
@@ -205,6 +219,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           {confirming ? '[CONFIRM?]' : '[KILL]'}
         </button>
       </div>
+      )}
 
       {actionError && (
         <div style={{

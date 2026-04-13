@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister } from './registry.js';
+import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus } from './registry.js';
 import { dockerExec, dockerLogs, stopContainer, startContainer, removeContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 
 const router = Router();
@@ -288,5 +288,26 @@ async function runSync(containerName, regenerateSources) {
 
   await dockerExec(containerName, ['bash', '-c', steps.join(' && ')]);
 }
+
+/**
+ * PATCH /_qa/api/features/:name/status
+ * Update the status of a feature (e.g., from not_started to running).
+ */
+router.patch('/features/:name/status', (req, res) => {
+  const { name } = req.params;
+  const { status } = req.body;
+  if (!getFeature(name)) {
+    return res.status(404).json({ error: 'Feature not registered' });
+  }
+  if (!status || typeof status !== 'string') {
+    return res.status(400).json({ error: 'status field required' });
+  }
+  try {
+    updateStatus(name, status);
+    res.json({ ok: true, name, status });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 export default router;
