@@ -19,13 +19,26 @@ PROXY_PORT="${PROXY_PORT:-3000}"
 JWT_SECRET="${JWT_SECRET:-}"
 JWT_ISSUER="${JWT_ISSUER:-myapp}"
 
-# Source backend .env overrides if mounted via .qa-shared (overrides docker-compose env vars)
+# Source backend .env overrides if mounted via .qa-shared.
+# .env is allowed to override application-level config (LDAP, JWT, business config),
+# but DB_HOST and DB_PORT must always point at container-internal postgres — otherwise
+# the host's dev-oriented values (e.g. localhost:5433) clobber the truth (127.0.0.1:5432)
+# and the backend never connects.
 if [ -n "${BACKEND_DIR}" ] && [ -f "/app/${BACKEND_DIR}/.env" ]; then
   echo "[qa] Loading backend .env overrides from /app/${BACKEND_DIR}/.env..."
+  _qa_orig_db_host="${DB_HOST:-}"
+  _qa_orig_db_port="${DB_PORT:-}"
   set -a
   # shellcheck source=/dev/null
   source "/app/${BACKEND_DIR}/.env"
   set +a
+  if [ "${DB_HOST:-}" != "127.0.0.1" ] || [ "${DB_PORT:-}" != "5432" ]; then
+    echo "[qa] .env tried to set DB_HOST=${DB_HOST:-unset} DB_PORT=${DB_PORT:-unset} — forcing container-internal 127.0.0.1:5432"
+  fi
+  DB_HOST=127.0.0.1
+  DB_PORT=5432
+  export DB_HOST DB_PORT
+  unset _qa_orig_db_host _qa_orig_db_port
 fi
 
 PG_DATA="/var/lib/postgresql/16/main"
