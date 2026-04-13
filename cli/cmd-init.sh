@@ -810,6 +810,15 @@ else
   warn "  sudo ln -sf ${FLEET_BIN} ${INSTALL_TARGET}"
 fi
 
+# ─── Install /configure-fleet-startup slash command ──────────────────────────
+CONFIGURE_CMD_SRC="${FLEET_ROOT}/cli/templates/configure-fleet-startup.md"
+CONFIGURE_CMD_DST="${APP_ROOT}/.claude/commands/configure-fleet-startup.md"
+if [ -f "${CONFIGURE_CMD_SRC}" ]; then
+  mkdir -p "$(dirname "${CONFIGURE_CMD_DST}")"
+  cp "${CONFIGURE_CMD_SRC}" "${CONFIGURE_CMD_DST}"
+  info "Installed slash command: .claude/commands/configure-fleet-startup.md"
+fi
+
 # ─── Success banner ──────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}┌──────────────────────────────────────────────┐${RESET}"
@@ -818,3 +827,6 @@ echo -e "${GREEN}│  Dashboard  → http://localhost:${ADMIN_PORT}          │
 echo -e "${GREEN}│  Proxy      → http://localhost:${PROXY_PORT}          │${RESET}"
 echo -e "${GREEN}│  Active     → ${NAME} (${BRANCH})${RESET}"
 echo -e "${GREEN}└──────────────────────────────────────────────┘${RESET}"
+echo ""
+echo -e "${GREEN}Tip:${RESET} open ${APP_ROOT} in Claude Code and run ${GREEN}/configure-fleet-startup${RESET}"
+echo "     to auto-tune BACKEND_BUILD_CMD/BACKEND_RUN_CMD and verify /actuator/health."
