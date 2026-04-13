@@ -11,11 +11,11 @@ export FLEET_ROOT
 source "${SCRIPT_DIR}/common.sh"
 
 # ─── Args ────────────────────────────────────────────────────────────────────
-if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
-  echo "Usage: fleet init <app-root-folder> <branch>"
+if [ -z "${1:-}" ]; then
+  echo "Usage: fleet init <app-root-folder> [branch]"
   echo ""
   echo "  app-root-folder — path to your project root"
-  echo "  branch          — first feature branch to spin up"
+  echo "  branch          — first feature branch to spin up (default: main)"
   echo ""
   echo "Example:"
   echo "  fleet init /path/to/my/project feature/my-branch"
@@ -26,7 +26,7 @@ if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
 fi
 
 APP_ROOT_ARG="$1"
-BRANCH="$2"
+BRANCH="${2:-main}"
 
 cd "${FLEET_ROOT}"
 
