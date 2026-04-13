@@ -34,19 +34,6 @@ BACKEND_BUILD_CMD="mvn package -DskipTests -q"
 # Node:         "node /app/my-backend/dist/index.js"
 BACKEND_RUN_CMD="java -jar /home/developer/backend.jar"
 
-# Port the backend process listens on inside the container.
-BACKEND_PORT="8081"
-
-# ── Database (optional — leave DB_NAME blank to skip PostgreSQL entirely) ─────
-DB_NAME="myapp_db"
-DB_USER="myapp_user"
-DB_PASSWORD="changeme"
-
-# ── Backend runtime environment ───────────────────────────────────────────────
-# Injected as environment variables into the running backend process.
-JWT_SECRET="changeme-replace-with-a-256-bit-secret-string-1234567890ab"
-JWT_ISSUER="myapp"
-
 # ── Ports (optional) ──────────────────────────────────────────────────────────
 # Host and in-container ports exposed by the gateway and feature containers.
 # Uncomment and override only if the defaults clash with something on your host.
