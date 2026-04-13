@@ -566,12 +566,162 @@ fi
 mkdir -p "${APP_ROOT}/.qa-worktrees"
 info "Created ${APP_ROOT}/.qa-worktrees"
 
-# ─── Create .qa-shared template if not present ───────────────────────────────
-SHARED_EXAMPLE="${FLEET_ROOT}/.qa-shared.example"
-if [ ! -f "${APP_ROOT}/.qa-shared" ] && [ -f "${SHARED_EXAMPLE}" ]; then
-  cp "${SHARED_EXAMPLE}" "${APP_ROOT}/.qa-shared"
-  info "Created ${APP_ROOT}/.qa-shared — edit to list non-tracked files to share with containers"
-fi
+# ─── Auto-discover .env files and write/update .qa-shared ────────────────────
+
+# discover_env_files — scans APP_ROOT (and subdirs for FRONTEND_DIR/BACKEND_DIR)
+# depth-1 for .env files that match the allowed glob patterns, skips git-tracked
+# files, and writes results into the idempotent marker block in .qa-shared.
+#
+# Globals read:  APP_ROOT, FRONTEND_DIR, BACKEND_DIR (may be empty)
+# No prompts — safe for non-interactive / CI runs.
+discover_env_files() {
+  local shared_file="${APP_ROOT}/.qa-shared"
+
+  # Dirs to scan: root, then frontend, then backend (if set and not equal to root).
+  local scan_dirs=("${APP_ROOT}")
+  if [ -n "${FRONTEND_DIR:-}" ] && [ -d "${APP_ROOT}/${FRONTEND_DIR}" ]; then
+    scan_dirs+=("${APP_ROOT}/${FRONTEND_DIR}")
+  fi
+  if [ -n "${BACKEND_DIR:-}" ] && [ -d "${APP_ROOT}/${BACKEND_DIR}" ]; then
+    scan_dirs+=("${APP_ROOT}/${BACKEND_DIR}")
+  fi
+
+  # Basenames to skip (exact match).
+  local -a EXCLUDE_NAMES=(".env.example" ".env.sample" ".env.template")
+
+  # Collect discovered relative paths into an array.
+  local -a found=()
+
+  local scan_dir fname rel_path candidate
+  for scan_dir in "${scan_dirs[@]}"; do
+    # Skip known non-source dirs if they somehow end up in the scan list.
+    local dir_base; dir_base="$(basename "${scan_dir}")"
+    case "${dir_base}" in
+      node_modules|.git|target|dist|build|out) continue ;;
+    esac
+
+    # Use find -maxdepth 1 to avoid glob failures when no dot-files exist.
+    # -name '.env*' limits output; we refine further below.
+    while IFS= read -r candidate; do
+      fname="$(basename "${candidate}")"
+
+      # Exclude production variants.
+      case "${fname}" in
+        .env.production*) continue ;;
+      esac
+
+      # Exclude exact names: .env.example, .env.sample, .env.template
+      local skip=0
+      local excl
+      for excl in "${EXCLUDE_NAMES[@]}"; do
+        [ "${fname}" = "${excl}" ] && skip=1 && break
+      done
+      [ "${skip}" -eq 1 ] && continue
+
+      # Only accept the allowed patterns:
+      #   .env  .env.local  .env.development  .env.development.local  .env.*.local
+      case "${fname}" in
+        .env|.env.local|.env.development|.env.development.local|.env.*.local) ;;
+        *) continue ;;
+      esac
+
+      # Build relative path from APP_ROOT.
+      rel_path="${candidate#${APP_ROOT}/}"
+      # Safety: if the candidate path did not start with APP_ROOT/ (shouldn't
+      # happen, but guard anyway), fall back to the filename.
+      [ "${rel_path}" = "${candidate}" ] && rel_path="${fname}"
+
+      # Skip git-tracked files. If the directory is not a git repo the command
+      # exits non-zero and we fall through (include the file — no git, no filter).
+      if git -C "${scan_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        # git ls-files --error-unmatch exits 0 when the file IS tracked.
+        if git -C "${scan_dir}" ls-files --error-unmatch "${candidate}" >/dev/null 2>&1; then
+          continue  # tracked — skip it
+        fi
+      fi
+
+      found+=("${rel_path}")
+    done < <(find "${scan_dir}" -maxdepth 1 -name '.env*' -type f 2>/dev/null)
+  done
+
+  local count="${#found[@]}"
+
+  # ── Create or update .qa-shared ───────────────────────────────────────────
+
+  local marker_start="# --- auto-discovered by fleet init ---"
+  local marker_end="# --- end auto-discovered ---"
+
+  if [ ! -f "${shared_file}" ]; then
+    # Create fresh with header + marker block.
+    {
+      echo "# .qa-shared — list non-tracked files to mount read-only into QA containers"
+      echo "# Paths are relative to your project root (APP_ROOT)."
+      echo "# Lines starting with # are comments; blank lines are ignored."
+      echo "#"
+      echo "# fleet init auto-populates the block below with discovered .env files."
+      echo "# You can add further entries outside the marker block; they are never"
+      echo "# touched by subsequent fleet init runs."
+      echo "#"
+      echo "# Example entries:"
+      echo "# d2r2-frontend/.env.local"
+      echo "# d2r2-frontend/.npmrc"
+      echo "# d2r2-backend/.env"
+      echo "# .env"
+      echo ""
+      echo "${marker_start}"
+      local p
+      for p in "${found[@]}"; do
+        echo "${p}"
+      done
+      echo "${marker_end}"
+    } > "${shared_file}"
+  else
+    # File exists — replace just the marker block content; leave everything else.
+    local tmp_file; tmp_file="$(mktemp)"
+
+    local inside_block=0
+    local block_written=0
+
+    while IFS= read -r line || [ -n "${line}" ]; do
+      if [ "${line}" = "${marker_start}" ]; then
+        inside_block=1
+        # Write the start marker + fresh discovered entries.
+        echo "${marker_start}" >> "${tmp_file}"
+        local p
+        for p in "${found[@]}"; do
+          echo "${p}" >> "${tmp_file}"
+        done
+        block_written=1
+        continue
+      fi
+      if [ "${line}" = "${marker_end}" ]; then
+        inside_block=0
+        echo "${marker_end}" >> "${tmp_file}"
+        continue
+      fi
+      # Suppress lines that were inside the old block (we already rewrote it).
+      [ "${inside_block}" -eq 1 ] && continue
+      echo "${line}" >> "${tmp_file}"
+    done < "${shared_file}"
+
+    # If no existing marker block was found, append one.
+    if [ "${block_written}" -eq 0 ]; then
+      echo "" >> "${tmp_file}"
+      echo "${marker_start}" >> "${tmp_file}"
+      local p
+      for p in "${found[@]}"; do
+        echo "${p}" >> "${tmp_file}"
+      done
+      echo "${marker_end}" >> "${tmp_file}"
+    fi
+
+    mv "${tmp_file}" "${shared_file}"
+  fi
+
+  info "Discovered ${count} .env file(s) → mounted RO"
+}
+
+discover_env_files
 
 # ─── Start host runner (AppleScript relay) ───────────────────────────────────
 info "Starting host runner (osascript relay on port 4001)..."

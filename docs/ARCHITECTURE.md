@@ -238,12 +238,13 @@ qa-init.sh <app-root> <branch>
 
 1. Validate the configured frontend and backend directories (`FRONTEND_DIR` / `BACKEND_DIR`) are present
 2. Write `APP_ROOT` to `.qa-config`
-3. Create `qa-net` Docker network
-4. Build `qa-gateway` image (includes compiled dashboard)
-5. Build `qa-feature-base` image
-6. Start gateway container with `/var/run/docker.sock` mount
-7. Poll `:4000/_qa/api/status` until ready
-8. Call `qa-add.sh` for the initial feature
+3. Scan `APP_ROOT`, `FRONTEND_DIR`, and `BACKEND_DIR` (depth-1) for untracked `.env` files; write/update the auto-discovered block in `.qa-shared` (creates the file with a header if absent)
+4. Create `qa-net` Docker network
+5. Build `qa-gateway` image (includes compiled dashboard)
+6. Build `qa-feature-base` image
+7. Start gateway container with `/var/run/docker.sock` mount
+8. Poll `:4000/_qa/api/status` until ready
+9. Call `qa-add.sh` for the initial feature
 
 ### `qa-add.sh`
 

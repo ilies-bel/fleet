@@ -1,10 +1,13 @@
 # .qa-shared — list non-tracked files to mount read-only into QA containers
-# Copy this file to your APP_ROOT as .qa-shared and uncomment what applies.
 # Paths are relative to your project root (APP_ROOT).
 # Lines starting with # are comments; blank lines are ignored.
 #
-# Common entries:
-# d2r2-frontend/.env.local
+# fleet init auto-populates this file with an idempotent marker block that
+# lists .env files it discovers in APP_ROOT, FRONTEND_DIR, and BACKEND_DIR.
+# Re-running fleet init replaces only the block contents without touching any
+# lines you add outside the markers.
+#
+# You can add further entries outside the auto-discovered block — for example:
 # d2r2-frontend/.npmrc
 # d2r2-backend/.env
 # .env
