@@ -12,3 +12,7 @@ dashboard/dist/
 .dolt/
 *.db
 .beads-credential-key
+
+# Beads task tracking (ephemeral)
+.beads/
+.mcp.json
