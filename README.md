@@ -25,68 +25,103 @@ localhost:3000            ← transparent proxy → active feature container
 - Docker (with Docker Compose v2)
 - bash
 - Node 20+ (only for local dashboard development)
-- A `qa-fleet.conf` in your project root (copy `qa-fleet.conf.example` and fill it in)
+
+## The `fleet` CLI
+
+All operations go through a single `fleet` dispatcher. `fleet init` symlinks it to `/usr/local/bin/fleet` so it is available anywhere.
+
+```
+fleet <command> [options]
+
+Commands:
+  init    <app-root> <branch>          Initialize fleet for a project
+  add     <name> <branch> [--direct]   Start a QA feature container
+  rm      <name>|--all|--nuke          Remove feature(s) or everything
+  restart <name>                       Restart a feature container
+  feature -c <name> [<branch>]         Create worktree+compose without starting
+  push    <name>                       Push worktree branch(es) to remote
+  sync    <name> [--regenerate-sources] Pull latest code and rebuild
+  help                                 Show help
+
+Environment:
+  FLEET_GATEWAY   Gateway base URL (default: http://localhost:4000)
+```
 
 ## One-time setup
 
-**1. Configure your project**
-
-Copy `qa-fleet.conf.example` to your project root and fill it in:
-
 ```bash
-cp qa-fleet.conf.example /path/to/my-project/qa-fleet.conf
-# edit it: set FRONTEND_DIR, BACKEND_DIR, DB_NAME, etc.
+fleet init <app-root-folder> <branch>
 ```
 
-**2. Run init**
-
-```bash
-./scripts/qa-init.sh <app-root-folder> <branch>
-```
-
-- `app-root-folder` — path to the project root (must contain `qa-fleet.conf`)
+- `app-root-folder` — path to the project root
 - `branch` — first feature branch to spin up automatically
+
+If `qa-fleet.conf` does not exist in the project root, init walks you through an interactive wizard that **auto-detects your stack** (Spring Boot, Go, Next.js, Vite, Node) and writes the file for you. Otherwise it reads the existing config.
 
 Example:
 ```bash
-./scripts/qa-init.sh /path/to/my-project feature/my-branch
+fleet init /path/to/my-project feature/my-branch
 ```
 
-This will:
-1. Save `APP_ROOT` to `.qa-config`
-2. Create the `qa-net` Docker network
-3. Build the `qa-gateway` image (includes the dashboard)
-4. Build the `qa-feature-base` image (reused for all features — built once)
-5. Start the gateway on ports 3000 and 4000
-6. Spin up the first feature container from the given branch
+`init` will:
+1. Create/load `qa-fleet.conf` in the project root
+2. Save `APP_ROOT` to `.qa-config`
+3. Create the `qa-net` Docker network
+4. Build the `qa-gateway` image (includes the dashboard)
+5. Copy the matching stack `Dockerfile.*` from `cli/stacks/` to `FLEET_ROOT/Dockerfile.feature-base` and build it
+6. Symlink `fleet` into `/usr/local/bin`
+7. Start the gateway on ports 3000 and 4000
+8. Spin up the first feature container from the given branch
 
-Safe to run again — idempotent.
+Safe to run again — idempotent. Interactive prompts default to `n` when no tty is attached.
+
+### Supported stacks
+
+Dockerfiles live in `cli/stacks/` and are selected automatically during init:
+
+- `Dockerfile.spring` — Spring Boot
+- `Dockerfile.go` — Go
+- `Dockerfile.next` — Next.js
+- `Dockerfile.vite` — Vite
+- `Dockerfile.node` — generic Node
 
 ## Adding a feature
 
 ```bash
-./scripts/qa-add.sh <name> <branch>
+fleet add <name> <branch> [--direct]
 ```
 
 - `name` — lowercase letters, numbers, hyphens only (e.g. `login-fix`, `auth-v2`)
 - `branch` — git branch name (checked against the frontend repository)
+- `--direct` — skip the worktree and build directly from `APP_ROOT`
 
 Example:
 ```bash
-./scripts/qa-add.sh login-fix feature/auth-fix
+fleet add login-fix feature/auth-fix
 ```
 
 This will:
 1. Verify the branch exists (local or remote)
-2. Start a `qa-<name>` container that builds the app internally from the given branch
-3. Register it with the gateway (auto-activated if it is the first feature)
+2. Create a git worktree under `<app-root>/.qa-worktrees/<name>` (unless `--direct`)
+3. Start a `qa-<name>` container that builds internally from the worktree
+4. Register it with the gateway (auto-activated if it is the first feature)
 
-The container builds internally — follow progress with:
+Follow build progress with:
 ```bash
 docker logs -f qa-<name>
 ```
 
 Once up, activate it from the dashboard or API, then visit http://localhost:3000.
+
+## Other feature commands
+
+```bash
+fleet feature -c <name> [<branch>]      # Scaffold worktree + compose, don't start
+fleet restart <name>                    # Restart container
+fleet sync <name>                       # Pull latest code and rebuild
+fleet sync <name> --regenerate-sources  # Re-run source generation (e.g. OpenAPI)
+fleet push <name>                       # Push the worktree branch(es) to remote
+```
 
 ## Dashboard
 
@@ -113,10 +148,28 @@ The first feature registered is activated automatically.
 ## Removing features
 
 ```bash
-./scripts/qa-teardown.sh <name>       # remove one feature
-./scripts/qa-teardown.sh --all        # remove all features, keep gateway running
-./scripts/qa-teardown.sh --nuke       # remove everything: features, gateway, network, config
+fleet rm <name>       # remove one feature
+fleet rm --all        # remove all features, keep gateway running
+fleet rm --nuke       # remove everything: features, gateway, network, config
 ```
+
+## Configuration (`qa-fleet.conf`)
+
+Generated by the `fleet init` wizard, or copy `qa-fleet.conf.example` manually. Key fields:
+
+| Field | Purpose |
+|-------|---------|
+| `PROJECT_NAME` | Display name in the dashboard (defaults to `APP_ROOT` basename) |
+| `FRONTEND_DIR` | Frontend folder relative to project root (required) |
+| `FRONTEND_OUT_DIR` | Build output dir — `out` (Next) or `dist` (Vite) |
+| `BACKEND_DIR` | Backend folder (leave blank for frontend-only) |
+| `BACKEND_BUILD_CMD` | e.g. `mvn package -DskipTests -q`, `go build -o server ./cmd/server` |
+| `BACKEND_RUN_CMD` | e.g. `java -jar /home/developer/backend.jar` |
+| `BACKEND_PORT` | Backend listen port inside the container |
+| `DB_NAME` / `DB_USER` / `DB_PASSWORD` | Postgres credentials (leave blank to skip DB) |
+| `JWT_SECRET` / `JWT_ISSUER` | Injected into backend runtime env |
+
+Multi-repo projects (frontend and backend in separate git roots) are detected automatically — `fleet add` creates a worktree per repo.
 
 ## OAuth setup
 
@@ -140,13 +193,13 @@ All management endpoints are on port 4000.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/_qa/api/features` | List all registered features |
+| `GET` | `/_qa/api/features` | List all registered features (includes `status` for not-yet-started containers) |
 | `GET` | `/_qa/api/features/:name/health` | Health check for a container (`up`/`down`) |
 | `POST` | `/_qa/api/features/:name/activate` | Set the active feature on port 3000 |
 | `POST` | `/_qa/api/features/:name/open-terminal` | Open iTerm2 tab into container (macOS) |
 | `GET` | `/_qa/api/status` | Gateway uptime, active feature, feature count |
-| `POST` | `/register-feature` | Register a feature (called by `qa-add.sh`) |
-| `DELETE` | `/register-feature/:name` | Deregister a feature (called by `qa-teardown.sh`) |
+| `POST` | `/register-feature` | Register a feature (called by `fleet add`) |
+| `DELETE` | `/register-feature/:name` | Deregister a feature (called by `fleet rm`) |
 | `GET` | `/auth/callback` | OAuth relay endpoint |
 
 ## Local dashboard development
@@ -158,6 +211,16 @@ npm run dev
 ```
 
 Vite proxies `/_qa/` to the gateway at localhost:4000, so you get hot-reload against live data.
+
+## Testing fleet init
+
+`test/project/` is a ready-to-use copy of `test/reference/` (Spring Boot backend + Next.js frontend). `scripts/qa-host-runner.sh` is a no-op stub so init proceeds past that step.
+
+```bash
+fleet init test/project main
+```
+
+Re-copy to reset: `cp -rp test/reference test/project`.
 
 ## Troubleshooting
 
@@ -186,7 +249,7 @@ Invalid: `MyFeature`, `auth fix`, `auth_fix`
 
 **Branch not found**
 
-`qa-add.sh` checks the branch exists in the frontend repository before starting the container. Fetch remote branches first:
+`fleet add` checks the branch exists in the frontend repository before starting the container. Fetch remote branches first:
 ```bash
 git -C <app-root>/<FRONTEND_DIR> fetch origin
 ```
@@ -200,4 +263,4 @@ btoa(JSON.stringify({ feature: "login-fix" }))
 
 **`.qa-config` not found**
 
-`qa-add.sh` and `qa-teardown.sh` read `APP_ROOT` from `.qa-config`. Run `qa-init.sh` first to create it.
+Every command except `init` reads `APP_ROOT` from `.qa-config` at the fleet root. Run `fleet init` first to create it.

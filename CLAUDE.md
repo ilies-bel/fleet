@@ -2,11 +2,16 @@
 
 ## Project Overview
 
-<!-- UPDATE THIS: 1-2 sentences describing what this project does and why it exists -->
+- qa-fleet is a local QA environment manager that spins up isolated Docker containers per feature branch, wiring together a reverse proxy (nginx), process manager (supervisord), and a React dashboard for visibility and control
+- It provides a CLI (`fleet`) for initialising, adding, syncing, and tearing down feature environments, and a gateway service that proxies traffic and manages the feature registry via Docker socket
 
 ## Tech Stack
 
-<!-- Populated by discovery agent -->
+- **Frontend:** React 19, react-router-dom 7, Vite 6, JSX (no TypeScript)
+- **Backend:** Node.js 20, Express 4, ES modules, zero-dep Docker socket client
+- **Infrastructure:** Docker, multi-stage Dockerfiles per stack (go/next/node/spring/vite), nginx, supervisord, bash
+- **Stacks supported:** Go, Next.js, Node.js, Spring Boot, Vite/React
+- **Runtime:** Non-root container user `developer` (uid 1001)
 
 ## Your Identity
 
@@ -143,8 +148,10 @@ Log learnings: `bd comment {ID} "LEARNED: [insight]"` — captured automatically
 
 ## Supervisors
 
-<!-- Populated by discovery agent -->
 - merge-supervisor
+- node-backend-supervisor
+- react-supervisor
+- infra-supervisor
 
 ## Testing fleet init
 
@@ -175,4 +182,3 @@ ORCHESTRATOR: Update this section as the project evolves.
 Include: active work, recent decisions, known issues, architectural notes.
 Keep it concise — pointers to files are better than duplicated content.
 -->
-
