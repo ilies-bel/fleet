@@ -297,7 +297,7 @@ detect_and_configure_stack() {
     if [ -f "${dest_dockerfile}" ]; then
       printf "  Dockerfile.feature-base already exists. Overwrite with %s template? [y/N]: " \
         "$(basename "${src_dockerfile}")"
-      read -r _ans </dev/tty
+      [ -t 0 ] && read -r _ans </dev/tty || { _ans="n"; echo "n (no tty)"; }
       if [[ "${_ans}" =~ ^[Yy]$ ]]; then
         cp "${src_dockerfile}" "${dest_dockerfile}"
         info "Copied $(basename "${src_dockerfile}") → Dockerfile.feature-base"
