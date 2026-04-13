@@ -7,3 +7,8 @@ node_modules/
 gateway/node_modules/
 dashboard/node_modules/
 dashboard/dist/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
