@@ -3,6 +3,7 @@
 !.qa/.gitkeep
 .qa-runner.pid
 .qa-config
+.worktrees/
 node_modules/
 gateway/node_modules/
 dashboard/node_modules/
