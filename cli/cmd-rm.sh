@@ -60,13 +60,15 @@ remove_feature() {
     [ -n "${frontend_dir}" ] && subdirs+=("${frontend_dir}")
     [ -n "${backend_dir}"  ] && subdirs+=("${backend_dir}")
 
-    for sub in "${subdirs[@]}"; do
-      local wt="${worktrees_dir}/${name}/${sub}"
-      if [ -d "$wt" ]; then
-        git -C "${APP_ROOT}/${sub}" worktree remove --force "$wt" 2>/dev/null \
-          || warn "Could not remove worktree ${wt}"
-      fi
-    done
+    if (( ${#subdirs[@]} > 0 )); then
+      for sub in "${subdirs[@]}"; do
+        local wt="${worktrees_dir}/${name}/${sub}"
+        if [ -d "$wt" ]; then
+          git -C "${APP_ROOT}/${sub}" worktree remove --force "$wt" 2>/dev/null \
+            || warn "Could not remove worktree ${wt}"
+        fi
+      done
+    fi
     rm -rf "${worktrees_dir}/${name}"
   fi
 
