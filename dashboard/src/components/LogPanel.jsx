@@ -2,17 +2,35 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { getLogs } from '../api.js';
 
 const SOURCES = ['backend', 'nginx', 'postgresql', 'supervisord', 'all'];
-const MAX_LINES = 5000;
+
+/** Color for each named source in the ALL view */
+const SOURCE_COLOR = {
+  backend:     'var(--color-accent)',
+  nginx:       '#66d9ef',
+  postgresql:  '#e6a700',
+  supervisord: 'var(--color-muted)',
+};
+
+/** Empty per-source snapshot */
+const EMPTY_ALL = { backend: '', nginx: '', postgresql: '', supervisord: '' };
 
 export default function LogPanel({ featureName, onClose }) {
   const [source, setSource] = useState('backend');
-  const [buffer, setBuffer] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [autoTail, setAutoTail] = useState(true);
-  const [fetchedAt, setFetchedAt] = useState(null);
-  const sinceRef = useRef(Math.floor(Date.now() / 1000) - 30);
+  // Per-source (non-all) mode: plain string
+  const [buffer, setBuffer]         = useState('');
+  // ALL mode: { backend, nginx, postgresql, supervisord }
+  const [allSources, setAllSources] = useState(EMPTY_ALL);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState(null);
+  const [autoTail, setAutoTail]     = useState(true);
+  const [fetchedAt, setFetchedAt]   = useState(null);
   const sentinelRef = useRef(null);
+  const dialogRef   = useRef(null);
+
+  // Focus dialog on mount for keyboard/screen-reader users
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
 
   // Close on Escape
   useEffect(() => {
@@ -24,35 +42,29 @@ export default function LogPanel({ featureName, onClose }) {
   // Reset state when source or feature changes
   useEffect(() => {
     setBuffer('');
+    setAllSources(EMPTY_ALL);
     setError(null);
-    sinceRef.current = Math.floor(Date.now() / 1000) - 30;
   }, [featureName, source]);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const opts = source === 'all'
-        ? { source, tail: 200, since: sinceRef.current }
-        : { source, tail: 200 };
-
-      const data = await getLogs(featureName, opts);
-      const text = data.lines || '';
-      setFetchedAt(data.fetchedAt);
-
       if (source === 'all') {
-        sinceRef.current = Math.floor(data.fetchedAt / 1000);
-        if (text) {
-          setBuffer(prev => {
-            const combined = prev + text;
-            const lines = combined.split('\n');
-            return lines.length > MAX_LINES
-              ? lines.slice(-MAX_LINES).join('\n')
-              : combined;
-          });
-        }
+        const data = await getLogs(featureName, { source, tail: 200 });
+        setFetchedAt(data.fetchedAt);
+        // data.sources: { backend, nginx, postgresql, supervisord }
+        const snap = data.sources ?? EMPTY_ALL;
+        setAllSources({
+          backend:     snap.backend     ?? '',
+          nginx:       snap.nginx       ?? '',
+          postgresql:  snap.postgresql  ?? '',
+          supervisord: snap.supervisord ?? '',
+        });
       } else {
-        setBuffer(text);
+        const data = await getLogs(featureName, { source, tail: 200 });
+        setFetchedAt(data.fetchedAt);
+        setBuffer(data.lines ?? '');
       }
     } catch (err) {
       setError(err.message);
@@ -69,20 +81,35 @@ export default function LogPanel({ featureName, onClose }) {
     return () => clearInterval(id);
   }, [fetchLogs, autoTail]);
 
-  // Auto-scroll to bottom when buffer changes
+  // Auto-scroll to bottom when content changes
   useEffect(() => {
     if (autoTail && sentinelRef.current) {
       sentinelRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [buffer, autoTail]);
+  }, [buffer, allSources, autoTail]);
 
-  const lineCount = buffer ? buffer.split('\n').length : 0;
+  // Line count: sum all sources for 'all', plain split for others
+  const lineCount = source === 'all'
+    ? Object.values(allSources).reduce((sum, text) => {
+        return sum + (text ? text.split('\n').length : 0);
+      }, 0)
+    : (buffer ? buffer.split('\n').length : 0);
+
   const fetchedTime = fetchedAt
     ? new Date(fetchedAt).toLocaleTimeString()
     : '—';
 
+  function handleClear() {
+    if (source === 'all') {
+      setAllSources(EMPTY_ALL);
+    } else {
+      setBuffer('');
+    }
+  }
+
   return (
     <div
+      role="presentation"
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -96,11 +123,16 @@ export default function LogPanel({ featureName, onClose }) {
     >
       {/* Panel box — stop propagation so clicks inside don't close */}
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Logs — ${featureName}`}
+        tabIndex={-1}
         onClick={e => e.stopPropagation()}
         style={{
           width: '860px',
           maxWidth: '95vw',
-          height: '80vh',
+          height: '80dvh',
           background: '#0a0a0a',
           border: '1px solid #333',
           display: 'flex',
@@ -127,6 +159,7 @@ export default function LogPanel({ featureName, onClose }) {
               <button
                 key={s}
                 onClick={() => setSource(s)}
+                aria-pressed={s === source}
                 style={tabBtn(s === source)}
               >
                 [{s.toUpperCase()}]
@@ -140,13 +173,14 @@ export default function LogPanel({ featureName, onClose }) {
           <button
             onClick={() => setAutoTail(v => !v)}
             style={tabBtn(autoTail)}
+            aria-pressed={autoTail}
             title={autoTail ? 'Pause auto-refresh' : 'Enable auto-refresh every 3s'}
           >
             {autoTail ? '[TAIL]' : '[PAUSED]'}
           </button>
 
           {/* Close */}
-          <button onClick={onClose} style={dangerBtn}>
+          <button onClick={onClose} style={dangerBtn} aria-label="Close log panel">
             [CLOSE]
           </button>
         </div>
@@ -159,45 +193,58 @@ export default function LogPanel({ featureName, onClose }) {
           flexDirection: 'column',
         }}>
           {error && (
-            <div style={{
-              padding: '0.4rem 0.75rem',
-              background: '#1a0000',
-              color: 'var(--color-danger)',
-              fontSize: '0.72rem',
-              borderBottom: '1px solid #330000',
-              flexShrink: 0,
-            }}>
+            <div
+              role="alert"
+              style={{
+                padding: '0.4rem 0.75rem',
+                background: '#1a0000',
+                color: 'var(--color-danger)',
+                fontSize: '0.72rem',
+                borderBottom: '1px solid #330000',
+                flexShrink: 0,
+              }}
+            >
               {error}
             </div>
           )}
-          {loading && !buffer && (
-            <div style={{
-              padding: '0.4rem 0.75rem',
-              color: 'var(--color-muted)',
-              fontSize: '0.72rem',
-              flexShrink: 0,
-            }}>
-              // fetching...
+          {loading && source !== 'all' && !buffer && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                padding: '0.4rem 0.75rem',
+                color: 'var(--color-muted)',
+                fontSize: '0.72rem',
+                flexShrink: 0,
+              }}
+            >
+              // fetching…
             </div>
           )}
           <div style={{
             flex: 1,
             overflowY: 'auto',
+            overscrollBehavior: 'contain',
             background: '#050505',
             border: '1px solid #1a1a1a',
             margin: '0.5rem 0.75rem 0',
           }}>
-            <pre style={{
-              margin: 0,
-              padding: '0.5rem 0.75rem',
-              fontSize: '0.72rem',
-              lineHeight: 1.5,
-              color: '#ccc',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-            }}>
-              {buffer || (loading ? '' : '// no output')}
-            </pre>
+            {source === 'all'
+              ? <AllSourcesView sources={allSources} loading={loading} />
+              : (
+                <pre style={{
+                  margin: 0,
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.72rem',
+                  lineHeight: 1.5,
+                  color: '#ccc',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}>
+                  {buffer || (loading ? '' : '// no output')}
+                </pre>
+              )
+            }
             <div ref={sentinelRef} />
           </div>
         </div>
@@ -213,16 +260,77 @@ export default function LogPanel({ featureName, onClose }) {
         }}>
           <span style={{ color: 'var(--color-muted)', fontSize: '0.65rem' }}>
             {lineCount} lines | fetched {fetchedTime}
-            {loading && autoTail ? ' | refreshing...' : ''}
+            {loading && autoTail ? ' | refreshing…' : ''}
           </span>
           <button
-            onClick={() => { setBuffer(''); sinceRef.current = Math.floor(Date.now() / 1000); }}
+            onClick={handleClear}
             style={{ ...dangerBtn, fontSize: '0.65rem', padding: '1px 6px' }}
+            aria-label="Clear log output"
           >
             [CLEAR]
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Renders the ALL view: four color-coded source blocks, each with a header.
+ * Non-empty sources only.
+ */
+function AllSourcesView({ sources, loading }) {
+  const names = ['backend', 'nginx', 'postgresql', 'supervisord'];
+  const hasAny = names.some(n => sources[n]);
+
+  if (!hasAny) {
+    return (
+      <pre style={{
+        margin: 0,
+        padding: '0.5rem 0.75rem',
+        fontSize: '0.72rem',
+        lineHeight: 1.5,
+        color: 'var(--color-muted)',
+        whiteSpace: 'pre-wrap',
+      }}>
+        {loading ? '' : '// no output'}
+      </pre>
+    );
+  }
+
+  return (
+    <div style={{ padding: '0.5rem 0.75rem' }}>
+      {names.map(name => {
+        const text = sources[name];
+        if (!text) return null;
+        const color = SOURCE_COLOR[name];
+        return (
+          <div key={name} style={{ marginBottom: '0.75rem' }}>
+            <div style={{
+              fontSize: '0.72rem',
+              lineHeight: 1.5,
+              color,
+              fontFamily: 'var(--font-mono)',
+              marginBottom: '0.15rem',
+              userSelect: 'none',
+            }}>
+              {'// ' + name}
+            </div>
+            <pre style={{
+              margin: 0,
+              fontSize: '0.72rem',
+              lineHeight: 1.5,
+              color,
+              opacity: 0.85,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              {text}
+            </pre>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -78,10 +78,15 @@ export function getStatus() {
 /**
  * @param {string} name
  * @param {{ source?: string, tail?: number, since?: number }} opts
- * @returns {Promise<{ lines: string, fetchedAt: number }>}
+ * @returns {Promise<
+ *   | { lines: string, fetchedAt: number }
+ *   | { sources: { backend: string, nginx: string, postgresql: string, supervisord: string }, fetchedAt: number }
+ * >}
  */
 export function getLogs(name, { source = 'backend', tail = 200, since = 0 } = {}) {
-  const params = new URLSearchParams({ source, tail, since });
+  const params = new URLSearchParams({ source, tail });
+  // 'since' is only meaningful for per-source streaming (not used by source=all)
+  if (source !== 'all' && since) params.set('since', since);
   return request(`/_qa/api/features/${name}/logs?${params}`);
 }
 
