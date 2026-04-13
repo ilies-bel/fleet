@@ -7,6 +7,8 @@
 # Generated at fleet init time from config/nginx.conf.tmpl
 config/nginx.conf
 .worktrees/
+.claude/worktrees/
+.DS_Store
 node_modules/
 gateway/node_modules/
 dashboard/node_modules/
@@ -20,3 +22,6 @@ dashboard/dist/
 # Beads task tracking (ephemeral)
 .beads/
 .mcp.json
+
+
+test
