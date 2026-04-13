@@ -331,6 +331,18 @@ fi
 info "Spinning up first feature: ${NAME} (branch: ${BRANCH})..."
 bash "${SCRIPT_DIR}/qa-add.sh" "${NAME}" "${BRANCH}"
 
+# ─── Install fleet CLI ───────────────────────────────────────────────────────
+FLEET_BIN="${QA_FLEET_ROOT}/fleet"
+INSTALL_DIR="/usr/local/bin"
+INSTALL_TARGET="${INSTALL_DIR}/fleet"
+chmod +x "${FLEET_BIN}"
+if ln -sf "${FLEET_BIN}" "${INSTALL_TARGET}" 2>/dev/null; then
+  info "Installed: fleet → ${INSTALL_TARGET}"
+else
+  warn "Could not symlink to ${INSTALL_DIR} (permission denied). Run manually:"
+  warn "  sudo ln -sf ${FLEET_BIN} ${INSTALL_TARGET}"
+fi
+
 # ─── Success banner ──────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}┌──────────────────────────────────────────────┐${RESET}"
