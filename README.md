@@ -202,6 +202,39 @@ All management endpoints are on port 4000.
 | `DELETE` | `/register-feature/:name` | Deregister a feature (called by `fleet rm`) |
 | `GET` | `/auth/callback` | OAuth relay endpoint |
 
+## Claude Code commands
+
+The `.claude/commands/fleet/` directory contains slash commands for Claude Code that automate common fleet workflows. These commands are self-contained: a fresh Claude session can execute them cold without additional setup.
+
+### Available commands
+
+| Command | Description |
+|---------|-------------|
+| `/fleet:init <project-path> [branch]` | End-to-end fleet init — auto-tunes `qa-fleet.conf`, runs `fleet init` non-interactively, waits for the container, verifies `/actuator/health`. Use this instead of running `fleet init` manually. |
+
+### Install (make commands globally available)
+
+```bash
+# Symlink the fleet command namespace into your global Claude commands directory
+ln -s "$(pwd)/.claude/commands/fleet" ~/.claude/commands/fleet
+```
+
+After symlinking, `/fleet:init` is available in any Claude Code session, regardless of which directory you open Claude from. Pass the project path as an argument:
+
+```
+/fleet:init /path/to/my-project feature/my-branch
+```
+
+### Use without installing (repo-local)
+
+Open Claude Code from the qa-fleet repo root — commands in `.claude/commands/` are automatically available as slash commands in that session:
+
+```bash
+cd /path/to/qa-fleet
+claude   # opens Claude Code
+# then: /fleet:init ../my-project main
+```
+
 ## Local dashboard development
 
 ```bash
