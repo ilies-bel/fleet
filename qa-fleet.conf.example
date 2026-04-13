@@ -46,3 +46,38 @@ DB_PASSWORD="changeme"
 # Injected as environment variables into the running backend process.
 JWT_SECRET="changeme-replace-with-a-256-bit-secret-string-1234567890ab"
 JWT_ISSUER="myapp"
+
+# ── Ports (optional) ──────────────────────────────────────────────────────────
+# Host and in-container ports exposed by the gateway and feature containers.
+# Uncomment and override only if the defaults clash with something on your host.
+
+# Gateway proxy host port — where browsers hit the preview.
+# PROXY_PORT="3000"
+
+# Gateway admin API + dashboard host port.
+# ADMIN_PORT="4000"
+
+# In-container dev-server port (Next.js default 3000, Vite default 5173).
+# FRONTEND_PORT="3000"
+
+# Postgres host port.
+# DB_PORT="5432"
+
+# ── Runtime versions (optional) ───────────────────────────────────────────────
+# Pin language/runtime versions baked into the feature base image.
+
+# Postgres major version.
+# POSTGRES_VERSION="16"
+
+# Node.js major version.
+# NODE_VERSION="20"
+
+# JDK major version (Spring stack only).
+# JAVA_VERSION="21"
+
+# Go toolchain version (Go stack only).
+# GO_VERSION="1.22"
+
+# ── Paths (optional) ──────────────────────────────────────────────────────────
+# Where the built backend artifact lives inside the container.
+# BACKEND_ARTIFACT_PATH="/home/developer/backend.jar"

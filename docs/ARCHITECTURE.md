@@ -2,7 +2,7 @@
 
 ## Overview
 
-QA Fleet is a Docker-based orchestration system for running multiple feature branches of the d2r2 application (Next.js frontend + Spring Boot backend + PostgreSQL) simultaneously on localhost.
+QA Fleet is a Docker-based orchestration system for running multiple feature branches of your application (e.g. a Next.js frontend + Spring Boot backend + PostgreSQL) simultaneously on localhost.
 
 The core design enables a **transparent proxy pattern**: the browser always connects to `localhost:3000`, but the gateway dynamically routes that traffic to whichever feature container is currently active — no browser reconfiguration needed when switching features.
 
@@ -166,7 +166,7 @@ Runs once on first container start. A sentinel file at `/tmp/.qa-built` prevents
 | 3 | `npm run build` — Next.js static export to `/var/www/html` |
 | 4 | Patch bundle URLs — replace `__QA_BACKEND_URL__` → `/backend`, `__QA_APP_URL__` → `localhost:3000` |
 | 5 | `mvn package -P jooq-codegen` — build Spring Boot JAR |
-| 6 | PostgreSQL `initdb`, create `d2r2_db` database and `d2r2_user` |
+| 6 | PostgreSQL `initdb`, create the configured database and user (from `DB_NAME` / `DB_USER`) |
 | 7 | `supervisord -n` — launch all processes (blocks, PID 1 equivalent) |
 
 ### Process Management (`supervisord.conf`)
@@ -236,7 +236,7 @@ Dark cyberpunk theme. Key variables:
 qa-init.sh <app-root> <branch>
 ```
 
-1. Validate `d2r2-frontend/` and `d2r2-backend/` present
+1. Validate the configured frontend and backend directories (`FRONTEND_DIR` / `BACKEND_DIR`) are present
 2. Write `APP_ROOT` to `.qa-config`
 3. Create `qa-net` Docker network
 4. Build `qa-gateway` image (includes compiled dashboard)
@@ -282,9 +282,9 @@ Per feature, three Docker volumes:
 | Volume | Mount | Purpose |
 |--------|-------|---------|
 | `<worktree-path>` | `/app` (rw) | Source code (live git worktree) |
-| `<app-root>/d2r2-frontend/node_modules` | `/app-nm-seed` (ro) | Seed — avoids full `npm install` |
-| `qa-<name>-nm` | `/app/d2r2-frontend/node_modules` (rw) | Persists built node_modules across restarts |
-| `qa-<name>-target` | `/app/d2r2-backend/target` (rw) | Persists Maven build artifacts |
+| `<app-root>/<frontend>/node_modules` | `/app-nm-seed` (ro) | Seed — avoids full `npm install` |
+| `qa-<name>-nm` | `/app/<frontend>/node_modules` (rw) | Persists built node_modules across restarts |
+| `qa-<name>-target` | `/app/<backend>/target` (rw) | Persists Maven build artifacts |
 
 The seed pattern: copy from read-only host mount into the named volume on first start, then `npm install --prefer-offline` to resolve deltas. This cuts cold-start time significantly on feature branches that share most dependencies.
 
