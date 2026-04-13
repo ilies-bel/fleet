@@ -3,6 +3,9 @@
 !.qa/.gitkeep
 .qa-runner.pid
 .qa-config
+
+# Generated at fleet init time from config/nginx.conf.tmpl
+config/nginx.conf
 .worktrees/
 node_modules/
 gateway/node_modules/

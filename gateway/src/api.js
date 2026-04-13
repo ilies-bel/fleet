@@ -28,7 +28,7 @@ router.get('/features/:name/health', async (req, res) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
 
-    const response = await fetch(`http://qa-${name}:3000/`, {
+    const response = await fetch(`http://qa-${name}:${process.env.PROXY_PORT || 3000}/`, {
       method: 'HEAD',
       signal: controller.signal,
     });
@@ -42,7 +42,7 @@ router.get('/features/:name/health', async (req, res) => {
 
 /**
  * POST /_qa/api/features/:name/activate
- * Set the active feature for the transparent proxy on port 3000.
+ * Set the active feature for the transparent proxy (PROXY_PORT).
  */
 router.post('/features/:name/activate', (req, res) => {
   const { name } = req.params;
@@ -283,7 +283,8 @@ async function runSync(containerName, regenerateSources) {
     steps.push('mvn compile -Pjooq-codegen -q');
   }
   steps.push(buildCmd);
-  steps.push('ls target/*.jar && cp target/*.jar /home/developer/backend.jar');
+  const artifactPath = process.env.BACKEND_ARTIFACT_PATH || '/home/developer/backend.jar';
+  steps.push(`ls target/*.jar && cp target/*.jar ${artifactPath}`);
   steps.push('supervisorctl restart backend');
 
   await dockerExec(containerName, ['bash', '-c', steps.join(' && ')]);

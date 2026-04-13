@@ -12,13 +12,16 @@ const __dirname = dirname(__filename);
 
 await reconcileFromDocker();
 
-// ── :3000 — transparent proxy only ───────────────────────────────────────────
+// ── proxy port (PROXY_PORT, default 3000) — transparent proxy only ───────────
 // No body parsing, no CORS, no middleware — pass everything through verbatim.
+const PROXY_PORT = Number(process.env.PROXY_PORT) || 3000;
+const ADMIN_PORT = Number(process.env.ADMIN_PORT) || 4000;
+
 const proxyApp = express();
 proxyApp.use(createFeatureProxy());
-proxyApp.listen(3000, '0.0.0.0', () => console.log('[QA Gateway] proxy on :3000'));
+proxyApp.listen(PROXY_PORT, '0.0.0.0', () => console.log(`[QA Gateway] proxy on :${PROXY_PORT}`));
 
-// ── :4000 — admin API + dashboard ────────────────────────────────────────────
+// ── admin port (ADMIN_PORT, default 4000) — admin API + dashboard ────────────
 const adminApp = express();
 adminApp.use(cors());
 adminApp.use(express.json());
@@ -43,4 +46,4 @@ adminApp.get('*', (_req, res) => {
   });
 });
 
-adminApp.listen(4000, '0.0.0.0', () => console.log('[QA Gateway] admin on :4000'));
+adminApp.listen(ADMIN_PORT, '0.0.0.0', () => console.log(`[QA Gateway] admin on :${ADMIN_PORT}`));

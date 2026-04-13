@@ -34,6 +34,15 @@ QA_FLEET_ROOT="${FLEET_ROOT}"
 load_qa_config
 load_fleet_conf
 
+# ─── Defaults for port / path knobs (also applied in cmd-init.sh) ────────────
+# Older qa-fleet.conf files lack these keys — fall back to the same baseline
+# cmd-init.sh uses, so the feature container and gateway agree on ports.
+: "${PROXY_PORT:=3000}"
+: "${ADMIN_PORT:=4000}"
+: "${DB_PORT:=5432}"
+: "${BACKEND_ARTIFACT_PATH:=/home/developer/backend.jar}"
+export PROXY_PORT ADMIN_PORT DB_PORT BACKEND_ARTIFACT_PATH
+
 WORKTREES_DIR="${APP_ROOT}/.qa-worktrees"
 WORKTREE_PATH="${WORKTREES_DIR}/${NAME}"
 INFO_FILE="${QA_FLEET_ROOT}/.qa/${NAME}/info"
@@ -127,9 +136,12 @@ services:
       - BACKEND_BUILD_CMD=${BACKEND_BUILD_CMD}
       - BACKEND_RUN_CMD=${BACKEND_RUN_CMD}
       - BACKEND_PORT=${BACKEND_PORT}
+      - BACKEND_ARTIFACT_PATH=${BACKEND_ARTIFACT_PATH}
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
+      - DB_PORT=${DB_PORT}
+      - PROXY_PORT=${PROXY_PORT}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ISSUER=${JWT_ISSUER}
     volumes:
@@ -174,5 +186,5 @@ echo -e "${GREEN}┌────────────────────
 echo -e "${GREEN}│  ${NAME} container started (building internally...)           ${RESET}"
 echo -e "${GREEN}│  Logs    → docker logs -f qa-${NAME}                          ${RESET}"
 echo -e "${GREEN}│  Branch  → ${BRANCH}                                          ${RESET}"
-echo -e "${GREEN}│  Proxy   → http://localhost:3000  (auto-activated if first)   ${RESET}"
+echo -e "${GREEN}│  Proxy   → http://localhost:${PROXY_PORT}  (auto-activated if first)   ${RESET}"
 echo -e "${GREEN}└──────────────────────────────────────────────────────────────┘${RESET}"

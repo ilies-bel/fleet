@@ -8,11 +8,14 @@ FRONTEND_DIR="${FRONTEND_DIR:?FRONTEND_DIR env var is required}"
 FRONTEND_OUT_DIR="${FRONTEND_OUT_DIR:-out}"
 BACKEND_DIR="${BACKEND_DIR:-}"
 BACKEND_BUILD_CMD="${BACKEND_BUILD_CMD:-}"
-BACKEND_RUN_CMD="${BACKEND_RUN_CMD:-java -jar /home/developer/backend.jar}"
+BACKEND_ARTIFACT_PATH="${BACKEND_ARTIFACT_PATH:-/home/developer/backend.jar}"
+BACKEND_RUN_CMD="${BACKEND_RUN_CMD:-java -jar ${BACKEND_ARTIFACT_PATH}}"
 BACKEND_PORT="${BACKEND_PORT:-8081}"
 DB_NAME="${DB_NAME:-}"
 DB_USER="${DB_USER:-}"
 DB_PASSWORD="${DB_PASSWORD:-}"
+DB_PORT="${DB_PORT:-5432}"
+PROXY_PORT="${PROXY_PORT:-3000}"
 JWT_SECRET="${JWT_SECRET:-}"
 JWT_ISSUER="${JWT_ISSUER:-myapp}"
 
@@ -88,7 +91,7 @@ if [ ! -f "${SENTINEL}" ]; then
   echo "[qa] Patching frontend bundle URLs..."
   find /var/www/html -name "*.js" -exec sed -i \
     -e "s|__QA_BACKEND_URL__|/backend|g" \
-    -e "s|__QA_APP_URL__|http://localhost:3000|g" \
+    -e "s|__QA_APP_URL__|http://localhost:${PROXY_PORT}|g" \
     {} \;
 
   # ── 5. Build backend (if configured) ─────────────────────────────────────────
@@ -98,7 +101,7 @@ if [ ! -f "${SENTINEL}" ]; then
     eval "${BACKEND_BUILD_CMD}"
     # Copy JAR to a stable path if the build produced one (Spring Boot convention).
     if ls target/*.jar >/dev/null 2>&1; then
-      cp target/*.jar /home/developer/backend.jar
+      cp target/*.jar "${BACKEND_ARTIFACT_PATH}"
     fi
   fi
 
@@ -181,7 +184,7 @@ if [ -n "${BACKEND_DIR}" ]; then
     printf 'command=%s\n' "${BACKEND_WRAPPER}"
     printf 'environment='
     printf 'DB_HOST="127.0.0.1",'
-    printf 'DB_PORT="5432",'
+    printf 'DB_PORT="%s",' "${DB_PORT}"
     printf 'DB_NAME="%s",'   "${DB_NAME}"
     printf 'DB_USER="%s",'   "${DB_USER}"
     printf 'DB_PASSWORD="%s",' "${DB_PASSWORD}"

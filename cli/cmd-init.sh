@@ -510,9 +510,12 @@ detect_orchestrator() {
   qa-gateway:
     image: qa-gateway
     container_name: qa-gateway-container
+    environment:
+      PROXY_PORT: "${PROXY_PORT}"
+      ADMIN_PORT: "${ADMIN_PORT}"
     ports:
-      - "3000:3000"
-      - "4000:4000"
+      - "${PROXY_PORT}:${PROXY_PORT}"
+      - "${ADMIN_PORT}:${ADMIN_PORT}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
@@ -542,6 +545,22 @@ info "Saved APP_ROOT=${APP_ROOT} to .qa-config"
 detect_and_configure_stack
 detect_hot_reload
 detect_orchestrator
+
+# ─── Render nginx.conf from template (port substitution) ─────────────────────
+NGINX_TMPL="${FLEET_ROOT}/config/nginx.conf.tmpl"
+NGINX_OUT="${FLEET_ROOT}/config/nginx.conf"
+if [ -f "${NGINX_TMPL}" ]; then
+  if command -v envsubst >/dev/null 2>&1; then
+    PROXY_PORT="${PROXY_PORT}" BACKEND_PORT="${BACKEND_PORT}" \
+      envsubst '${PROXY_PORT} ${BACKEND_PORT}' < "${NGINX_TMPL}" > "${NGINX_OUT}"
+  else
+    # Fallback: sed-based substitution keeps init self-contained without gettext.
+    sed -e "s|\${PROXY_PORT}|${PROXY_PORT}|g" \
+        -e "s|\${BACKEND_PORT}|${BACKEND_PORT}|g" \
+        "${NGINX_TMPL}" > "${NGINX_OUT}"
+  fi
+  info "Rendered config/nginx.conf (listen ${PROXY_PORT}, backend ${BACKEND_PORT})"
+fi
 
 # ─── Create worktrees directory ───────────────────────────────────────────────
 mkdir -p "${APP_ROOT}/.qa-worktrees"
@@ -593,8 +612,10 @@ info "Starting gateway container..."
 docker run -d \
   --name qa-gateway-container \
   --network qa-net \
-  -p 3000:3000 \
-  -p 4000:4000 \
+  -e PROXY_PORT="${PROXY_PORT}" \
+  -e ADMIN_PORT="${ADMIN_PORT}" \
+  -p "${PROXY_PORT}:${PROXY_PORT}" \
+  -p "${ADMIN_PORT}:${ADMIN_PORT}" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --security-opt label=disable \
   --restart unless-stopped \
@@ -604,7 +625,7 @@ docker run -d \
 info "Waiting for gateway to be ready..."
 ATTEMPTS=0
 MAX=30
-until curl -sf http://localhost:4000/_qa/api/status >/dev/null 2>&1; do
+until curl -sf "http://localhost:${ADMIN_PORT}/_qa/api/status" >/dev/null 2>&1; do
   ATTEMPTS=$((ATTEMPTS + 1))
   if [ "$ATTEMPTS" -ge "$MAX" ]; then
     error "Gateway did not start within ${MAX}s"
@@ -643,7 +664,7 @@ fi
 echo ""
 echo -e "${GREEN}┌──────────────────────────────────────────────┐${RESET}"
 echo -e "${GREEN}│  QA Fleet ready                              │${RESET}"
-echo -e "${GREEN}│  Dashboard  → http://localhost:4000          │${RESET}"
-echo -e "${GREEN}│  Proxy      → http://localhost:3000          │${RESET}"
+echo -e "${GREEN}│  Dashboard  → http://localhost:${ADMIN_PORT}          │${RESET}"
+echo -e "${GREEN}│  Proxy      → http://localhost:${PROXY_PORT}          │${RESET}"
 echo -e "${GREEN}│  Active     → ${NAME} (${BRANCH})${RESET}"
 echo -e "${GREEN}└──────────────────────────────────────────────┘${RESET}"
