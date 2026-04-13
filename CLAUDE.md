@@ -146,6 +146,28 @@ Log learnings: `bd comment {ID} "LEARNED: [insight]"` — captured automatically
 <!-- Populated by discovery agent -->
 - merge-supervisor
 
+## Testing fleet init
+
+`test/project/` is a ready-to-use copy of `test/reference/` (d2r2 — Spring Boot backend + Next.js frontend).
+
+```bash
+# Run interactively in your terminal (not as a subshell — needs /dev/tty for prompts)
+fleet init test/project main
+```
+
+Expected detection output:
+```
+Stack detected: backend=spring, frontend=next
+Dockerfile.spring → FLEET_ROOT/Dockerfile.feature-base
+spring-boot-devtools not found → prompt to add
+```
+
+Notes:
+- `scripts/qa-host-runner.sh` is a no-op stub so init proceeds past that step
+- `test/project/qa-fleet.conf` is pre-filled — wizard is skipped
+- Both git repos (`d2r2-backend/`, `d2r2-frontend/`) are on branch `main`
+- `test/reference/` is the pristine original — never modify it; re-copy if needed: `cp -rp test/reference test/project`
+
 ## Current State
 
 <!--
