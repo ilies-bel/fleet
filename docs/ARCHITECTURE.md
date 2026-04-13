@@ -31,6 +31,67 @@ All feature containers run exclusively on the internal `qa-net` Docker network �
 
 ---
 
+## Runtime Topology
+
+```
++-----------------------------------------------------------------------+
+|  HOST (macOS / Linux)                                                 |
+|                                                                       |
+|  Developer Browser                                                    |
+|    |-- :3000 (proxy) ------+                                          |
+|    |-- :4000 (dashboard)   |                                          |
+|                            |                                          |
+|  qa-host-runner.sh         |   +--------------------------------+     |
+|  127.0.0.1:4001            |   |  qa-gateway  (one container)   |     |
+|  POST /open-terminal       |   |                                |     |
+|  --> AppleScript -> iTerm2 |   |  proxy.js      :3000 <--------+     |
+|            ^               |   |  api.js        :4000 <-- :4000      |
+|            |               |   |  registry.js   (in-memory Map) |     |
+|            |  open-terminal|   |  reconcile.js  (startup sync)  |     |
+|            +---------------+---|  docker.js                     |     |
+|                                |    |                           |     |
++--------------------------------|----|---------------------------+     |
+                                 |    |                                 |
+                                 |    v                                 |
+                                 |  /var/run/docker.sock               |
+                                 |    |                                 |
+                                 |    v                                 |
+                                 |  Docker Daemon                      |
+                                 |                                     |
+                         qa-net (internal bridge — no host publishing) |
+                          |            |                    |           |
+                          v            v                    v           |
+              +------------------+ +------------------+ +----------+   |
+              | qa-feature-a     | | qa-feature-b     | | qa-...   |   |
+              |                  | |                  | |          |   |
+              | supervisord(PID1)| | supervisord(PID1)| |  ...     |   |
+              |  postgresql:5432 | |  postgresql:5432 | |          |   |
+              |  backend:8081    | |  backend:8081    | |          |   |
+              |  nginx:3000      | |  nginx:3000      | |          |   |
+              |    /          -> | |                  | |          |   |
+              |    /var/www/html | |                  | |          |   |
+              |    /backend/  -> | |                  | |          |   |
+              |    127.0.0.1:    | |                  | |          |   |
+              |    8081          | |                  | |          |   |
+              |                  | |                  | |          |   |
+              | Volumes:         | | Volumes:         | |          |   |
+              |  /app        (rw)| |  /app        (rw)| |          |   |
+              |  /app-nm-seed(ro)| |  /app-nm-seed(ro)| |          |   |
+              |  qa-a-nm     (rw)| |  qa-b-nm     (rw)| |          |   |
+              |  qa-a-target (rw)| |  qa-b-target (rw)| |          |   |
+              +------------------+ +------------------+ +----------+   |
+```
+
+**Legend:**
+
+- Exactly one `qa-gateway` container, long-lived — started once by `qa-init.sh` and left running
+- N feature containers, reachable only via `qa-net` — never bound to host ports
+- No `docker-compose` orchestrates the fleet; the gateway manages containers directly via the Docker socket
+- Each feature container is all-in-one (DB + backend + frontend) managed by `supervisord` as PID 1
+- Only one feature is "active" at a time; `proxy.js` forwards `:3000` traffic to that container's `nginx`
+
+---
+
 ## Component Map
 
 ```
