@@ -24,4 +24,5 @@ dashboard/dist/
 .mcp.json
 
 
-test
+test/project
+test/reference
