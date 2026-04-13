@@ -195,15 +195,23 @@ router.get('/features/:name/logs', async (req, res) => {
   const containerName = `qa-${name}`;
 
   try {
-    let lines;
     if (source === 'all') {
-      lines = await dockerLogs(containerName, tail, since);
+      const LOG_SOURCES = ['backend', 'nginx', 'postgresql', 'supervisord'];
+      const tailArg = String(tail);
+      const results = await Promise.all(
+        LOG_SOURCES.map(src =>
+          dockerExec(containerName, ['tail', '-n', tailArg, `/var/log/supervisor/${src}.log`])
+            .catch(() => ''),
+        ),
+      );
+      const sources = Object.fromEntries(LOG_SOURCES.map((src, i) => [src, results[i]]));
+      return res.json({ sources, fetchedAt: Date.now() });
     } else if (ALLOWED_SOURCES.has(source)) {
-      lines = await dockerExec(containerName, ['tail', '-n', String(tail), `/var/log/supervisor/${source}.log`]);
+      const lines = await dockerExec(containerName, ['tail', '-n', String(tail), `/var/log/supervisor/${source}.log`]);
+      return res.json({ lines, fetchedAt: Date.now() });
     } else {
       return res.status(400).json({ error: `Invalid source '${source}'. Use: backend, nginx, postgresql, supervisord, all` });
     }
-    res.json({ lines, fetchedAt: Date.now() });
   } catch (err) {
     if (err instanceof DockerSocketError) {
       return res.status(503).json({ error: err.message });
