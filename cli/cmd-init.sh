@@ -318,7 +318,7 @@ detect_hot_reload() {
     if ! grep -q 'spring-boot-devtools' "${APP_ROOT}/${BACKEND_DIR}/pom.xml" 2>/dev/null; then
       warn "spring-boot-devtools not found in pom.xml — hot reload disabled"
       printf "  Add spring-boot-devtools dependency to pom.xml? [y/N]: "
-      read -r ans </dev/tty
+      [ -t 0 ] && read -r ans </dev/tty || { ans="n"; echo "n (no tty)"; }
       if [[ "$ans" =~ ^[Yy]$ ]]; then
         # Insert devtools dependency before </dependencies> (first occurrence)
         sed -i '' 's|</dependencies>|    <dependency>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-devtools</artifactId>\n        <scope>provided</scope>\n        <optional>true</optional>\n    </dependency>\n</dependencies>|' "${APP_ROOT}/${BACKEND_DIR}/pom.xml"
@@ -344,7 +344,7 @@ detect_hot_reload() {
     if [ ! -f "${APP_ROOT}/${BACKEND_DIR}/.air.toml" ] && [ ! -f "${APP_ROOT}/.air.toml" ]; then
       warn "Air (hot reload for Go) not configured"
       printf "  Generate .air.toml in backend directory? [y/N]: "
-      read -r ans </dev/tty
+      [ -t 0 ] && read -r ans </dev/tty || { ans="n"; echo "n (no tty)"; }
       if [[ "$ans" =~ ^[Yy]$ ]]; then
         cat > "${APP_ROOT}/${BACKEND_DIR}/.air.toml" <<'AIRCONF'
 root = "."
@@ -420,7 +420,7 @@ detect_orchestrator() {
   if [ -n "${compose_file}" ]; then
     info "Docker Compose file detected: ${compose_file}"
     printf "  Integrate fleet gateway into this compose file? [y/N]: "
-    read -r ans </dev/tty
+    [ -t 0 ] && read -r ans </dev/tty || { ans="n"; echo "n (no tty)"; }
     if [[ "$ans" =~ ^[Yy]$ ]]; then
       # Append fleet gateway service if not already present
       if ! grep -q 'qa-gateway' "${compose_file}" 2>/dev/null; then
