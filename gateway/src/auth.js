@@ -9,13 +9,13 @@ const router = Router();
  * Body: { name, branch }
  */
 router.post('/register-feature', (req, res) => {
-  const { name, branch, worktreePath = null, project = null } = req.body;
+  const { name, branch, worktreePath = null, project = null, status = 'running' } = req.body;
 
   if (!name || !branch) {
     return res.status(400).json({ error: 'name and branch are required' });
   }
 
-  register(name, branch, worktreePath, project);
+  register(name, branch, worktreePath, project, status);
 
   res.json({ ok: true, name, branch });
 });
