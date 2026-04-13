@@ -1,41 +1,29 @@
 #!/bin/bash
-# fleet — QA Fleet CLI
-# Usage: fleet <command> [options]
+# fleet — QA Fleet CLI unified dispatcher
 set -euo pipefail
 
-GATEWAY="${FLEET_GATEWAY:-http://localhost:4000}"
+# Resolve fleet root (follow symlinks)
+_src="${BASH_SOURCE[0]}"
+while [ -L "$_src" ]; do _src="$(readlink "$_src")"; done
+FLEET_ROOT="$(cd "$(dirname "$_src")" && pwd)"
+export FLEET_ROOT
 
-cmd="${1:-}"
+# Source shared library
+source "$FLEET_ROOT/cli/common.sh"
+
+cmd="${1:-help}"
+shift || true
+
 case "$cmd" in
-  sync)
-    name="${2:-}"
-    if [ -z "$name" ]; then
-      echo "Usage: fleet sync <name> [--regenerate-sources]"
-      echo "  name                 Feature name (as shown in dashboard)"
-      echo "  --regenerate-sources Also regenerate jOOQ DSL (needed after Liquibase migrations)"
-      exit 1
-    fi
-
-    regen=false
-    for arg in "${@:3}"; do
-      [ "$arg" = "--regenerate-sources" ] && regen=true
-    done
-
-    url="${GATEWAY}/_qa/api/features/${name}/sync"
-    [ "$regen" = true ] && url="${url}?regenerateSources=true"
-
-    echo "[fleet] Syncing '${name}'$([ "$regen" = true ] && echo ' (with jOOQ source regen)' || true)..."
-    curl -sf -X POST "$url" | python3 -m json.tool
-    echo "[fleet] Sync started — open logs in dashboard to follow progress"
-    ;;
+  init)     exec "$FLEET_ROOT/cli/cmd-init.sh" "$@" ;;
+  add)      exec "$FLEET_ROOT/cli/cmd-add.sh" "$@" ;;
+  rm)       exec "$FLEET_ROOT/cli/cmd-rm.sh" "$@" ;;
+  restart)  exec "$FLEET_ROOT/cli/cmd-restart.sh" "$@" ;;
+  feature)  exec "$FLEET_ROOT/cli/cmd-feature.sh" "$@" ;;
+  push)     exec "$FLEET_ROOT/cli/cmd-push.sh" "$@" ;;
+  sync)     exec "$FLEET_ROOT/cli/cmd-sync.sh" "$@" ;;
+  help|--help|-h) show_help ;;
   *)
-    echo "Usage: fleet <command> [options]"
-    echo ""
-    echo "Commands:"
-    echo "  sync <name> [--regenerate-sources]   Pull latest code, rebuild and restart backend"
-    echo ""
-    echo "Environment:"
-    echo "  FLEET_GATEWAY   Gateway base URL (default: http://localhost:4000)"
-    exit 1
+    error "Unknown command: $cmd\nRun 'fleet help' for usage."
     ;;
 esac
