@@ -65,6 +65,34 @@ has_build_script() {
   [ -f "$pkg" ] && grep -q '"build"' "$pkg" 2>/dev/null
 }
 
+# Check whether a TCP port is in use on the host. Returns 0 if in use, 1 if free.
+# Silent if lsof is unavailable (also returns 1 so callers skip the collision path).
+port_in_use() {
+  local port="$1"
+  command -v lsof >/dev/null 2>&1 || return 1
+  lsof -iTCP:"${port}" -sTCP:LISTEN -nP >/dev/null 2>&1
+}
+
+# Prompt for an alternative port when the default is bound. TTY-safe (commit cada935):
+# if no tty, silently fall back to the default rather than blocking automation.
+# Writes the chosen value to $_PROMPT_RESULT.
+prompt_alt_port() {
+  local label="$1" default="$2"
+  if port_in_use "${default}"; then
+    warn "Port ${default} (${label}) is already in use on the host"
+    printf "  Enter alternative %s port [%s]: " "${label}" "${default}"
+    if [ -t 0 ]; then
+      read -r _PROMPT_RESULT </dev/tty
+      _PROMPT_RESULT="${_PROMPT_RESULT:-${default}}"
+    else
+      _PROMPT_RESULT="${default}"
+      echo "${default} (no tty — keeping default)"
+    fi
+  else
+    _PROMPT_RESULT="${default}"
+  fi
+}
+
 # ─── Interactive config wizard ────────────────────────────────────────────────
 setup_fleet_conf() {
   # Derive a slug from the project folder name for use as default DB/JWT names.
@@ -78,16 +106,16 @@ setup_fleet_conf() {
   echo ""
 
   # ── Auto-detect frontend ──────────────────────────────────────────────────
-  local det_frontend="" det_out="dist"
+  local det_frontend="" det_out="dist" det_frontend_port="3000"
   for dir in "${APP_ROOT}"/*/; do
     [ -d "$dir" ] || continue
     local dname; dname=$(basename "$dir")
     if has_build_script "$dir"; then
       # Prefer dirs that look like a frontend (next/vite config present)
       if ls "${dir}"next.config.* >/dev/null 2>&1; then
-        det_frontend="$dname"; det_out="out"; break
+        det_frontend="$dname"; det_out="out"; det_frontend_port="3000"; break
       elif ls "${dir}"vite.config.* >/dev/null 2>&1; then
-        det_frontend="$dname"; det_out="dist"; break
+        det_frontend="$dname"; det_out="dist"; det_frontend_port="5173"; break
       else
         # Take the first one with a build script as fallback
         [ -z "$det_frontend" ] && det_frontend="$dname"
@@ -178,6 +206,13 @@ setup_fleet_conf() {
   ask "JWT secret"  "$default_secret";   v_jwt_secret="$_PROMPT_RESULT"
   ask "JWT issuer"  "$project_slug";     v_jwt_issuer="$_PROMPT_RESULT"
 
+  # ── Gateway port collision check ──────────────────────────────────────────
+  # Only prompt if the default port is already bound AND lsof is available.
+  # Otherwise keep the default silently so CI/non-interactive runs are unaffected.
+  local v_proxy_port v_admin_port
+  prompt_alt_port "gateway proxy"  "3000"; v_proxy_port="$_PROMPT_RESULT"
+  prompt_alt_port "gateway admin"  "4000"; v_admin_port="$_PROMPT_RESULT"
+
   # ── Write qa-fleet.conf ───────────────────────────────────────────────────
   echo ""
   cat > "${FLEET_CONF}" <<CONF
@@ -202,6 +237,23 @@ DB_PASSWORD="${v_db_password}"
 # ── Backend runtime environment ───────────────────────────────────────────────
 JWT_SECRET="${v_jwt_secret}"
 JWT_ISSUER="${v_jwt_issuer}"
+
+# ── Ports (host-side) ─────────────────────────────────────────────────────────
+# Change these if the defaults collide with something already running locally.
+PROXY_PORT="${v_proxy_port}"
+ADMIN_PORT="${v_admin_port}"
+FRONTEND_PORT="${det_frontend_port}"
+DB_PORT="5432"
+
+# ── Toolchain versions ────────────────────────────────────────────────────────
+# Baked into the stack Dockerfiles at build time. Bump carefully.
+POSTGRES_VERSION="16"
+NODE_VERSION="20"
+JAVA_VERSION="21"
+GO_VERSION="1.22"
+
+# ── Paths (inside feature containers) ─────────────────────────────────────────
+BACKEND_ARTIFACT_PATH="/home/developer/backend.jar"
 CONF
 
   info "Written: ${FLEET_CONF}"
@@ -245,6 +297,25 @@ DB_PASSWORD="${DB_PASSWORD:-}"
 JWT_SECRET="${JWT_SECRET:-}"
 JWT_ISSUER="${JWT_ISSUER:-myapp}"
 
+# ── Defaults for port / version / path knobs ─────────────────────────────────
+# Existing qa-fleet.conf files written before these keys existed still work:
+# :=-style defaults apply in-place and are exported for downstream subshells.
+: "${PROXY_PORT:=3000}"
+: "${ADMIN_PORT:=4000}"
+# FRONTEND_PORT default depends on the frontend stack, but STACK_FRONTEND isn't
+# detected yet (see detect_and_configure_stack below). Use 3000 as a safe
+# baseline here; the stack detector adjusts it once STACK_FRONTEND is known.
+: "${FRONTEND_PORT:=3000}"
+: "${DB_PORT:=5432}"
+: "${POSTGRES_VERSION:=16}"
+: "${NODE_VERSION:=20}"
+: "${JAVA_VERSION:=21}"
+: "${GO_VERSION:=1.22}"
+: "${BACKEND_ARTIFACT_PATH:=/home/developer/backend.jar}"
+export PROXY_PORT ADMIN_PORT FRONTEND_PORT DB_PORT
+export POSTGRES_VERSION NODE_VERSION JAVA_VERSION GO_VERSION
+export BACKEND_ARTIFACT_PATH
+
 # ─── Stack detection ──────────────────────────────────────────────────────────
 detect_and_configure_stack() {
   STACK_BACKEND="none"
@@ -276,6 +347,15 @@ detect_and_configure_stack() {
 
   info "Stack detected: backend=${STACK_BACKEND}, frontend=${STACK_FRONTEND}"
   export STACK_BACKEND STACK_FRONTEND
+
+  # Refine FRONTEND_PORT default now that STACK_FRONTEND is known.
+  # Only adjust if the user hasn't explicitly set a non-default value: we
+  # detect "default" by checking against the baseline 3000 applied earlier.
+  # If the conf file specifies a non-3000 value we leave it alone.
+  if [ "${FRONTEND_PORT}" = "3000" ] && [ "${STACK_FRONTEND}" = "vite" ]; then
+    FRONTEND_PORT="5173"
+    export FRONTEND_PORT
+  fi
 
   # Copy matching Dockerfile template into FLEET_ROOT (used by docker build -f Dockerfile.feature-base)
   local src_dockerfile="" dest_dockerfile="${FLEET_ROOT}/Dockerfile.feature-base"
