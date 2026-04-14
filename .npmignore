@@ -1,0 +1,16 @@
+# Development and test artifacts
+test/
+docs/
+.beads/
+.worktrees/
+.git/
+*.log
+node_modules/
+
+# Project config (only .example ships)
+qa-fleet.conf
+
+# CI / editor / OS noise
+.DS_Store
+*.swp
+*.swo
