@@ -159,8 +159,10 @@ Log learnings: `bd comment {ID} "LEARNED: [insight]"` — captured automatically
 
 ```bash
 # Run interactively in your terminal (not as a subshell — needs /dev/tty for prompts)
-fleet init test/project main
+cd test/project && fleet init
 ```
+
+Branch is auto-detected (`main`). Pass an explicit branch if needed: `fleet init main`.
 
 Expected detection output:
 ```

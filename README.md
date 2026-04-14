@@ -34,7 +34,7 @@ All operations go through a single `fleet` dispatcher. `fleet init` symlinks it 
 fleet <command> [options]
 
 Commands:
-  init    <app-root> <branch>          Initialize fleet for a project
+  init    [branch]                     Initialize fleet for a project (run from project root)
   add     <name> <branch> [--direct]   Start a QA feature container
   rm      <name>|--all|--nuke          Remove feature(s) or everything
   restart <name>                       Restart a feature container
@@ -50,17 +50,17 @@ Environment:
 ## One-time setup
 
 ```bash
-fleet init <app-root-folder> <branch>
+cd /path/to/my-project
+fleet init [branch]
 ```
 
-- `app-root-folder` — path to the project root
-- `branch` — first feature branch to spin up automatically
+- `branch` — first feature branch to spin up (optional — auto-detected from `main`/`master` if omitted)
 
-If `qa-fleet.conf` does not exist in the project root, init walks you through an interactive wizard that **auto-detects your stack** (Spring Boot, Go, Next.js, Vite, Node) and writes the file for you. Otherwise it reads the existing config.
+Run from your project root. If `qa-fleet.conf` does not exist, init walks you through an interactive wizard that **auto-detects your stack** (Spring Boot, Go, Next.js, Vite, Node) and writes the file for you. Otherwise it reads the existing config. After the first container is up, init prompts for additional branches to add.
 
 Example:
 ```bash
-fleet init /path/to/my-project feature/my-branch
+cd /path/to/my-project && fleet init feature/my-branch
 ```
 
 `init` will:
@@ -210,7 +210,7 @@ The `.claude/commands/fleet/` directory contains slash commands for Claude Code 
 
 | Command | Description |
 |---------|-------------|
-| `/fleet:init <project-path> [branch]` | End-to-end fleet init — auto-tunes `qa-fleet.conf`, runs `fleet init` non-interactively, waits for the container, verifies `/actuator/health`. Use this instead of running `fleet init` manually. |
+| `/fleet:init <project-path> [branch]` | End-to-end fleet init — auto-tunes `qa-fleet.conf`, runs `cd <project-path> && fleet init` non-interactively, waits for the container, verifies `/actuator/health`. Use this instead of running `fleet init` manually. |
 
 ### Install (make commands globally available)
 
@@ -225,6 +225,8 @@ After symlinking, `/fleet:init` is available in any Claude Code session, regardl
 /fleet:init /path/to/my-project feature/my-branch
 ```
 
+The slash command handles the `cd` internally — you do not need to change directory first.
+
 ### Use without installing (repo-local)
 
 Open Claude Code from the qa-fleet repo root — commands in `.claude/commands/` are automatically available as slash commands in that session:
@@ -232,7 +234,7 @@ Open Claude Code from the qa-fleet repo root — commands in `.claude/commands/`
 ```bash
 cd /path/to/qa-fleet
 claude   # opens Claude Code
-# then: /fleet:init ../my-project main
+# then: /fleet:init /path/to/my-project main
 ```
 
 ## Local dashboard development
@@ -250,10 +252,10 @@ Vite proxies `/_qa/` to the gateway at localhost:4000, so you get hot-reload aga
 `test/project/` is a ready-to-use copy of `test/reference/` (Spring Boot backend + Next.js frontend). `scripts/qa-host-runner.sh` is a no-op stub so init proceeds past that step.
 
 ```bash
-fleet init test/project main
+cd test/project && fleet init
 ```
 
-Re-copy to reset: `cp -rp test/reference test/project`.
+Branch is auto-detected (`main`). Re-copy to reset: `cp -rp test/reference test/project`.
 
 ## Troubleshooting
 

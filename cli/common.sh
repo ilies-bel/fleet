@@ -38,7 +38,7 @@ export GATEWAY_URL
 # Errors if missing or APP_ROOT doesn't exist.
 load_qa_config() {
   local config_file="${FLEET_ROOT}/.qa-config"
-  [ -f "${config_file}" ] || error ".qa-config not found. Run: fleet init <app-root> <branch>"
+  [ -f "${config_file}" ] || error ".qa-config not found. Run: fleet init (from your project root)"
   # shellcheck source=/dev/null
   source "${config_file}"
   [ -d "${APP_ROOT:-}" ] || error "APP_ROOT '${APP_ROOT:-}' does not exist (check .qa-config)"

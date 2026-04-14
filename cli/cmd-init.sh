@@ -11,28 +11,33 @@ export FLEET_ROOT
 source "${SCRIPT_DIR}/common.sh"
 
 # ─── Args ────────────────────────────────────────────────────────────────────
-if [ -z "${1:-}" ]; then
-  echo "Usage: fleet init <app-root-folder> [branch]"
-  echo ""
-  echo "  app-root-folder — path to your project root"
-  echo "  branch          — first feature branch to spin up (default: main)"
-  echo ""
-  echo "Example:"
-  echo "  fleet init /path/to/my/project feature/my-branch"
-  echo ""
-  echo "If qa-fleet.conf does not exist in the project root, the script will"
-  echo "scan the project and walk you through creating one."
-  exit 1
-fi
+# Usage: fleet init [branch]
+#
+# The project root is always the current working directory. When branch is
+# omitted, we auto-detect `main` or `master` from the project's git subdirs.
+# If qa-fleet.conf does not exist, the wizard walks you through creating it,
+# then prompts to add more feature branches at the end.
 
-APP_ROOT_ARG="$1"
-BRANCH="${2:-main}"
+APP_ROOT="$(pwd)"
+export APP_ROOT
+
+detect_default_branch() {
+  local dir
+  for dir in "${APP_ROOT}"/*/; do
+    [ -d "${dir%/}/.git" ] || continue
+    if git -C "${dir%/}" show-ref --verify --quiet refs/heads/main 2>/dev/null; then
+      echo "main"; return
+    fi
+    if git -C "${dir%/}" show-ref --verify --quiet refs/heads/master 2>/dev/null; then
+      echo "master"; return
+    fi
+  done
+  echo "main"
+}
+
+BRANCH="${1:-$(detect_default_branch)}"
 
 cd "${FLEET_ROOT}"
-
-APP_ROOT="$(cd "${APP_ROOT_ARG}" && pwd)" \
-  || error "Folder '${APP_ROOT_ARG}' does not exist"
-export APP_ROOT
 
 FLEET_CONF="${APP_ROOT}/qa-fleet.conf"
 
@@ -784,12 +789,20 @@ until curl -sf "http://localhost:${ADMIN_PORT}/_qa/api/status" >/dev/null 2>&1; 
 done
 info "Gateway is up."
 
+# ─── Helper: derive safe container name from a branch ─────────────────────────
+# Shared by the first-feature spin-up and the follow-up add-more loop.
+derive_container_name() {
+  local branch="$1"
+  local name
+  name="${branch//\//-}"
+  name="${name//[^a-z0-9-]/}"
+  name="${name:0:30}"
+  name="${name#-}"   # ensure it starts with a letter or digit
+  echo "${name}"
+}
+
 # ─── Spin up first feature ────────────────────────────────────────────────────
-# Derive a safe container name from the branch (slashes → hyphens, strip unsafe chars)
-NAME="${BRANCH//\//-}"
-NAME="${NAME//[^a-z0-9-]/}"
-NAME="${NAME:0:30}"
-NAME="${NAME#-}"   # ensure it starts with a letter or digit
+NAME="$(derive_container_name "${BRANCH}")"
 
 if [ -z "$NAME" ]; then
   error "Could not derive a valid container name from branch '${BRANCH}'"
@@ -817,6 +830,24 @@ if [ -f "${CONFIGURE_CMD_SRC}" ]; then
   mkdir -p "$(dirname "${CONFIGURE_CMD_DST}")"
   cp "${CONFIGURE_CMD_SRC}" "${CONFIGURE_CMD_DST}"
   info "Installed slash command: .claude/commands/configure-fleet-startup.md"
+fi
+
+# ─── Prompt to add more feature branches ─────────────────────────────────────
+# Only in interactive sessions — skip silently in CI / tmux automation.
+if [ -r /dev/tty ]; then
+  while true; do
+    printf "\n  Additional branch to add (blank to finish): "
+    _EXTRA_BRANCH=""
+    read -r _EXTRA_BRANCH </dev/tty || break
+    [ -n "${_EXTRA_BRANCH}" ] || break
+    _EXTRA_NAME="$(derive_container_name "${_EXTRA_BRANCH}")"
+    if [ -z "${_EXTRA_NAME}" ]; then
+      warn "Could not derive a valid container name from '${_EXTRA_BRANCH}' — skipping"
+      continue
+    fi
+    info "Adding feature: ${_EXTRA_NAME} (branch: ${_EXTRA_BRANCH})..."
+    bash "${FLEET_ROOT}/cli/cmd-add.sh" "${_EXTRA_NAME}" "${_EXTRA_BRANCH}"
+  done
 fi
 
 # ─── Success banner ──────────────────────────────────────────────────────────

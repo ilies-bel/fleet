@@ -23,7 +23,7 @@ The command receives arguments via `$ARGUMENTS`. Parse them:
 
 ```
 PROJECT_PATH = first token of $ARGUMENTS  (required — absolute or relative to cwd)
-BRANCH       = second token, default "main"
+BRANCH       = second token, default "" (empty — fleet init auto-detects main/master)
 ```
 
 **Validation:**
@@ -180,14 +180,23 @@ Run via tmux so Claude can send keystrokes to the tty:
 tmux kill-session -t fleetinit 2>/dev/null || true
 
 # Start fleet init in a detached tmux session
+# fleet init takes the project root as cwd; branch arg is optional (auto-detected).
+BRANCH_ARG=""
+[ -n "$BRANCH" ] && BRANCH_ARG=" $BRANCH"
 tmux new-session -d -s fleetinit \
-  "fleet init $PROJECT_PATH $BRANCH 2>&1 | tee /tmp/fleet-init.log; echo '[fleet-init-done]' >> /tmp/fleet-init.log"
+  "cd $PROJECT_PATH && fleet init${BRANCH_ARG} 2>&1 | tee /tmp/fleet-init.log; echo '[fleet-init-done]' >> /tmp/fleet-init.log"
 
 # Give the process 3 seconds to emit the devtools prompt (if any)
 sleep 3
 
 # Answer the devtools prompt (safe no-op if prompt doesn't appear)
 tmux send-keys -t fleetinit "n" Enter
+
+# After the first feature spins up, fleet init prompts for additional branches.
+# Send an empty Enter to exit the loop immediately (non-interactive / CI path).
+# We delay slightly so the first-feature add can complete before the prompt appears.
+sleep 5
+tmux send-keys -t fleetinit "" Enter
 
 # Stream the log so you can follow progress
 echo "fleet init running. Log tail:"
