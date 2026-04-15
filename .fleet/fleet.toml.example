@@ -1,0 +1,57 @@
+# fleet.toml — Fleet project configuration
+#
+# This file is the single source of truth for a Fleet-managed project.
+# Copy this file to .fleet/fleet.toml and adjust to your project.
+#
+# fleet init will generate this file interactively if it is absent.
+
+# ─── Project ──────────────────────────────────────────────────────────────────
+[project]
+name = "d2r2"
+root = "/Users/x/projects/d2r2"   # absolute path to the project root on this host
+
+# ─── Ports ────────────────────────────────────────────────────────────────────
+[ports]
+proxy = 3000    # nginx reverse proxy (public-facing)
+admin = 4000    # fleet gateway admin API
+db    = 5432    # host-mapped database port (optional; 0 = disabled)
+
+# ─── Stacks ───────────────────────────────────────────────────────────────────
+# One [[stacks]] entry per technology used by the project.
+# `type` is an identifier (spring | next | node | go | vite | …).
+# `dockerfile` is the path to the generated base image Dockerfile, relative to
+# the project root.  fleet init writes these files; you should not edit them by
+# hand unless you know what you are doing.
+
+[[stacks]]
+type       = "spring"
+dockerfile = ".fleet/Dockerfile.feature-base.spring"
+
+[[stacks]]
+type       = "next"
+dockerfile = ".fleet/Dockerfile.feature-base.next"
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+# One [[services]] entry per deployable unit.
+# `name`  — logical identifier used in fleet commands (e.g. fleet add <name>)
+# `dir`   — path of the service source tree, relative to project.root
+# `stack` — must match one of the [[stacks]] type values above
+# `port`  — container-internal port the service listens on
+# `build` — command that produces the deployable artefact (run inside the container)
+# `run`   — command that starts the service (run inside the container)
+
+[[services]]
+name  = "backend"
+dir   = "d2r2-backend"
+stack = "spring"
+port  = 8081
+build = "mvn package -DskipTests -q"
+run   = "java -jar /home/developer/backend.jar"
+
+[[services]]
+name  = "frontend"
+dir   = "d2r2-frontend"
+stack = "next"
+port  = 3000
+build = "npm run build"
+run   = "npm run dev"

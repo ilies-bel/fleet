@@ -32,55 +32,226 @@ export -f info warn error
 GATEWAY_URL="${FLEET_GATEWAY:-http://localhost:4000}"
 export GATEWAY_URL
 
-# ─── Config loaders ───────────────────────────────────────────────────────────
+# ─── TOML loader ─────────────────────────────────────────────────────────────
 
-# load_qa_config — sources .fleet-config, exports APP_ROOT
-# Errors if missing or APP_ROOT doesn't exist.
-load_qa_config() {
-  local config_file="${FLEET_ROOT}/.fleet-config"
-  [ -f "${config_file}" ] || error ".fleet-config not found. Run: fleet init <app-root> <branch>"
-  # shellcheck source=/dev/null
-  source "${config_file}"
-  [ -d "${APP_ROOT:-}" ] || error "APP_ROOT '${APP_ROOT:-}' does not exist (check .fleet-config)"
-  export APP_ROOT
+# _find_python_with_tomllib — prints the path of the first python3 interpreter
+# that has tomllib (stdlib ≥3.11) or tomli (third-party) available.
+# Prints nothing and returns 1 if none found.
+_find_python_with_tomllib() {
+  local py candidates
+  # Ordered preference: well-known newer binaries first, then $PATH python3
+  candidates=(
+    python3.13 python3.12 python3.11
+    /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11
+    /usr/local/bin/python3.13 /usr/local/bin/python3.12 /usr/local/bin/python3.11
+    "${HOME}/.local/bin/python3.13" "${HOME}/.local/bin/python3.12" "${HOME}/.local/bin/python3.11"
+    python3
+  )
+  for py in "${candidates[@]}"; do
+    if command -v "$py" >/dev/null 2>&1; then
+      if "$py" -c "import tomllib" 2>/dev/null \
+         || "$py" -c "import tomli as tomllib" 2>/dev/null; then
+        echo "$py"
+        return 0
+      fi
+    fi
+  done
+  return 1
 }
 
-# load_fleet_conf — sources $APP_ROOT/fleet.conf, applies all defaults
-# Must call load_qa_config first.
-load_fleet_conf() {
-  local fleet_conf="${APP_ROOT}/fleet.conf"
-  [ -f "${fleet_conf}" ] || error "fleet.conf not found in ${APP_ROOT}. Run: fleet init first."
-  # shellcheck source=/dev/null
-  source "${fleet_conf}"
+# load_fleet_toml — parse ${FLEET_ROOT}/.fleet/fleet.toml and export env vars:
+#
+#   FLEET_PROJECT_NAME   — project.name
+#   FLEET_PROJECT_ROOT   — project.root
+#   FLEET_PORT_PROXY     — ports.proxy
+#   FLEET_PORT_ADMIN     — ports.admin
+#   FLEET_PORT_DB        — ports.db
+#   FLEET_STACKS_JSON    — [[stacks]] as a JSON array of {type,dockerfile}
+#   FLEET_SERVICES_JSON  — [[services]] as a JSON array of {name,dir,stack,port,build,run}
+#
+# Errors clearly if the file is missing or if no suitable python3 is found.
+load_fleet_toml() {
+  local toml_file="${FLEET_ROOT}/.fleet/fleet.toml"
 
-  [ -n "${FRONTEND_DIR:-}" ] || error "FRONTEND_DIR is not set in fleet.conf"
-
-  # Derive project name from APP_ROOT if not set
-  if [ -z "${PROJECT_NAME:-}" ]; then
-    local _app_basename
-    _app_basename="$(basename "${APP_ROOT}")"
-    if [ "${_app_basename}" = "app" ]; then
-      PROJECT_NAME="$(basename "$(dirname "${APP_ROOT}")")"
-    else
-      PROJECT_NAME="${_app_basename}"
-    fi
+  if [ ! -f "${toml_file}" ]; then
+    error ".fleet/fleet.toml not found in ${FLEET_ROOT}. Run: fleet init"
   fi
 
-  # Apply defaults for optional fields
+  local pybin
+  pybin=$(_find_python_with_tomllib) \
+    || error "No python3 with tomllib/tomli found. Install python >=3.11 or: pip3 install tomli"
+
+  local parsed
+  parsed=$("$pybin" - "${toml_file}" <<'PYEOF'
+import sys, json
+
+# Try tomllib (stdlib ≥3.11), fall back to tomli (third-party)
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        print("ERROR: tomllib/tomli not available", file=sys.stderr)
+        sys.exit(1)
+
+toml_path = sys.argv[1]
+with open(toml_path, "rb") as fh:
+    data = tomllib.load(fh)
+
+project  = data.get("project", {})
+ports    = data.get("ports", {})
+stacks   = data.get("stacks", [])
+services = data.get("services", [])
+
+out = {
+    "project_name":   project.get("name", ""),
+    "project_root":   project.get("root", ""),
+    "port_proxy":     str(ports.get("proxy", "")),
+    "port_admin":     str(ports.get("admin", "")),
+    "port_db":        str(ports.get("db", "")),
+    "stacks_json":    json.dumps([
+        {"type": s.get("type",""), "dockerfile": s.get("dockerfile","")}
+        for s in stacks
+    ]),
+    "services_json":  json.dumps([
+        {
+            "name":  sv.get("name",""),
+            "dir":   sv.get("dir",""),
+            "stack": sv.get("stack",""),
+            "port":  str(sv.get("port","")),
+            "build": sv.get("build",""),
+            "run":   sv.get("run",""),
+        }
+        for sv in services
+    ]),
+}
+print(json.dumps(out))
+PYEOF
+  ) || error "Failed to parse .fleet/fleet.toml — check syntax and python3 installation"
+
+  # Extract fields from the JSON blob using python itself (no jq dependency)
+  local _get
+  _get() { "$pybin" -c "import sys,json; d=json.loads(sys.argv[1]); print(d.get(sys.argv[2],''))" "$parsed" "$1"; }
+
+  FLEET_PROJECT_NAME=$(_get project_name)
+  FLEET_PROJECT_ROOT=$(_get project_root)
+  FLEET_PORT_PROXY=$(_get port_proxy)
+  FLEET_PORT_ADMIN=$(_get port_admin)
+  FLEET_PORT_DB=$(_get port_db)
+  FLEET_STACKS_JSON=$(_get stacks_json)
+  FLEET_SERVICES_JSON=$(_get services_json)
+
+  export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT \
+         FLEET_PORT_PROXY FLEET_PORT_ADMIN FLEET_PORT_DB \
+         FLEET_STACKS_JSON FLEET_SERVICES_JSON
+}
+
+# fleet_services_json — print FLEET_SERVICES_JSON
+fleet_services_json() {
+  printf '%s\n' "${FLEET_SERVICES_JSON}"
+}
+
+# fleet_stack_for_service <svc_name> — print the stack type for a named service
+fleet_stack_for_service() {
+  local svc_name="${1:-}"
+  [ -n "$svc_name" ] || error "fleet_stack_for_service: service name required"
+  local pybin
+  pybin=$(_find_python_with_tomllib) \
+    || error "No python3 with tomllib/tomli found"
+  "$pybin" -c "
+import sys, json
+services = json.loads(sys.argv[1])
+name     = sys.argv[2]
+for s in services:
+    if s.get('name') == name:
+        print(s.get('stack', ''))
+        sys.exit(0)
+sys.exit(1)
+" "${FLEET_SERVICES_JSON}" "$svc_name" \
+    || error "fleet_stack_for_service: no service named '${svc_name}' in FLEET_SERVICES_JSON"
+}
+
+# fleet_project_root — print FLEET_PROJECT_ROOT
+fleet_project_root() {
+  printf '%s\n' "${FLEET_PROJECT_ROOT}"
+}
+
+export -f load_fleet_toml fleet_services_json fleet_stack_for_service fleet_project_root
+
+# ─── Config loaders (legacy shims) ───────────────────────────────────────────
+# These kept for backward compatibility while cmd-*.sh scripts are migrated.
+# They call load_fleet_toml and map the new variables into the old names.
+
+# load_qa_config — DEPRECATED shim; calls load_fleet_toml and sets APP_ROOT.
+load_qa_config() {
+  load_fleet_toml
+  APP_ROOT="${FLEET_PROJECT_ROOT}"
+  export APP_ROOT
+  [ -d "${APP_ROOT:-}" ] || error "project.root '${APP_ROOT:-}' does not exist (check .fleet/fleet.toml)"
+}
+
+# load_fleet_conf — DEPRECATED shim; calls load_fleet_toml and back-fills legacy vars.
+# Must call load_qa_config (or load_fleet_toml) first, OR can be called standalone.
+load_fleet_conf() {
+  # Ensure TOML is loaded — idempotent if already exported
+  if [ -z "${FLEET_PROJECT_NAME:-}" ]; then
+    load_fleet_toml
+  fi
+
+  APP_ROOT="${FLEET_PROJECT_ROOT}"
+  PROJECT_NAME="${FLEET_PROJECT_NAME}"
+  PROXY_PORT="${FLEET_PORT_PROXY}"
+  ADMIN_PORT="${FLEET_PORT_ADMIN}"
+  DB_PORT="${FLEET_PORT_DB}"
+
+  # Back-fill frontend/backend vars from services named "frontend"/"backend"
+  local pybin
+  pybin=$(_find_python_with_tomllib) \
+    || error "No python3 with tomllib/tomli found"
+
+  local _svc_field
+  _svc_field() {
+    "$pybin" -c "
+import sys, json
+services = json.loads(sys.argv[1])
+svc_name = sys.argv[2]
+field    = sys.argv[3]
+for s in services:
+    if s.get('name') == svc_name:
+        print(s.get(field, ''))
+        sys.exit(0)
+print('')
+" "${FLEET_SERVICES_JSON}" "$1" "$2"
+  }
+
+  FRONTEND_DIR=$(_svc_field frontend dir)
+  FRONTEND_PORT=$(_svc_field frontend port)
+  BACKEND_DIR=$(_svc_field backend dir)
+  BACKEND_PORT=$(_svc_field backend port)
+  BACKEND_BUILD_CMD=$(_svc_field backend build)
+  BACKEND_RUN_CMD=$(_svc_field backend run)
+
+  # Apply legacy defaults for optional fields
   FRONTEND_OUT_DIR="${FRONTEND_OUT_DIR:-out}"
-  BACKEND_DIR="${BACKEND_DIR:-}"
-  BACKEND_BUILD_CMD="${BACKEND_BUILD_CMD:-}"
   BACKEND_RUN_CMD="${BACKEND_RUN_CMD:-java -jar /home/developer/backend.jar}"
   BACKEND_PORT="${BACKEND_PORT:-8081}"
+
+  # Legacy fields sourced from fleet.conf that have no TOML equivalent —
+  # keep empty unless already set in environment.
   DB_NAME="${DB_NAME:-}"
   DB_USER="${DB_USER:-}"
   DB_PASSWORD="${DB_PASSWORD:-}"
   JWT_SECRET="${JWT_SECRET:-}"
   JWT_ISSUER="${JWT_ISSUER:-myapp}"
 
-  export FRONTEND_DIR FRONTEND_OUT_DIR BACKEND_DIR BACKEND_BUILD_CMD BACKEND_RUN_CMD \
-         BACKEND_PORT DB_NAME DB_USER DB_PASSWORD JWT_SECRET JWT_ISSUER PROJECT_NAME
+  export APP_ROOT PROJECT_NAME PROXY_PORT ADMIN_PORT DB_PORT \
+         FRONTEND_DIR FRONTEND_OUT_DIR FRONTEND_PORT \
+         BACKEND_DIR BACKEND_BUILD_CMD BACKEND_RUN_CMD BACKEND_PORT \
+         DB_NAME DB_USER DB_PASSWORD JWT_SECRET JWT_ISSUER
 }
+
+export -f load_qa_config load_fleet_conf
 
 # ─── Multi-repo detection ─────────────────────────────────────────────────────
 # is_multirepo — returns 0 (true) if FRONTEND_DIR and BACKEND_DIR have different
