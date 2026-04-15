@@ -9,7 +9,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/_qa/': 'http://localhost:4000',
+      '/_fleet/': 'http://localhost:4000',
     },
   },
 });
