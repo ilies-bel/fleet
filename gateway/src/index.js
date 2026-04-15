@@ -19,7 +19,7 @@ const ADMIN_PORT = Number(process.env.ADMIN_PORT) || 4000;
 
 const proxyApp = express();
 proxyApp.use(createFeatureProxy());
-proxyApp.listen(PROXY_PORT, '0.0.0.0', () => console.log(`[QA Gateway] proxy on :${PROXY_PORT}`));
+proxyApp.listen(PROXY_PORT, '0.0.0.0', () => console.log(`[fleet] proxy on :${PROXY_PORT}`));
 
 // ── admin port (ADMIN_PORT, default 4000) — admin API + dashboard ────────────
 const adminApp = express();
@@ -27,7 +27,7 @@ adminApp.use(cors());
 adminApp.use(express.json());
 
 // Management API (features list, health, activate, terminal, status)
-adminApp.use('/_qa/api', apiRouter);
+adminApp.use('/_fleet/api', apiRouter);
 
 // Feature registration + OAuth relay (called by scripts and OAuth providers)
 adminApp.use('/', authRouter);
@@ -46,4 +46,4 @@ adminApp.get('*', (_req, res) => {
   });
 });
 
-adminApp.listen(ADMIN_PORT, '0.0.0.0', () => console.log(`[QA Gateway] admin on :${ADMIN_PORT}`));
+adminApp.listen(ADMIN_PORT, '0.0.0.0', () => console.log(`[fleet] admin on :${ADMIN_PORT}`));

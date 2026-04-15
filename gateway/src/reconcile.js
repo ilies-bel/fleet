@@ -1,17 +1,17 @@
 import { listRunningContainers, inspectContainer, startContainer } from './docker.js';
 import { register, isRegistered } from './registry.js';
 
-const GATEWAY_NAME = 'qa-gateway-container';
+const GATEWAY_NAME = 'fleet-gateway';
 
 /**
- * At startup, scan Docker for all qa-* containers (running or stopped),
+ * At startup, scan Docker for all fleet-* containers (running or stopped),
  * start any that are stopped, and register them.
  * Recovers NAME and BRANCH from container env, WORKTREE_PATH from the /app bind mount.
  */
 export async function reconcileFromDocker() {
   let containers;
   try {
-    containers = await listRunningContainers('qa-', { all: true });
+    containers = await listRunningContainers('fleet-', { all: true });
   } catch (err) {
     console.warn('[reconcile] Docker unavailable, skipping:', err.message);
     return;
@@ -20,7 +20,7 @@ export async function reconcileFromDocker() {
   const qaContainers = containers.filter((c) =>
     c.Names.some((n) => {
       const bare = n.replace(/^\//, '');
-      return /^qa-[a-z0-9-]+$/.test(bare) && bare !== GATEWAY_NAME;
+      return /^fleet-[a-z0-9-]+$/.test(bare) && bare !== GATEWAY_NAME;
     })
   );
 
@@ -32,7 +32,7 @@ export async function reconcileFromDocker() {
   let registered = 0;
   for (const container of qaContainers) {
     const containerName = container.Names[0].replace(/^\//, '');
-    const name = containerName.replace(/^qa-/, '');
+    const name = containerName.replace(/^fleet-/, '');
 
     if (isRegistered(name)) continue;
 
