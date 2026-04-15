@@ -33,7 +33,7 @@ function dockerRequest({ method, path, body }) {
 
     req.on('error', (err) => {
       if (err.code === 'ENOENT' || err.code === 'ECONNREFUSED') {
-        reject(new DockerSocketError('Docker socket not available — restart the gateway with qa-init.sh'));
+        reject(new DockerSocketError('Docker socket not available — restart the gateway with fleet init'));
       } else {
         reject(err);
       }
@@ -113,7 +113,7 @@ export async function dockerExec(containerName, cmd) {
 
 /**
  * List containers whose name matches the given prefix filter.
- * @param {string} nameFilter  e.g. 'qa-'
+ * @param {string} nameFilter  e.g. 'fleet-'
  * @param {{ all?: boolean }} opts  all=true includes stopped containers
  * @returns {Promise<object[]>}  raw Docker container list entries
  */

@@ -12,13 +12,13 @@ export function createFeatureProxy() {
   const proxy = createProxyMiddleware({
     router: () => {
       const name = getActiveFeature();
-      return name ? `http://qa-${name}:3000` : null;
+      return name ? `http://fleet-${name}:3000` : null;
     },
     changeOrigin: true,
     on: {
       proxyReq: (proxyReq) => {
         const name = getActiveFeature();
-        if (name) proxyReq.setHeader('X-QA-Feature', name);
+        if (name) proxyReq.setHeader('X-Fleet-Feature', name);
       },
       proxyRes: (proxyRes) => {
         // Prevent browser from caching responses across feature switches

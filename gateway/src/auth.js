@@ -5,7 +5,7 @@ const router = Router();
 
 /**
  * POST /register-feature
- * Called by qa-add.sh to register a new feature container.
+ * Called by fleet add to register a new feature container.
  * Body: { name, branch }
  */
 router.post('/register-feature', (req, res) => {
@@ -22,7 +22,7 @@ router.post('/register-feature', (req, res) => {
 
 /**
  * DELETE /register-feature/:name
- * Called by qa-teardown.sh to deregister a feature container.
+ * Called by fleet teardown to deregister a feature container.
  */
 router.delete('/register-feature/:name', (req, res) => {
   const { name } = req.params;

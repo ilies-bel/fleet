@@ -6,7 +6,7 @@ const router = Router();
 const startedAt = Date.now();
 
 /**
- * GET /_qa/api/features
+ * GET /_fleet/api/features
  * Returns all registered features with isActive flag.
  */
 router.get('/features', (_req, res) => {
@@ -14,7 +14,7 @@ router.get('/features', (_req, res) => {
 });
 
 /**
- * GET /_qa/api/features/:name/health
+ * GET /_fleet/api/features/:name/health
  * HEAD the container's nginx to check if the full stack is responding.
  */
 router.get('/features/:name/health', async (req, res) => {
@@ -28,7 +28,7 @@ router.get('/features/:name/health', async (req, res) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
 
-    const response = await fetch(`http://qa-${name}:${process.env.PROXY_PORT || 3000}/`, {
+    const response = await fetch(`http://fleet-${name}:${process.env.PROXY_PORT || 3000}/`, {
       method: 'HEAD',
       signal: controller.signal,
     });
@@ -41,7 +41,7 @@ router.get('/features/:name/health', async (req, res) => {
 });
 
 /**
- * POST /_qa/api/features/:name/activate
+ * POST /_fleet/api/features/:name/activate
  * Set the active feature for the transparent proxy (PROXY_PORT).
  */
 router.post('/features/:name/activate', (req, res) => {
@@ -58,7 +58,7 @@ router.post('/features/:name/activate', (req, res) => {
 });
 
 /**
- * DELETE /_qa/api/features/:name
+ * DELETE /_fleet/api/features/:name
  * Force-stop and remove the container, then unregister from the registry.
  */
 router.delete('/features/:name', async (req, res) => {
@@ -67,7 +67,7 @@ router.delete('/features/:name', async (req, res) => {
     return res.status(404).json({ error: 'Feature not registered' });
   }
   try {
-    await removeContainer(`qa-${name}`);
+    await removeContainer(`fleet-${name}`);
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
     if (err instanceof DockerContainerError && err.status !== 404) {
@@ -80,7 +80,7 @@ router.delete('/features/:name', async (req, res) => {
 });
 
 /**
- * POST /_qa/api/features/:name/open-terminal
+ * POST /_fleet/api/features/:name/open-terminal
  * Opens an iTerm2 window on the Mac host in the feature's local worktree.
  * The gateway is Linux so osascript is forwarded to the host runner at
  * host.docker.internal:4001/run-osascript.
@@ -95,7 +95,7 @@ router.post('/features/:name/open-terminal', async (req, res) => {
 
   const { worktreePath } = feature;
   if (!worktreePath) {
-    return res.status(400).json({ error: 'No worktree path recorded for this feature — re-register with qa-add.sh' });
+    return res.status(400).json({ error: 'No worktree path recorded for this feature — re-register with fleet add' });
   }
 
   const script = [
@@ -122,14 +122,14 @@ router.post('/features/:name/open-terminal', async (req, res) => {
 });
 
 /**
- * POST /_qa/api/features/:name/stop
+ * POST /_fleet/api/features/:name/stop
  * Stop the container without removing it from the registry.
  */
 router.post('/features/:name/stop', async (req, res) => {
   const { name } = req.params;
   if (!getFeature(name)) return res.status(404).json({ error: 'Feature not registered' });
   try {
-    await stopContainer(`qa-${name}`);
+    await stopContainer(`fleet-${name}`);
     res.json({ ok: true });
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
@@ -139,14 +139,14 @@ router.post('/features/:name/stop', async (req, res) => {
 });
 
 /**
- * POST /_qa/api/features/:name/start
+ * POST /_fleet/api/features/:name/start
  * Start a previously stopped container.
  */
 router.post('/features/:name/start', async (req, res) => {
   const { name } = req.params;
   if (!getFeature(name)) return res.status(404).json({ error: 'Feature not registered' });
   try {
-    await startContainer(`qa-${name}`);
+    await startContainer(`fleet-${name}`);
     res.json({ ok: true });
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
@@ -156,14 +156,14 @@ router.post('/features/:name/start', async (req, res) => {
 });
 
 /**
- * GET /_qa/api/features/:name/stats
+ * GET /_fleet/api/features/:name/stats
  * Returns a one-shot resource snapshot: CPU %, memory, network I/O.
  */
 router.get('/features/:name/stats', async (req, res) => {
   const { name } = req.params;
   if (!getFeature(name)) return res.status(404).json({ error: 'Feature not registered' });
   try {
-    const stats = await getContainerStats(`qa-${name}`);
+    const stats = await getContainerStats(`fleet-${name}`);
     res.json(stats);
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
@@ -176,7 +176,7 @@ router.get('/features/:name/stats', async (req, res) => {
 });
 
 /**
- * GET /_qa/api/features/:name/logs?source=backend&tail=200&since=0
+ * GET /_fleet/api/features/:name/logs?source=backend&tail=200&since=0
  * Stream the last N lines of a supervisor log file or combined Docker logs.
  * source: backend | nginx | postgresql | supervisord | all
  */
@@ -192,7 +192,7 @@ router.get('/features/:name/logs', async (req, res) => {
   const source = req.query.source || 'backend';
   const tail = Math.min(Math.max(parseInt(req.query.tail) || 200, 1), 2000);
   const since = Math.max(parseInt(req.query.since) || 0, 0);
-  const containerName = `qa-${name}`;
+  const containerName = `fleet-${name}`;
 
   try {
     let lines;
@@ -220,7 +220,7 @@ router.get('/features/:name/logs', async (req, res) => {
 });
 
 /**
- * GET /_qa/api/status
+ * GET /_fleet/api/status
  */
 router.get('/status', (_req, res) => {
   res.json({
@@ -232,7 +232,7 @@ router.get('/status', (_req, res) => {
 });
 
 /**
- * POST /_qa/api/features/:name/sync
+ * POST /_fleet/api/features/:name/sync
  * Pull latest code, rebuild backend, restart via supervisord.
  * Accepts ?regenerateSources=true to also regenerate jOOQ DSL after Liquibase migrations.
  * Returns immediately (202) — the sync runs inside the container in the background.
@@ -244,7 +244,7 @@ router.post('/features/:name/sync', async (req, res) => {
   }
 
   const regenerateSources = req.query.regenerateSources === 'true';
-  const containerName = `qa-${name}`;
+  const containerName = `fleet-${name}`;
 
   res.json({ ok: true, message: 'Sync started — check logs for progress' });
 
@@ -291,7 +291,7 @@ async function runSync(containerName, regenerateSources) {
 }
 
 /**
- * PATCH /_qa/api/features/:name/status
+ * PATCH /_fleet/api/features/:name/status
  * Update the status of a feature (e.g., from not_started to running).
  */
 router.patch('/features/:name/status', (req, res) => {
