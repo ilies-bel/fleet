@@ -26,6 +26,35 @@ localhost:3000            ← transparent proxy → active feature container
 - bash
 - Node 20+ (only for local dashboard development)
 
+## Install via npx
+
+Install the `fleet` CLI and Claude Code assets into any project with a single command:
+
+```bash
+# Install Claude Code assets globally (~/.claude — available in all projects)
+npx @ilies-bel/fleet install-claude --global
+
+# Install locally (./.claude — scoped to current project only)
+npx @ilies-bel/fleet install-claude --local
+
+# Overwrite existing files
+npx @ilies-bel/fleet install-claude --global --force
+```
+
+What gets installed:
+
+| Asset | Destination |
+|-------|-------------|
+| `/fleet:init` slash command | `<target>/commands/fleet/init.md` |
+| All 10 agent definitions | `<target>/agents/*.md` |
+| All skills (react-best-practices, subagents-discipline) | `<target>/skills/` |
+
+After installing, open Claude Code in your project and run `/fleet:init` to start the guided setup.
+
+If neither `--global` nor `--local` is passed, the installer prompts interactively.
+
+The `fleet` bash CLI itself is available as a bin after `npm install -g @ilies-bel/fleet` — or use `npx @ilies-bel/fleet <command>` to run without installing globally.
+
 ## The `fleet` CLI
 
 All operations go through a single `fleet` dispatcher. `fleet init` symlinks it to `/usr/local/bin/fleet` so it is available anywhere.
