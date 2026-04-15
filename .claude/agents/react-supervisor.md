@@ -1,6 +1,6 @@
 ---
 name: react-supervisor
-description: React frontend supervisor for the qa-fleet dashboard. Use when implementing or modifying anything under dashboard/src/ — components, routing, API calls, or UI state.
+description: React frontend supervisor for the fleet dashboard. Use when implementing or modifying anything under dashboard/src/ — components, routing, API calls, or UI state.
 model: sonnet
 tools: *
 ---

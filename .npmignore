@@ -8,7 +8,7 @@ docs/
 node_modules/
 
 # Project config (only .example ships)
-qa-fleet.conf
+fleet.conf
 
 # CI / editor / OS noise
 .DS_Store

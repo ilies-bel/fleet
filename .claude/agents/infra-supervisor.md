@@ -1,6 +1,6 @@
 ---
 name: infra-supervisor
-description: Infrastructure supervisor for qa-fleet. Use when modifying Dockerfiles, docker-compose, nginx/supervisord config, bash scripts in cli/ or scripts/, or any container/build/CI concerns.
+description: Infrastructure supervisor for fleet. Use when modifying Dockerfiles, docker-compose, nginx/supervisord config, bash scripts in cli/ or scripts/, or any container/build/CI concerns.
 model: sonnet
 tools: *
 ---

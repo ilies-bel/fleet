@@ -1,9 +1,9 @@
-# qa-fleet Initialisation Test
+# Fleet Initialisation Test
 
 End-to-end smoke test for `fleet init` that also provisions a full multi-agent
 orchestration layer (The Claude Protocol) on top of the initialised project.
 
-Goal: after running these steps, `test/project/` must be a working qa-fleet
+Goal: after running these steps, `test/project/` must be a working fleet
 environment **and** have supervisors + beads + hooks wired up so an
 orchestrator can immediately dispatch work.
 
@@ -32,7 +32,7 @@ cp -rp test/reference test/project
 Sanity checks:
 
 ```bash
-ls test/project                       # → d2r2-backend/  d2r2-frontend/  qa-fleet.conf
+ls test/project                       # → d2r2-backend/  d2r2-frontend/  fleet.conf
 (cd test/project/d2r2-backend  && git rev-parse --abbrev-ref HEAD)   # → main
 (cd test/project/d2r2-frontend && git rev-parse --abbrev-ref HEAD)   # → main
 ```
@@ -90,9 +90,9 @@ spring-boot-devtools not found → prompt to add   (answer: yes)
 
 Notes:
 
-- `scripts/qa-host-runner.sh` is a no-op stub; init must proceed past it
-- `test/project/qa-fleet.conf` is pre-filled → conf wizard is skipped
-- An idempotent `.qa-shared` block is appended to any untracked `.env` files
+- `scripts/fleet-host-runner.sh` is a no-op stub; init must proceed past it
+- `test/project/fleet.conf` is pre-filled → conf wizard is skipped
+- An idempotent `.fleet-shared` block is appended to any untracked `.env` files
 
 ---
 
@@ -100,12 +100,12 @@ Notes:
 
 ```bash
 cd /Users/ib472e5l/project/perso/fleet/qa-fleet
-docker ps --filter name=qa-fleet          # gateway + nginx containers running
-curl -sf http://localhost:$(grep '^GATEWAY_PORT' test/project/qa-fleet.conf | cut -d= -f2)/health
+docker ps --filter name=fleet          # gateway + nginx containers running
+curl -sf http://localhost:$(grep '^GATEWAY_PORT' test/project/fleet.conf | cut -d= -f2)/health
 ls test/project/Dockerfile.feature-base    # copied from stacks/Dockerfile.spring
 ```
 
-Dashboard should be reachable at the `DASHBOARD_PORT` defined in `qa-fleet.conf`.
+Dashboard should be reachable at the `DASHBOARD_PORT` defined in `fleet.conf`.
 
 ---
 
