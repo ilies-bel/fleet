@@ -1,8 +1,8 @@
-.qa-ports
-.qa/*/
-!.qa/.gitkeep
-.qa-runner.pid
-.qa-config
+.fleet-ports
+.fleet/*/
+!.fleet/.gitkeep
+.fleet-runner.pid
+.fleet-config
 
 # Generated at fleet init time from config/nginx.conf.tmpl
 config/nginx.conf

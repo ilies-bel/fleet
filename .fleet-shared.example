@@ -1,4 +1,4 @@
-# .qa-shared — list non-tracked files to mount read-only into QA containers
+# .fleet-shared — list non-tracked files to mount read-only into fleet containers
 # Paths are relative to your project root (APP_ROOT).
 # Lines starting with # are comments; blank lines are ignored.
 #

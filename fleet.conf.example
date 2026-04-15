@@ -1,12 +1,12 @@
-# ─── QA Fleet — project configuration ────────────────────────────────────────
-# Copy this file to your project root as:  qa-fleet.conf
-# Then run:  ./scripts/qa-init.sh /path/to/your/project feature/my-branch
+# ─── Fleet — project configuration ───────────────────────────────────────────
+# Copy this file to your project root as:  fleet.conf
+# Then run:  ./scripts/fleet-init.sh /path/to/your/project feature/my-branch
 #
-# Alternatively, run qa-init.sh without a qa-fleet.conf present and it will
+# Alternatively, run fleet-init.sh without a fleet.conf present and it will
 # walk you through creating one interactively.
 
 # ── Project identity (optional) ──────────────────────────────────────────────
-# How this project appears in the QA Fleet dashboard when multiple projects
+# How this project appears in the Fleet dashboard when multiple projects
 # share one gateway. Defaults to the APP_ROOT folder name (or its parent if
 # the folder is named "app").
 # PROJECT_NAME="my-project"

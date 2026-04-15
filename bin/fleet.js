@@ -126,7 +126,7 @@ async function runInstaller(installerArgs) {
   // Post-install tip
   console.log('Done! Open Claude Code in your project and run:\n');
   console.log('  /fleet:init\n');
-  console.log('This will walk you through setting up qa-fleet for your project.\n');
+  console.log('This will walk you through setting up fleet for your project.\n');
 }
 
 function parseInstallerFlags(args) {

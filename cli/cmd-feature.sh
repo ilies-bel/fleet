@@ -44,11 +44,11 @@ if [ -z "$BRANCH" ]; then
 fi
 
 # ─── Guard: already exists? ───────────────────────────────────────────────────
-if [ -f "${QA_FLEET_ROOT}/.qa/${NAME}/info" ]; then
+if [ -f "${QA_FLEET_ROOT}/.fleet/${NAME}/info" ]; then
   error "Feature '${NAME}' already exists. Run: fleet rm ${NAME}"
 fi
 
-WORKTREES_DIR="${APP_ROOT}/.qa-worktrees"
+WORKTREES_DIR="${APP_ROOT}/.fleet-worktrees"
 WORKTREE_PATH="${WORKTREES_DIR}/${NAME}"
 
 # ─── Create worktrees ─────────────────────────────────────────────────────────
@@ -68,26 +68,26 @@ done
 
 # ─── Build compose (no docker compose up) ────────────────────────────────────
 info "Generating docker-compose.yml..."
-mkdir -p "${QA_FLEET_ROOT}/.qa/${NAME}"
-COMPOSE_FILE="${QA_FLEET_ROOT}/.qa/${NAME}/docker-compose.yml"
-INFO_FILE="${QA_FLEET_ROOT}/.qa/${NAME}/info"
+mkdir -p "${QA_FLEET_ROOT}/.fleet/${NAME}"
+COMPOSE_FILE="${QA_FLEET_ROOT}/.fleet/${NAME}/docker-compose.yml"
+INFO_FILE="${QA_FLEET_ROOT}/.fleet/${NAME}/info"
 
 BACKEND_VOLUME=""
 BACKEND_VOLUMES_DECL=""
 if [ -n "${BACKEND_DIR:-}" ]; then
-  BACKEND_VOLUME="      - qa-${NAME}-target:/app/${BACKEND_DIR}/target"
-  BACKEND_VOLUMES_DECL="  qa-${NAME}-target:"
+  BACKEND_VOLUME="      - fleet-${NAME}-target:/app/${BACKEND_DIR}/target"
+  BACKEND_VOLUMES_DECL="  fleet-${NAME}-target:"
 fi
 
-# Build EXTRA_MOUNTS from .qa-shared
-SHARED_FILE="${APP_ROOT}/.qa-shared"
+# Build EXTRA_MOUNTS from .fleet-shared
+SHARED_FILE="${APP_ROOT}/.fleet-shared"
 EXTRA_MOUNTS=""
 if [ -f "${SHARED_FILE}" ]; then
   while IFS= read -r path; do
     [ -z "$path" ] && continue; [[ "$path" == \#* ]] && continue
     src="${APP_ROOT}/${path}"
     [ -e "$src" ] && EXTRA_MOUNTS="${EXTRA_MOUNTS}      - ${src}:/app/${path}:ro\n" \
-      || warn "  .qa-shared: '$path' not found, skipping"
+      || warn "  .fleet-shared: '$path' not found, skipping"
   done < "${SHARED_FILE}"
 fi
 
@@ -100,10 +100,10 @@ fi
 cat > "${COMPOSE_FILE}" <<COMPOSE
 services:
   ${NAME}:
-    image: qa-feature-base
-    container_name: qa-${NAME}
+    image: fleet-feature-base
+    container_name: fleet-${NAME}
     networks:
-      - qa-net
+      - fleet-net
     environment:
       - APP_NAME=${NAME}
       - BRANCH=${BRANCH}
@@ -122,15 +122,15 @@ services:
     volumes:
       - ${WORKTREE_PATH}:/app
       - ${APP_ROOT}/${FRONTEND_DIR}/node_modules:/app-nm-seed:ro
-      - qa-${NAME}-nm:/app/${FRONTEND_DIR}/node_modules
+      - fleet-${NAME}-nm:/app/${FRONTEND_DIR}/node_modules
 ${BACKEND_VOLUME}
 $(echo -e "${EXTRA_MOUNTS}")
 volumes:
-  qa-${NAME}-nm:
+  fleet-${NAME}-nm:
 ${BACKEND_VOLUMES_DECL}
 
 networks:
-  qa-net:
+  fleet-net:
     external: true
 COMPOSE
 

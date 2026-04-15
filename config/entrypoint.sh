@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# ── Config injected by docker-compose (sourced from qa-fleet.conf) ────────────
-APP_NAME="${APP_NAME:-qa-feature}"
+# ── Config injected by docker-compose (sourced from fleet.conf) ───────────────
+APP_NAME="${APP_NAME:-fleet-feature}"
 BRANCH="${BRANCH:?BRANCH env var is required}"
 FRONTEND_DIR="${FRONTEND_DIR:?FRONTEND_DIR env var is required}"
 FRONTEND_OUT_DIR="${FRONTEND_OUT_DIR:-out}"
@@ -19,42 +19,42 @@ PROXY_PORT="${PROXY_PORT:-3000}"
 JWT_SECRET="${JWT_SECRET:-}"
 JWT_ISSUER="${JWT_ISSUER:-myapp}"
 
-# Source backend .env overrides if mounted via .qa-shared.
+# Source backend .env overrides if mounted via .fleet-shared.
 # .env is allowed to override application-level config (LDAP, JWT, business config),
 # but DB_HOST and DB_PORT must always point at container-internal postgres — otherwise
 # the host's dev-oriented values (e.g. localhost:5433) clobber the truth (127.0.0.1:5432)
 # and the backend never connects.
 if [ -n "${BACKEND_DIR}" ] && [ -f "/app/${BACKEND_DIR}/.env" ]; then
-  echo "[qa] Loading backend .env overrides from /app/${BACKEND_DIR}/.env..."
-  _qa_orig_db_host="${DB_HOST:-}"
-  _qa_orig_db_port="${DB_PORT:-}"
+  echo "[fleet] Loading backend .env overrides from /app/${BACKEND_DIR}/.env..."
+  _fleet_orig_db_host="${DB_HOST:-}"
+  _fleet_orig_db_port="${DB_PORT:-}"
   set -a
   # shellcheck source=/dev/null
   source "/app/${BACKEND_DIR}/.env"
   set +a
   if [ "${DB_HOST:-}" != "127.0.0.1" ] || [ "${DB_PORT:-}" != "5432" ]; then
-    echo "[qa] .env tried to set DB_HOST=${DB_HOST:-unset} DB_PORT=${DB_PORT:-unset} — forcing container-internal 127.0.0.1:5432"
+    echo "[fleet] .env tried to set DB_HOST=${DB_HOST:-unset} DB_PORT=${DB_PORT:-unset} — forcing container-internal 127.0.0.1:5432"
   fi
   DB_HOST=127.0.0.1
   DB_PORT=5432
   export DB_HOST DB_PORT
-  unset _qa_orig_db_host _qa_orig_db_port
+  unset _fleet_orig_db_host _fleet_orig_db_port
 fi
 
 PG_DATA="/var/lib/postgresql/16/main"
-SENTINEL="/tmp/.qa-built"
+SENTINEL="/tmp/.fleet-built"
 
-echo "[qa] ============================================================"
-echo "[qa] Feature:  ${APP_NAME}  |  Branch: ${BRANCH}"
-echo "[qa] Frontend: ${FRONTEND_DIR} (out: ${FRONTEND_OUT_DIR})"
-echo "[qa] Backend:  ${BACKEND_DIR:-none}"
-echo "[qa] Database: ${DB_NAME:-disabled}"
-echo "[qa] ============================================================"
+echo "[fleet] ============================================================"
+echo "[fleet] Feature:  ${APP_NAME}  |  Branch: ${BRANCH}"
+echo "[fleet] Frontend: ${FRONTEND_DIR} (out: ${FRONTEND_OUT_DIR})"
+echo "[fleet] Backend:  ${BACKEND_DIR:-none}"
+echo "[fleet] Database: ${DB_NAME:-disabled}"
+echo "[fleet] ============================================================"
 
 if [ ! -f "${SENTINEL}" ]; then
   # ── 1. Seed node_modules from host copy ──────────────────────────────────────
   if [ ! -d "/app/${FRONTEND_DIR}/node_modules/.bin" ]; then
-    echo "[qa] Seeding node_modules from host copy..."
+    echo "[fleet] Seeding node_modules from host copy..."
     cp -a /app-nm-seed/. "/app/${FRONTEND_DIR}/node_modules/"
   fi
 
@@ -62,7 +62,7 @@ if [ ! -f "${SENTINEL}" ]; then
   # Only relevant for Next.js / Vite projects whose node_modules were installed on macOS.
   # fetch_pkg is a no-op when the darwin source package is absent, so it is safe to run
   # for any npm-based project.
-  echo "[qa] Patching platform-specific npm binaries for Linux arm64..."
+  echo "[fleet] Patching platform-specific npm binaries for Linux arm64..."
   cd "/app/${FRONTEND_DIR}"
   NPM_REGISTRY="https://registry.npmjs.org"
   pkg_ver() {
@@ -74,11 +74,11 @@ if [ ! -f "${SENTINEL}" ]; then
     local dir="node_modules/${pkg}"
     [ -d "$dir" ] && return 0          # already present
     local bare="${pkg##*/}"
-    echo "[qa] Fetching ${pkg}@${ver}..."
+    echo "[fleet] Fetching ${pkg}@${ver}..."
     mkdir -p "$dir"
     curl -fsSL "${NPM_REGISTRY}/${pkg}/-/${bare}-${ver}.tgz" \
       | tar -xz -C "$dir" --strip-components=1 \
-      || { echo "[qa] WARN: failed to fetch ${pkg}@${ver}"; rm -rf "$dir"; }
+      || { echo "[fleet] WARN: failed to fetch ${pkg}@${ver}"; rm -rf "$dir"; }
   }
   fetch_pkg "@next/swc-linux-arm64-gnu"              "$(pkg_ver '@next/swc-darwin-arm64')"
   fetch_pkg "lightningcss-linux-arm64-gnu"            "$(pkg_ver 'lightningcss-darwin-arm64')"
@@ -89,11 +89,11 @@ if [ ! -f "${SENTINEL}" ]; then
   fetch_pkg "@unrs/resolver-binding-linux-arm64-gnu"  "$(pkg_ver '@unrs/resolver-binding-darwin-arm64')"
 
   # ── 3. Build frontend ─────────────────────────────────────────────────────────
-  echo "[qa] Building frontend (npm run build)..."
+  echo "[fleet] Building frontend (npm run build)..."
   cd "/app/${FRONTEND_DIR}"
   NEXT_TELEMETRY_DISABLED=1 \
-  NEXT_PUBLIC_URL_BACK="__QA_BACKEND_URL__" \
-  NEXT_PUBLIC_APP_URL="__QA_APP_URL__" \
+  NEXT_PUBLIC_URL_BACK="__FLEET_BACKEND_URL__" \
+  NEXT_PUBLIC_APP_URL="__FLEET_APP_URL__" \
   NODE_OPTIONS="--max-old-space-size=4096" \
     npm run build
   cp -a "${FRONTEND_OUT_DIR}/." /var/www/html/
@@ -101,15 +101,15 @@ if [ ! -f "${SENTINEL}" ]; then
   # ── 4. Patch frontend bundle URLs ────────────────────────────────────────────
   # Replaces placeholder strings injected at build time with runtime values.
   # Projects that don't use these placeholders are unaffected (sed finds no matches).
-  echo "[qa] Patching frontend bundle URLs..."
+  echo "[fleet] Patching frontend bundle URLs..."
   find /var/www/html -name "*.js" -exec sed -i \
-    -e "s|__QA_BACKEND_URL__|/backend|g" \
-    -e "s|__QA_APP_URL__|http://localhost:${PROXY_PORT}|g" \
+    -e "s|__FLEET_BACKEND_URL__|/backend|g" \
+    -e "s|__FLEET_APP_URL__|http://localhost:${PROXY_PORT}|g" \
     {} \;
 
   # ── 5. Build backend (if configured) ─────────────────────────────────────────
   if [ -n "${BACKEND_DIR}" ] && [ -n "${BACKEND_BUILD_CMD}" ]; then
-    echo "[qa] Building backend (${BACKEND_BUILD_CMD})..."
+    echo "[fleet] Building backend (${BACKEND_BUILD_CMD})..."
     cd "/app/${BACKEND_DIR}"
     eval "${BACKEND_BUILD_CMD}"
     # Copy JAR to a stable path if the build produced one (Spring Boot convention).
@@ -119,14 +119,14 @@ if [ ! -f "${SENTINEL}" ]; then
   fi
 
   touch "${SENTINEL}"
-  echo "[qa] Build complete."
+  echo "[fleet] Build complete."
 else
-  echo "[qa] Sentinel found — skipping build (container restart)."
+  echo "[fleet] Sentinel found — skipping build (container restart)."
 fi
 
 # ── 6. Initialise PostgreSQL (if DB_NAME is configured) ──────────────────────
 if [ -n "${DB_NAME}" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
-  echo "[qa] First start — initialising PostgreSQL..."
+  echo "[fleet] First start — initialising PostgreSQL..."
 
   su -s /bin/bash postgres -c \
     "/usr/lib/postgresql/16/bin/initdb -D ${PG_DATA} -E UTF8 --locale=C --auth=trust"
@@ -147,13 +147,13 @@ if [ -n "${DB_NAME}" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   su -s /bin/bash postgres -c \
     "/usr/lib/postgresql/16/bin/pg_ctl stop -D ${PG_DATA} -w"
 
-  echo "[qa] PostgreSQL initialised."
+  echo "[fleet] PostgreSQL initialised."
 fi
 
 # ── 7. Generate supervisord.conf and start all services ───────────────────────
-echo "[qa] Generating supervisord config..."
+echo "[fleet] Generating supervisord config..."
 
-SUPERVISORD_CONF="/etc/supervisor/conf.d/qa.conf"
+SUPERVISORD_CONF="/etc/supervisor/conf.d/fleet.conf"
 
 cat > "${SUPERVISORD_CONF}" <<SUPEREOF
 [supervisord]
@@ -226,5 +226,5 @@ stdout_logfile=/var/log/supervisor/nginx.log
 stderr_logfile=/var/log/supervisor/nginx.log
 SUPEREOF
 
-echo "[qa] Starting supervisord (services: postgresql=${DB_NAME:-off}, backend=${BACKEND_DIR:-off}, nginx=on)..."
+echo "[fleet] Starting supervisord (services: postgresql=${DB_NAME:-off}, backend=${BACKEND_DIR:-off}, nginx=on)..."
 exec /usr/bin/supervisord -n -c "${SUPERVISORD_CONF}"
