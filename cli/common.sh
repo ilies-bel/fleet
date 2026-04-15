@@ -34,28 +34,26 @@ export GATEWAY_URL
 
 # ─── Config loaders ───────────────────────────────────────────────────────────
 
-# load_qa_config — sources .qa-config, exports APP_ROOT
+# load_qa_config — sources .fleet-config, exports APP_ROOT
 # Errors if missing or APP_ROOT doesn't exist.
 load_qa_config() {
-  local config_file="${FLEET_ROOT}/.qa-config"
-  [ -f "${config_file}" ] || error ".qa-config not found. Run: fleet init <app-root> <branch>"
+  local config_file="${FLEET_ROOT}/.fleet-config"
+  [ -f "${config_file}" ] || error ".fleet-config not found. Run: fleet init <app-root> <branch>"
   # shellcheck source=/dev/null
   source "${config_file}"
-  [ -d "${APP_ROOT:-}" ] || error "APP_ROOT '${APP_ROOT:-}' does not exist (check .qa-config)"
-  # Also expose QA_FLEET_ROOT as alias for FLEET_ROOT for legacy compatibility
-  QA_FLEET_ROOT="${FLEET_ROOT}"
-  export APP_ROOT QA_FLEET_ROOT
+  [ -d "${APP_ROOT:-}" ] || error "APP_ROOT '${APP_ROOT:-}' does not exist (check .fleet-config)"
+  export APP_ROOT
 }
 
-# load_fleet_conf — sources $APP_ROOT/qa-fleet.conf, applies all defaults
+# load_fleet_conf — sources $APP_ROOT/fleet.conf, applies all defaults
 # Must call load_qa_config first.
 load_fleet_conf() {
-  local fleet_conf="${APP_ROOT}/qa-fleet.conf"
-  [ -f "${fleet_conf}" ] || error "qa-fleet.conf not found in ${APP_ROOT}. Run: fleet init first."
+  local fleet_conf="${APP_ROOT}/fleet.conf"
+  [ -f "${fleet_conf}" ] || error "fleet.conf not found in ${APP_ROOT}. Run: fleet init first."
   # shellcheck source=/dev/null
   source "${fleet_conf}"
 
-  [ -n "${FRONTEND_DIR:-}" ] || error "FRONTEND_DIR is not set in qa-fleet.conf"
+  [ -n "${FRONTEND_DIR:-}" ] || error "FRONTEND_DIR is not set in fleet.conf"
 
   # Derive project name from APP_ROOT if not set
   if [ -z "${PROJECT_NAME:-}" ]; then
@@ -122,7 +120,7 @@ gateway_delete() {
 
 # ─── Stack Dockerfile templating ─────────────────────────────────────────────
 # apply_stack_template SRC DEST
-# Copy a stack Dockerfile template, substituting whitelisted qa-fleet.conf vars.
+# Copy a stack Dockerfile template, substituting whitelisted fleet.conf vars.
 # The explicit whitelist is critical: a bare `envsubst` would eat ${PATH},
 # ${HOME}, etc. in RUN steps. Only the listed vars are substituted; everything
 # else passes through verbatim.

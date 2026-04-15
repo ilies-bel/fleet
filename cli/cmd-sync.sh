@@ -23,7 +23,7 @@ for arg in "${@:2}"; do
   [ "$arg" = "--regenerate-sources" ] && regen=true
 done
 
-url="${GATEWAY_URL}/_qa/api/features/${name}/sync"
+url="${GATEWAY_URL}/_fleet/api/features/${name}/sync"
 [ "$regen" = true ] && url="${url}?regenerateSources=true"
 
 info "Syncing '${name}'$([ "$regen" = true ] && echo ' (with source regen)' || true)..."

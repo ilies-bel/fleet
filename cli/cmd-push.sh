@@ -20,8 +20,8 @@ fi
 
 load_qa_config
 
-INFO_FILE="${QA_FLEET_ROOT}/.qa/${NAME}/info"
-[ -f "${INFO_FILE}" ] || error "Feature '${NAME}' not found (no .qa/${NAME}/info)"
+INFO_FILE="${QA_FLEET_ROOT}/.fleet/${NAME}/info"
+[ -f "${INFO_FILE}" ] || error "Feature '${NAME}' not found (no .fleet/${NAME}/info)"
 
 # shellcheck source=/dev/null
 source "${INFO_FILE}"

@@ -7,15 +7,15 @@ if [ -t 1 ]; then
 else
   GREEN=''; YELLOW=''; RED=''; RESET=''
 fi
-info()  { echo -e "${GREEN}[qa-teardown]${RESET} $*"; }
-warn()  { echo -e "${YELLOW}[qa-teardown]${RESET} $*"; }
-error() { echo -e "${RED}[qa-teardown] ERROR:${RESET} $*" >&2; exit 1; }
+info()  { echo -e "${GREEN}[fleet-teardown]${RESET} $*"; }
+warn()  { echo -e "${YELLOW}[fleet-teardown]${RESET} $*"; }
+error() { echo -e "${RED}[fleet-teardown] ERROR:${RESET} $*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-QA_FLEET_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+FLEET_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ─── Load APP_ROOT (needed for worktree cleanup) ─────────────────────────────
-CONFIG_FILE="${QA_FLEET_ROOT}/.qa-config"
+CONFIG_FILE="${FLEET_ROOT}/.fleet-config"
 APP_ROOT=""
 if [ -f "${CONFIG_FILE}" ]; then
   # shellcheck source=/dev/null
@@ -25,8 +25,8 @@ fi
 # ─── Remove one feature ──────────────────────────────────────────────────────
 remove_feature() {
   local name="$1"
-  local compose_file="${QA_FLEET_ROOT}/.qa/${name}/docker-compose.yml"
-  local info_file="${QA_FLEET_ROOT}/.qa/${name}/info"
+  local compose_file="${FLEET_ROOT}/.fleet/${name}/docker-compose.yml"
+  local info_file="${FLEET_ROOT}/.fleet/${name}/info"
 
   info "Removing feature: ${name}"
 
@@ -38,7 +38,7 @@ remove_feature() {
   if [ -f "${compose_file}" ]; then
     docker compose -f "${compose_file}" down -v 2>/dev/null || true
   else
-    docker rm -f "qa-${name}" 2>/dev/null || warn "Container 'qa-${name}' not found"
+    docker rm -f "fleet-${name}" 2>/dev/null || warn "Container 'fleet-${name}' not found"
   fi
 
   # Read FRONTEND_DIR and BACKEND_DIR recorded at add time
@@ -55,7 +55,7 @@ remove_feature() {
 
   # Remove worktrees (skipped for direct-mounted features)
   if [ "${feature_direct}" = "false" ] && [ -n "${APP_ROOT:-}" ]; then
-    local worktrees_dir="${APP_ROOT}/.qa-worktrees"
+    local worktrees_dir="${APP_ROOT}/.fleet-worktrees"
 
     # Build list of subdirs to clean up from what was recorded in info
     local subdirs=()
@@ -73,7 +73,7 @@ remove_feature() {
   fi
 
   # Remove build context and metadata
-  rm -rf "${QA_FLEET_ROOT}/.qa/${name}"
+  rm -rf "${FLEET_ROOT}/.fleet/${name}"
 
   info "Removed '${name}'"
 }
@@ -92,7 +92,7 @@ fi
 case "$MODE" in
   --all)
     info "Removing all feature containers..."
-    for dir in "${QA_FLEET_ROOT}/.qa"/*/; do
+    for dir in "${FLEET_ROOT}/.fleet"/*/; do
       local_name=$(basename "$dir")
       [ -d "$dir" ] && [ -f "${dir}info" ] || continue
       remove_feature "$local_name"
@@ -103,33 +103,33 @@ case "$MODE" in
   --nuke)
     info "Nuking everything..."
 
-    for dir in "${QA_FLEET_ROOT}/.qa"/*/; do
+    for dir in "${FLEET_ROOT}/.fleet"/*/; do
       local_name=$(basename "$dir")
       [ -d "$dir" ] && [ -f "${dir}info" ] || continue
       remove_feature "$local_name" 2>/dev/null || true
     done
 
-    docker rm -f qa-gateway-container 2>/dev/null && info "Gateway removed" || warn "Gateway not found"
-    docker rmi qa-gateway 2>/dev/null || true
-    docker rmi qa-feature-base 2>/dev/null || true
-    docker network rm qa-net 2>/dev/null && info "Network 'qa-net' removed" || warn "Network not found"
+    docker rm -f fleet-gateway 2>/dev/null && info "Gateway removed" || warn "Gateway not found"
+    docker rmi fleet-gateway 2>/dev/null || true
+    docker rmi fleet-feature-base 2>/dev/null || true
+    docker network rm fleet-net 2>/dev/null && info "Network 'fleet-net' removed" || warn "Network not found"
 
-    RUNNER_PID_FILE="${QA_FLEET_ROOT}/.qa-runner.pid"
+    RUNNER_PID_FILE="${FLEET_ROOT}/.fleet-runner.pid"
     if [ -f "${RUNNER_PID_FILE}" ]; then
       RUNNER_PID=$(cat "${RUNNER_PID_FILE}")
       kill "${RUNNER_PID}" 2>/dev/null && info "Host runner stopped (PID ${RUNNER_PID})" || warn "Host runner not running"
       rm -f "${RUNNER_PID_FILE}"
     fi
 
-    rm -f "${QA_FLEET_ROOT}/.qa-config"
+    rm -f "${FLEET_ROOT}/.fleet-config"
     info "Nuke complete."
     ;;
 
   *)
     NAME="$MODE"
-    INFO_FILE="${QA_FLEET_ROOT}/.qa/${NAME}/info"
+    INFO_FILE="${FLEET_ROOT}/.fleet/${NAME}/info"
 
-    if [ ! -f "${INFO_FILE}" ] && ! docker inspect "qa-${NAME}" >/dev/null 2>&1; then
+    if [ ! -f "${INFO_FILE}" ] && ! docker inspect "fleet-${NAME}" >/dev/null 2>&1; then
       error "Feature '${NAME}' not found"
     fi
 

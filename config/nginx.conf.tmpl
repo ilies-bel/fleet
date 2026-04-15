@@ -6,8 +6,8 @@ server {
     error_log /dev/stderr warn;
 
     # Backend proxy
-    # Browser calls: http://localhost:${PROXY_PORT}/_qa/preview/{name}/backend/...
-    # Gateway strips /_qa/preview/{name} → /backend/... arrives here
+    # Browser calls: http://localhost:${PROXY_PORT}/_fleet/preview/{name}/backend/...
+    # Gateway strips /_fleet/preview/{name} → /backend/... arrives here
     # nginx strips /backend prefix → backend app sees /...
     location /backend/ {
         proxy_pass http://127.0.0.1:${BACKEND_PORT}/;

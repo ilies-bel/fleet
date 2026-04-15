@@ -35,7 +35,7 @@ load_qa_config
 load_fleet_conf
 
 # ─── Defaults for port / path knobs (also applied in cmd-init.sh) ────────────
-# Older qa-fleet.conf files lack these keys — fall back to the same baseline
+# Older fleet.conf files lack these keys — fall back to the same baseline
 # cmd-init.sh uses, so the feature container and gateway agree on ports.
 : "${PROXY_PORT:=3000}"
 : "${ADMIN_PORT:=4000}"
@@ -43,19 +43,19 @@ load_fleet_conf
 : "${BACKEND_ARTIFACT_PATH:=/home/developer/backend.jar}"
 export PROXY_PORT ADMIN_PORT DB_PORT BACKEND_ARTIFACT_PATH
 
-WORKTREES_DIR="${APP_ROOT}/.qa-worktrees"
+WORKTREES_DIR="${APP_ROOT}/.fleet-worktrees"
 WORKTREE_PATH="${WORKTREES_DIR}/${NAME}"
-INFO_FILE="${QA_FLEET_ROOT}/.qa/${NAME}/info"
-COMPOSE_FILE="${QA_FLEET_ROOT}/.qa/${NAME}/docker-compose.yml"
+INFO_FILE="${QA_FLEET_ROOT}/.fleet/${NAME}/info"
+COMPOSE_FILE="${QA_FLEET_ROOT}/.fleet/${NAME}/docker-compose.yml"
 
 # ─── Guard: container must not already exist ─────────────────────────────────
-if docker inspect "qa-${NAME}" >/dev/null 2>&1; then
-  error "Container 'qa-${NAME}' already exists. Run: fleet rm ${NAME}"
+if docker inspect "fleet-${NAME}" >/dev/null 2>&1; then
+  error "Container 'fleet-${NAME}' already exists. Run: fleet rm ${NAME}"
 fi
 
 # ─── Guard: base image must exist ────────────────────────────────────────────
-docker inspect qa-feature-base >/dev/null 2>&1 \
-  || error "qa-feature-base image not found. Run: fleet init first."
+docker inspect fleet-feature-base >/dev/null 2>&1 \
+  || error "fleet-feature-base image not found. Run: fleet init first."
 
 # ─── Branch pre-flight check (skipped in direct mode) ────────────────────────
 if [ "${DIRECT}" = "false" ]; then
@@ -91,8 +91,8 @@ else
   done
 fi
 
-# ─── Build extra mounts from .qa-shared ──────────────────────────────────────
-SHARED_FILE="${APP_ROOT}/.qa-shared"
+# ─── Build extra mounts from .fleet-shared ───────────────────────────────────
+SHARED_FILE="${APP_ROOT}/.fleet-shared"
 EXTRA_MOUNTS=""
 if [ -f "${SHARED_FILE}" ]; then
   while IFS= read -r path; do
@@ -102,7 +102,7 @@ if [ -f "${SHARED_FILE}" ]; then
     if [ -e "$src" ]; then
       EXTRA_MOUNTS="${EXTRA_MOUNTS}      - ${src}:/app/${path}:ro\n"
     else
-      warn "  .qa-shared: '${path}' not found, skipping"
+      warn "  .fleet-shared: '${path}' not found, skipping"
     fi
   done < "${SHARED_FILE}"
 fi
@@ -111,21 +111,21 @@ fi
 BACKEND_VOLUME=""
 BACKEND_VOLUMES_DECL=""
 if [ -n "${BACKEND_DIR}" ]; then
-  BACKEND_VOLUME="      - qa-${NAME}-target:/app/${BACKEND_DIR}/target"
-  BACKEND_VOLUMES_DECL="  qa-${NAME}-target:"
+  BACKEND_VOLUME="      - fleet-${NAME}-target:/app/${BACKEND_DIR}/target"
+  BACKEND_VOLUMES_DECL="  fleet-${NAME}-target:"
 fi
 
 # ─── Generate docker-compose.yml ─────────────────────────────────────────────
 info "Generating docker-compose.yml..."
-mkdir -p "${QA_FLEET_ROOT}/.qa/${NAME}"
+mkdir -p "${QA_FLEET_ROOT}/.fleet/${NAME}"
 
 cat > "${COMPOSE_FILE}" <<COMPOSE
 services:
   ${NAME}:
-    image: qa-feature-base
-    container_name: qa-${NAME}
+    image: fleet-feature-base
+    container_name: fleet-${NAME}
     networks:
-      - qa-net
+      - fleet-net
     environment:
       - APP_NAME=${NAME}
       - BRANCH=${BRANCH}
@@ -148,22 +148,22 @@ services:
     volumes:
       - ${WORKTREE_PATH}:/app
       - ${APP_ROOT}/${FRONTEND_DIR}/node_modules:/app-nm-seed:ro
-      - qa-${NAME}-nm:/app/${FRONTEND_DIR}/node_modules
+      - fleet-${NAME}-nm:/app/${FRONTEND_DIR}/node_modules
 ${BACKEND_VOLUME}
 $(echo -e "${EXTRA_MOUNTS}")
 volumes:
-  qa-${NAME}-nm:
+  fleet-${NAME}-nm:
 ${BACKEND_VOLUMES_DECL}
 
 networks:
-  qa-net:
+  fleet-net:
     external: true
 COMPOSE
 
 # ─── Start container ─────────────────────────────────────────────────────────
-info "Starting container qa-${NAME} (branch: ${BRANCH})..."
+info "Starting container fleet-${NAME} (branch: ${BRANCH})..."
 info "The container will build the project internally — follow with:"
-info "  docker logs -f qa-${NAME}"
+info "  docker logs -f fleet-${NAME}"
 
 docker compose -f "${COMPOSE_FILE}" up -d
 
@@ -185,7 +185,7 @@ fi
 echo ""
 echo -e "${GREEN}┌──────────────────────────────────────────────────────────────┐${RESET}"
 echo -e "${GREEN}│  ${NAME} container started (building internally...)           ${RESET}"
-echo -e "${GREEN}│  Logs    → docker logs -f qa-${NAME}                          ${RESET}"
+echo -e "${GREEN}│  Logs    → docker logs -f fleet-${NAME}                       ${RESET}"
 echo -e "${GREEN}│  Branch  → ${BRANCH}                                          ${RESET}"
 echo -e "${GREEN}│  Proxy   → http://localhost:${PROXY_PORT}  (auto-activated if first)   ${RESET}"
 echo -e "${GREEN}└──────────────────────────────────────────────────────────────┘${RESET}"

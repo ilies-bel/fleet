@@ -19,10 +19,10 @@ fi
 validate_feature_name "$NAME"
 load_qa_config
 
-info "Restarting container qa-${NAME}..."
-docker restart "qa-${NAME}"
+info "Restarting container fleet-${NAME}..."
+docker restart "fleet-${NAME}"
 
 # Quick health confirmation
 sleep 2
-STATUS=$(curl -sf "${GATEWAY_URL}/_qa/api/features/${NAME}/health" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo '{"status":"unknown"}')
+STATUS=$(curl -sf "${GATEWAY_URL}/_fleet/api/features/${NAME}/health" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo '{"status":"unknown"}')
 info "Restarted. Health: $STATUS"
