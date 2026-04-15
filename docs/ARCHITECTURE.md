@@ -1,8 +1,8 @@
-# QA Fleet — Architecture
+# Fleet — Architecture
 
 ## Overview
 
-QA Fleet is a Docker-based orchestration system for running multiple feature branches of your application (e.g. a Next.js frontend + Spring Boot backend + PostgreSQL) simultaneously on localhost.
+Fleet is a Docker-based orchestration system for running multiple feature branches of your application (e.g. a Next.js frontend + Spring Boot backend + PostgreSQL) simultaneously on localhost.
 
 The core design enables a **transparent proxy pattern**: the browser always connects to `localhost:3000`, but the gateway dynamically routes that traffic to whichever feature container is currently active — no browser reconfiguration needed when switching features.
 
@@ -17,7 +17,7 @@ Developer Browser
       │         │                                  Feature management API
       │         │                                  OAuth relay
       │         │
-      └── localhost:3000  ──── Gateway Proxy ─────► qa-<active>:3000 (internal)
+      └── localhost:3000  ──── Gateway Proxy ─────► fleet-<active>:3000 (internal)
                                                           │
                                           ┌───────────────┼───────────────┐
                                           │               │               │
@@ -27,14 +27,14 @@ Developer Browser
                                     export (SSG)
 ```
 
-All feature containers run exclusively on the internal `qa-net` Docker network — they are never exposed on host ports.
+All feature containers run exclusively on the internal `fleet-net` Docker network — they are never exposed on host ports.
 
 ---
 
 ## Component Map
 
 ```
-qa-fleet/
+fleet/
 ├── gateway/            Node.js Express — dual-port server (proxy + API)
 │   └── src/
 │       ├── index.js    Entry point — reconcile + start both servers
@@ -61,10 +61,10 @@ qa-fleet/
 ├── Dockerfile.feature-base  Reusable base image for all feature containers
 │
 └── scripts/            Bash CLI
-    ├── qa-init.sh      One-time setup (network, images, gateway, first feature)
-    ├── qa-add.sh       Spin up a new feature (worktree + compose + register)
-    ├── qa-teardown.sh  Remove features or entire system
-    └── qa-host-runner.sh AppleScript relay for iTerm2 (macOS, port 4001)
+    ├── fleet-init.sh   One-time setup (network, images, gateway, first feature)
+    ├── fleet-add.sh    Spin up a new feature (worktree + compose + register)
+    ├── fleet-teardown.sh  Remove features or entire system
+    └── fleet-host-runner.sh AppleScript relay for iTerm2 (macOS, port 4001)
 ```
 
 ---
@@ -88,7 +88,7 @@ Communicates with the Docker daemon over `/var/run/docker.sock` using Node's bui
 |----------|-------------|
 | `dockerRequest(method, path, body?)` | Raw HTTP over Unix socket |
 | `dockerExec(containerId, cmd[])` | Run command in container, stream stdout |
-| `listRunningContainers()` | Filter by `qa-` name prefix |
+| `listRunningContainers()` | Filter by `fleet-` name prefix |
 | `inspectContainer(name)` | Full container JSON |
 | `stopContainer / startContainer / removeContainer` | Lifecycle |
 | `getContainerStats(name)` | One-shot stats (CPU%, memory, network I/O) |
@@ -115,14 +115,14 @@ FeatureRecord {
 
 ### `reconcile.js` — Startup Recovery
 
-On gateway start, scans Docker for all `qa-*` named containers (running or stopped), starts any that are stopped, and re-registers them by reading `BRANCH` from container env and `worktreePath` from volume mounts. This makes the gateway stateless — it can be restarted without losing track of features.
+On gateway start, scans Docker for all `fleet-*` named containers (running or stopped), starts any that are stopped, and re-registers them by reading `BRANCH` from container env and `worktreePath` from volume mounts. This makes the gateway stateless — it can be restarted without losing track of features.
 
 ### `proxy.js` — Transparent Proxy
 
-Uses `http-proxy-middleware`. Routes all port-3000 traffic to `http://qa-<activeFeature>:3000`.
+Uses `http-proxy-middleware`. Routes all port-3000 traffic to `http://fleet-<activeFeature>:3000`.
 
 - Removes `etag` / `last-modified` headers to prevent cross-feature cache pollution
-- Sets `X-QA-Feature` request header
+- Sets `X-Fleet-Feature` request header
 - Returns `503` when no feature is active
 - Returns `502` when the active container is unreachable
 
@@ -137,7 +137,7 @@ OAuth Provider → localhost:4000/auth/callback?code=...&state=<b64>
                     │ decode state → { feature: "login-fix" }
                     │ activate "login-fix"
                     └── redirect → localhost:3000/auth/callback?code=...&state=<b64>
-                                       │ proxied to qa-login-fix:3000
+                                       │ proxied to fleet-login-fix:3000
 ```
 
 ---
@@ -157,14 +157,14 @@ Built once, reused for all features. Layers:
 
 ### Container Startup (`entrypoint.sh`) — 7 Stages
 
-Runs once on first container start. A sentinel file at `/tmp/.qa-built` prevents re-running on restart.
+Runs once on first container start. A sentinel file at `/tmp/.fleet-built` prevents re-running on restart.
 
 | Stage | Action |
 |-------|--------|
 | 1 | Seed `node_modules` from read-only volume mount (avoids full `npm install`) |
 | 2 | Patch platform binaries — fetch Linux arm64 variants of esbuild, swc, lightningcss, etc. |
 | 3 | `npm run build` — Next.js static export to `/var/www/html` |
-| 4 | Patch bundle URLs — replace `__QA_BACKEND_URL__` → `/backend`, `__QA_APP_URL__` → `localhost:3000` |
+| 4 | Patch bundle URLs — replace `__FLEET_BACKEND_URL__` → `/backend`, `__FLEET_APP_URL__` → `localhost:3000` |
 | 5 | `mvn package -P jooq-codegen` — build Spring Boot JAR |
 | 6 | PostgreSQL `initdb`, create the configured database and user (from `DB_NAME` / `DB_USER`) |
 | 7 | `supervisord -n` — launch all processes (blocks, PID 1 equivalent) |
@@ -212,7 +212,7 @@ App.jsx
 
 ### API Client (`api.js`)
 
-Thin fetch wrapper. All endpoints prefixed with `/_qa/api/`. Returns parsed JSON or throws on non-2xx.
+Thin fetch wrapper. All endpoints prefixed with `/_fleet/api/`. Returns parsed JSON or throws on non-2xx.
 
 ### Design Tokens (`index.css`)
 
@@ -230,49 +230,49 @@ Dark cyberpunk theme. Key variables:
 
 ## Bash CLI — Setup Scripts
 
-### `qa-init.sh` (idempotent)
+### `fleet-init.sh` (idempotent)
 
 ```
-qa-init.sh <app-root> <branch>
+fleet-init.sh <app-root> <branch>
 ```
 
 1. Validate the configured frontend and backend directories (`FRONTEND_DIR` / `BACKEND_DIR`) are present
-2. Write `APP_ROOT` to `.qa-config`
-3. Scan `APP_ROOT`, `FRONTEND_DIR`, and `BACKEND_DIR` (depth-1) for untracked `.env` files; write/update the auto-discovered block in `.qa-shared` (creates the file with a header if absent)
-4. Create `qa-net` Docker network
-5. Build `qa-gateway` image (includes compiled dashboard)
-6. Build `qa-feature-base` image
+2. Write `APP_ROOT` to `.fleet-config`
+3. Scan `APP_ROOT`, `FRONTEND_DIR`, and `BACKEND_DIR` (depth-1) for untracked `.env` files; write/update the auto-discovered block in `.fleet-shared` (creates the file with a header if absent)
+4. Create `fleet-net` Docker network
+5. Build `fleet-gateway` image (includes compiled dashboard)
+6. Build `fleet-feature-base` image
 7. Start gateway container with `/var/run/docker.sock` mount
-8. Poll `:4000/_qa/api/status` until ready
-9. Call `qa-add.sh` for the initial feature
+8. Poll `:4000/_fleet/api/status` until ready
+9. Call `fleet-add.sh` for the initial feature
 
-### `qa-add.sh`
+### `fleet-add.sh`
 
 ```
-qa-add.sh <name> <branch> [--direct]
+fleet-add.sh <name> <branch> [--direct]
 ```
 
 1. Validate name (`^[a-z0-9-]+$`) and branch existence
-2. Create git worktrees for frontend and backend at `APP_ROOT/.qa-worktrees/<name>/`
-3. Parse `.qa-shared` for extra read-only volume mounts (non-tracked files like `.env.local`)
-4. Generate `docker-compose.yml` in `.qa/<name>/`
+2. Create git worktrees for frontend and backend at `APP_ROOT/.fleet-worktrees/<name>/`
+3. Parse `.fleet-shared` for extra read-only volume mounts (non-tracked files like `.env.local`)
+4. Generate `docker-compose.yml` in `.fleet/<name>/`
 5. `docker compose up -d`
-6. Save metadata to `.qa/<name>/info`
+6. Save metadata to `.fleet/<name>/info`
 7. `POST /register-feature` to gateway
 
 `--direct` skips worktrees and mounts `APP_ROOT` directly — useful for fast iteration on a single branch.
 
-### `qa-teardown.sh`
+### `fleet-teardown.sh`
 
 | Flag | Effect |
 |------|--------|
-| `<name>` | Deregister + `docker compose down -v` + remove worktrees + remove `.qa/<name>` |
+| `<name>` | Deregister + `docker compose down -v` + remove worktrees + remove `.fleet/<name>` |
 | `--all` | All features, keep gateway |
-| `--nuke` | Features + gateway + `qa-net` network + `.qa-config` |
+| `--nuke` | Features + gateway + `fleet-net` network + `.fleet-config` |
 
-### `qa-host-runner.sh`
+### `fleet-host-runner.sh`
 
-Tiny Express server (port 4001, host network) that receives `POST /open-terminal` and executes AppleScript to open an iTerm2 tab. Runs as a background process started by `qa-init.sh`. Required because the gateway runs inside Docker and cannot call AppleScript directly.
+Tiny Express server (port 4001, host network) that receives `POST /open-terminal` and executes AppleScript to open an iTerm2 tab. Runs as a background process started by `fleet-init.sh`. Required because the gateway runs inside Docker and cannot call AppleScript directly.
 
 ---
 
@@ -284,8 +284,8 @@ Per feature, three Docker volumes:
 |--------|-------|---------|
 | `<worktree-path>` | `/app` (rw) | Source code (live git worktree) |
 | `<app-root>/<frontend>/node_modules` | `/app-nm-seed` (ro) | Seed — avoids full `npm install` |
-| `qa-<name>-nm` | `/app/<frontend>/node_modules` (rw) | Persists built node_modules across restarts |
-| `qa-<name>-target` | `/app/<backend>/target` (rw) | Persists Maven build artifacts |
+| `fleet-<name>-nm` | `/app/<frontend>/node_modules` (rw) | Persists built node_modules across restarts |
+| `fleet-<name>-target` | `/app/<backend>/target` (rw) | Persists Maven build artifacts |
 
 The seed pattern: copy from read-only host mount into the named volume on first start, then `npm install --prefer-offline` to resolve deltas. This cuts cold-start time significantly on feature branches that share most dependencies.
 
@@ -293,7 +293,7 @@ The seed pattern: copy from read-only host mount into the named volume on first 
 
 ## API Reference
 
-All endpoints on port 4000. Prefix: `/_qa/api/`.
+All endpoints on port 4000. Prefix: `/_fleet/api/`.
 
 | Method | Path | Description |
 |--------|------|-------------|

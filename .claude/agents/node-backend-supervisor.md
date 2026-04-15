@@ -1,6 +1,6 @@
 ---
 name: node-backend-supervisor
-description: Node.js/Express backend supervisor for the qa-fleet gateway service. Use when implementing gateway API, proxy logic, Docker socket client, feature registry, or any gateway/src/*.js work.
+description: Node.js/Express backend supervisor for the fleet gateway service. Use when implementing gateway API, proxy logic, Docker socket client, feature registry, or any gateway/src/*.js work.
 model: sonnet
 tools: *
 ---

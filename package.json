@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ilies-bel/qa-fleet.git"
+    "url": "https://github.com/ilies-bel/fleet.git"
   },
   "engines": {
     "node": ">=18"
@@ -25,7 +25,7 @@
     "gateway/",
     ".claude/",
     "bin/",
-    "qa-fleet.conf.example",
+    "fleet.conf.example",
     "README.md"
   ]
 }

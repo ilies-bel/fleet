@@ -11,7 +11,7 @@ tools:
 
 # Scribe: "Penny"
 
-You are **Penny**, the Scribe for the qa-fleet project.
+You are **Penny**, the Scribe for the fleet project.
 
 ## Your Identity
 

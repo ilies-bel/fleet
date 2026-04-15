@@ -1,11 +1,11 @@
 ---
 name: fleet:init
-description: End-to-end fleet init for a project. Auto-tunes qa-fleet.conf for the detected stack, runs the bash fleet init, waits for the container, and verifies /actuator/health. Use instead of running 'fleet init' directly when you want it Just To Work.
+description: End-to-end fleet init for a project. Auto-tunes fleet.conf for the detected stack, runs the bash fleet init, waits for the container, and verifies /actuator/health. Use instead of running 'fleet init' directly when you want it Just To Work.
 user-invocable: true
 argument-hint: "<project-path> [branch]"
 ---
 
-Run the full fleet init flow end-to-end: detect the project stack, auto-tune `qa-fleet.conf`, invoke `fleet init` non-interactively via tmux, wait for the backend container, then verify `/actuator/health`.
+Run the full fleet init flow end-to-end: detect the project stack, auto-tune `fleet.conf`, invoke `fleet init` non-interactively via tmux, wait for the backend container, then verify `/actuator/health`.
 
 ## Prerequisites
 
@@ -13,11 +13,11 @@ Run the full fleet init flow end-to-end: detect the project stack, auto-tune `qa
 - `fleet` on PATH (or run `fleet init` once first to symlink it)
 - `tmux` installed (`brew install tmux` on macOS)
 - `jq` installed (for JSON health parsing)
-- qa-fleet repo cloned at a known path (see Step 0)
+- fleet repo cloned at a known path (see Step 0)
 
 ---
 
-## Step 0 — Parse arguments and locate qa-fleet root
+## Step 0 — Parse arguments and locate fleet root
 
 The command receives arguments via `$ARGUMENTS`. Parse them:
 
@@ -32,12 +32,12 @@ BRANCH       = second token, default "main"
 - If the resolved path does not exist → print `Error: path '<resolved>' does not exist.` and stop.
 - If none of `pom.xml`, `package.json`, `build.gradle`, or subdirectory containing these exists in the project root → warn "No recognizable project files found. Proceeding anyway."
 
-Locate the qa-fleet repo root:
+Locate the fleet repo root:
 
 ```bash
 QA_FLEET_ROOT=$(git -C "$(dirname "$(which fleet)")" rev-parse --show-toplevel 2>/dev/null) \
   || QA_FLEET_ROOT="$(cd "$(dirname "$(realpath "$(which fleet)")")/.." && pwd)"
-# Fallback: the qa-fleet root is the directory containing the 'fleet' dispatcher.
+# Fallback: the fleet root is the directory containing the 'fleet' dispatcher.
 ```
 
 If `fleet` is not on PATH, use a hard fallback known from the installed symlink:
@@ -60,7 +60,7 @@ ls "$PROJECT_PATH/"
 
 Identify which subdirectories are the frontend and backend. A subdirectory is the backend if it contains `pom.xml`, `build.gradle`, or `go.mod`. A subdirectory is the frontend if it contains a `package.json` with a `"build"` script AND a `next.config.*` (Next.js) or `vite.config.*` (Vite/React).
 
-**1b. Read the project root `qa-fleet.conf` (if it exists)**
+**1b. Read the project root `fleet.conf` (if it exists)**
 
 Record current values for: `PROJECT_NAME`, `FRONTEND_DIR`, `BACKEND_DIR`, `FRONTEND_OUT_DIR`, `BACKEND_BUILD_CMD`, `BACKEND_RUN_CMD`, `PROXY_PORT`, `BACKEND_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
 
@@ -131,23 +131,23 @@ Based on the evidence from Step 1, derive the following values.
 
 ## Step 3 — Show diff and confirm
 
-Print the proposed `qa-fleet.conf` content (or a unified diff if the file already exists):
+Print the proposed `fleet.conf` content (or a unified diff if the file already exists):
 
 ```
---- qa-fleet.conf (current)
-+++ qa-fleet.conf (proposed)
+--- fleet.conf (current)
++++ fleet.conf (proposed)
 @@ ...
 ```
 
-Use `AskUserQuestion`: "Apply the above qa-fleet.conf and proceed with fleet init? [y/N]"
+Use `AskUserQuestion`: "Apply the above fleet.conf and proceed with fleet init? [y/N]"
 
 If the user declines → print "Aborted — no changes made." and stop.
 
 ---
 
-## Step 4 — Write qa-fleet.conf
+## Step 4 — Write fleet.conf
 
-Write the complete `qa-fleet.conf` to `${PROJECT_PATH}/qa-fleet.conf`. Only touch this file. Template:
+Write the complete `fleet.conf` to `${PROJECT_PATH}/fleet.conf`. Only touch this file. Template:
 
 ```
 PROJECT_NAME="<value>"
@@ -171,7 +171,7 @@ Include only keys that have non-empty values. The write must be idempotent (runn
 
 `fleet init` reads `/dev/tty` for two interactive prompts:
 1. **spring-boot-devtools prompt** — "Add spring-boot-devtools to pom.xml? [y/N]" → always answer `n` (we never mutate source).
-2. **conf wizard** — this is entirely bypassed because we wrote `qa-fleet.conf` in Step 4.
+2. **conf wizard** — this is entirely bypassed because we wrote `fleet.conf` in Step 4.
 
 Run via tmux so Claude can send keystrokes to the tty:
 
@@ -214,7 +214,7 @@ while ! grep -q '\[fleet-init-done\]' /tmp/fleet-init.log 2>/dev/null; do
     echo "ERROR: fleet init timed out after ${INIT_TIMEOUT}s. Last 30 lines:"
     tail -30 /tmp/fleet-init.log
     echo ""
-    echo "Recovery: check docker logs qa-gateway-container, then re-run /fleet:init"
+    echo "Recovery: check docker logs fleet-gateway, then re-run /fleet:init"
     exit 1
   fi
 done
@@ -228,7 +228,7 @@ if grep -qiE '(^ERROR|error:|failed|FAILED)' /tmp/fleet-init.log; then
   echo "fleet init reported errors:"
   tail -30 /tmp/fleet-init.log
   echo ""
-  echo "Recovery action: run 'docker logs qa-gateway-container' and 'docker logs qa-main' for details."
+  echo "Recovery action: run 'docker logs fleet-gateway' and 'docker logs fleet-main' for details."
   exit 1
 fi
 ```
@@ -240,14 +240,14 @@ fi
 Poll every 30 seconds, maximum 5 minutes (10 attempts):
 
 ```bash
-PROXY_PORT=$(grep '^PROXY_PORT' "${PROJECT_PATH}/qa-fleet.conf" \
+PROXY_PORT=$(grep '^PROXY_PORT' "${PROJECT_PATH}/fleet.conf" \
   | cut -d= -f2 | tr -d '"' || echo 3000)
 
 MAX_ATTEMPTS=10
 ATTEMPT=0
 while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
   ATTEMPT=$((ATTEMPT + 1))
-  RUNNING=$(docker logs --tail 5 qa-main 2>&1 | grep 'backend entered RUNNING state' || true)
+  RUNNING=$(docker logs --tail 5 fleet-main 2>&1 | grep 'backend entered RUNNING state' || true)
   if [[ -n "$RUNNING" ]]; then
     echo "Backend is RUNNING (attempt ${ATTEMPT})"
     break
@@ -255,11 +255,11 @@ while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
   if [[ $ATTEMPT -eq $MAX_ATTEMPTS ]]; then
     echo "ERROR: Backend did not enter RUNNING state within 5 minutes."
     echo "Last 50 log lines:"
-    docker logs --tail 50 qa-main 2>&1
+    docker logs --tail 50 fleet-main 2>&1
     echo ""
     echo "Recovery options:"
-    echo "  1. Check build errors: docker logs qa-main 2>&1 | grep -i error"
-    echo "  2. Verify BACKEND_BUILD_CMD in ${PROJECT_PATH}/qa-fleet.conf"
+    echo "  1. Check build errors: docker logs fleet-main 2>&1 | grep -i error"
+    echo "  2. Verify BACKEND_BUILD_CMD in ${PROJECT_PATH}/fleet.conf"
     echo "  3. Re-run after fixing: /fleet:init $PROJECT_PATH $BRANCH"
     exit 1
   fi
@@ -273,7 +273,7 @@ done
 ## Step 7 — Verify health endpoint
 
 ```bash
-PROXY_PORT=$(grep '^PROXY_PORT' "${PROJECT_PATH}/qa-fleet.conf" \
+PROXY_PORT=$(grep '^PROXY_PORT' "${PROJECT_PATH}/fleet.conf" \
   | cut -d= -f2 | tr -d '"' || echo 3000)
 
 HTTP_CODE=$(curl -s -o /tmp/health.json \
@@ -310,10 +310,10 @@ else
     echo "DOWN components detected:"
     while IFS= read -r component; do
       case "$component" in
-        ldap*)   echo "  - $component: LDAP server unreachable — add -Dspring.profiles.active=local to BACKEND_RUN_CMD in qa-fleet.conf" ;;
+        ldap*)   echo "  - $component: LDAP server unreachable — add -Dspring.profiles.active=local to BACKEND_RUN_CMD in fleet.conf" ;;
         db|datasource|jdbc*) echo "  - $component: Database unreachable — check DB_HOST/DB_PORT and that postgres container is running" ;;
         mail*)   echo "  - $component: Mail server not reachable — expected in local dev; disable via profile if needed" ;;
-        *)       echo "  - $component: Unknown failure — check docker logs qa-main for root cause" ;;
+        *)       echo "  - $component: Unknown failure — check docker logs fleet-main for root cause" ;;
       esac
     done <<< "$DOWN_COMPONENTS"
   fi
@@ -331,26 +331,26 @@ Print a structured summary:
 
 Project:       $PROJECT_PATH
 Branch:        $BRANCH
-conf applied:  ${PROJECT_PATH}/qa-fleet.conf
+conf applied:  ${PROJECT_PATH}/fleet.conf
 
 Container status:
-<output of: docker ps --filter name=qa-main --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'>
+<output of: docker ps --filter name=fleet-main --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'>
 
 Health: HTTP <code>
 <full JSON body from /tmp/health.json>
 ```
 
-If any component is DOWN: append the per-component hint from Step 7 and note: "The application is running but some components are unhealthy — see hints above. No source code changes are needed; adjust qa-fleet.conf or environment only."
+If any component is DOWN: append the per-component hint from Step 7 and note: "The application is running but some components are unhealthy — see hints above. No source code changes are needed; adjust fleet.conf or environment only."
 
 ---
 
 ## Hard rules
 
-- Only write `qa-fleet.conf` in `$PROJECT_PATH`. Do not touch any other file.
+- Only write `fleet.conf` in `$PROJECT_PATH`. Do not touch any other file.
 - Do NOT push to git.
 - Do NOT modify `.claude/`, `.beads/`, or any source code file.
 - Do NOT modify `test/reference/` — it is a pristine fixture.
-- If `pom.xml`, `package.json`, and `application*.yml` are all absent, print: "Stack not auto-detectable — please set BACKEND_BUILD_CMD and BACKEND_RUN_CMD manually in qa-fleet.conf." and exit cleanly.
+- If `pom.xml`, `package.json`, and `application*.yml` are all absent, print: "Stack not auto-detectable — please set BACKEND_BUILD_CMD and BACKEND_RUN_CMD manually in fleet.conf." and exit cleanly.
 - If the tmux session is already running and appears stuck, kill it first: `tmux kill-session -t fleetinit 2>/dev/null || true`.
 
 ---

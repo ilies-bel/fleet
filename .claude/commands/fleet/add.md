@@ -81,9 +81,9 @@ fi
 **1e. Gateway container running (warn-only)**
 
 ```bash
-if ! docker inspect qa-gateway-container &>/dev/null || \
-   [[ "$(docker inspect -f '{{.State.Status}}' qa-gateway-container 2>/dev/null)" != "running" ]]; then
-  echo "WARN: gateway container 'qa-gateway-container' is not running."
+if ! docker inspect fleet-gateway &>/dev/null || \
+   [[ "$(docker inspect -f '{{.State.Status}}' fleet-gateway 2>/dev/null)" != "running" ]]; then
+  echo "WARN: gateway container 'fleet-gateway' is not running."
   echo "  Feature registration will be skipped. The container will still start,"
   echo "  but traffic routing via the gateway will be unavailable until the gateway is up."
 fi
@@ -149,8 +149,8 @@ while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
       docker logs --tail 50 "$CONTAINER" 2>&1
       echo ""
       echo "Recovery hints:"
-      echo "  - Check BACKEND_BUILD_CMD in qa-fleet.conf — a build failure exits the container."
-      echo "  - Check BACKEND_RUN_CMD in qa-fleet.conf — a bad start command causes an immediate exit."
+      echo "  - Check BACKEND_BUILD_CMD in fleet.conf — a build failure exits the container."
+      echo "  - Check BACKEND_RUN_CMD in fleet.conf — a bad start command causes an immediate exit."
       echo "  - Run 'fleet rm ${NAME}' before retrying."
       exit 1
       ;;
@@ -169,8 +169,8 @@ while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
     docker logs --tail 50 "$CONTAINER" 2>&1
     echo ""
     echo "Recovery hints:"
-    echo "  - Inspect BACKEND_BUILD_CMD in qa-fleet.conf: is the build command correct?"
-    echo "  - Inspect BACKEND_RUN_CMD in qa-fleet.conf: is the run command correct?"
+    echo "  - Inspect BACKEND_BUILD_CMD in fleet.conf: is the build command correct?"
+    echo "  - Inspect BACKEND_RUN_CMD in fleet.conf: is the run command correct?"
     echo "  - Run 'fleet rm ${NAME}' before retrying."
     exit 1
   fi
@@ -184,12 +184,12 @@ done
 
 ## Step 4 — Verify health endpoint
 
-Resolve `PROXY_PORT` from the project's `qa-fleet.conf`. Look for the conf in the current working directory or one level up; default to `3000` if not found.
+Resolve `PROXY_PORT` from the project's `fleet.conf`. Look for the conf in the current working directory or one level up; default to `3000` if not found.
 
 ```bash
-PROXY_PORT=$(grep '^PROXY_PORT' qa-fleet.conf 2>/dev/null \
+PROXY_PORT=$(grep '^PROXY_PORT' fleet.conf 2>/dev/null \
   | cut -d= -f2 | tr -d '"' | tr -d "'" || true)
-PROXY_PORT=${PROXY_PORT:-$(grep '^PROXY_PORT' ../qa-fleet.conf 2>/dev/null \
+PROXY_PORT=${PROXY_PORT:-$(grep '^PROXY_PORT' ../fleet.conf 2>/dev/null \
   | cut -d= -f2 | tr -d '"' | tr -d "'" || true)}
 PROXY_PORT=${PROXY_PORT:-3000}
 
@@ -233,9 +233,9 @@ else
     while IFS= read -r component; do
       case "$component" in
         ldap*)
-          echo "  - ${component}: LDAP server unreachable — add \`-Dspring.profiles.active=local\` to BACKEND_RUN_CMD in qa-fleet.conf" ;;
+          echo "  - ${component}: LDAP server unreachable — add \`-Dspring.profiles.active=local\` to BACKEND_RUN_CMD in fleet.conf" ;;
         db|datasource|jdbc*)
-          echo "  - ${component}: database unreachable — check postgres container and DB_* env vars in qa-fleet.conf" ;;
+          echo "  - ${component}: database unreachable — check postgres container and DB_* env vars in fleet.conf" ;;
         mail*)
           echo "  - ${component}: mail server not reachable — expected in local dev; disable via Spring profile if needed" ;;
         *)
@@ -283,13 +283,13 @@ echo "  Logs:     docker logs -f qa-${NAME}"
 echo "  Teardown: fleet rm ${NAME}"
 ```
 
-If any component was DOWN: append the per-component hints from Step 4 and note: "The feature is running but some components are unhealthy — see hints above. Adjust qa-fleet.conf or environment only; do not modify source files."
+If any component was DOWN: append the per-component hints from Step 4 and note: "The feature is running but some components are unhealthy — see hints above. Adjust fleet.conf or environment only; do not modify source files."
 
 ---
 
 ## Hard rules
 
-- Do NOT modify any source file, `qa-fleet.conf`, `.claude/`, or `.beads/`.
+- Do NOT modify any source file, `fleet.conf`, `.claude/`, or `.beads/`.
 - Do NOT push to git.
 - Do NOT run `fleet rm` automatically — always surface the command for the user to run.
 - If any pre-flight check fails, stop immediately with a clear recovery hint. No self-healing.

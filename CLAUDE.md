@@ -1,8 +1,8 @@
-# qa-fleet
+# Fleet
 
 ## Project Overview
 
-- qa-fleet is a local QA environment manager that spins up isolated Docker containers per feature branch, wiring together a reverse proxy (nginx), process manager (supervisord), and a React dashboard for visibility and control
+- Fleet is a local environment manager that spins up isolated Docker containers per feature branch, wiring together a reverse proxy (nginx), process manager (supervisord), and a React dashboard for visibility and control
 - It provides a CLI (`fleet`) for initialising, adding, syncing, and tearing down feature environments, and a gateway service that proxies traffic and manages the feature registry via Docker socket
 
 ## Tech Stack
@@ -171,7 +171,7 @@ spring-boot-devtools not found → prompt to add
 
 Notes:
 - `scripts/qa-host-runner.sh` is a no-op stub so init proceeds past that step
-- `test/project/qa-fleet.conf` is pre-filled — wizard is skipped
+- `test/project/fleet.conf` is pre-filled — wizard is skipped
 - Both git repos (`d2r2-backend/`, `d2r2-frontend/`) are on branch `main`
 - `test/reference/` is the pristine original — never modify it; re-copy if needed: `cp -rp test/reference test/project`
 
