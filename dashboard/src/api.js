@@ -21,7 +21,7 @@ async function request(path, options = {}) {
 
 /** @returns {Promise<Array>} */
 export function getFeatures() {
-  return request('/_qa/api/features');
+  return request('/_fleet/api/features');
 }
 
 /**
@@ -30,7 +30,7 @@ export function getFeatures() {
  * @returns {Promise<object>}
  */
 export function addFeature(name, branch) {
-  return request('/_qa/api/features', {
+  return request('/_fleet/api/features', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, branch }),
@@ -42,7 +42,7 @@ export function addFeature(name, branch) {
  * @returns {Promise<{ ok: boolean, active: string }>}
  */
 export function activateFeature(name) {
-  return request(`/_qa/api/features/${name}/activate`, { method: 'POST' });
+  return request(`/_fleet/api/features/${name}/activate`, { method: 'POST' });
 }
 
 /**
@@ -50,7 +50,7 @@ export function activateFeature(name) {
  * @returns {Promise<object>}
  */
 export function removeFeature(name) {
-  return request(`/_qa/api/features/${name}`, { method: 'DELETE' });
+  return request(`/_fleet/api/features/${name}`, { method: 'DELETE' });
 }
 
 /**
@@ -58,7 +58,7 @@ export function removeFeature(name) {
  * @returns {Promise<{ status: 'up'|'down' }>}
  */
 export function getHealth(name) {
-  return request(`/_qa/api/features/${name}/health`);
+  return request(`/_fleet/api/features/${name}/health`);
 }
 
 /**
@@ -67,12 +67,12 @@ export function getHealth(name) {
  * @returns {Promise<{ ok: boolean, containerName: string }>}
  */
 export function openTerminal(name) {
-  return request(`/_qa/api/features/${name}/open-terminal`, { method: 'POST' });
+  return request(`/_fleet/api/features/${name}/open-terminal`, { method: 'POST' });
 }
 
 /** @returns {Promise<{ uptimeMs: number, featureCount: number, activeFeature: string|null, nodeVersion: string }>} */
 export function getStatus() {
-  return request('/_qa/api/status');
+  return request('/_fleet/api/status');
 }
 
 /**
@@ -82,17 +82,17 @@ export function getStatus() {
  */
 export function getLogs(name, { source = 'backend', tail = 200, since = 0 } = {}) {
   const params = new URLSearchParams({ source, tail, since });
-  return request(`/_qa/api/features/${name}/logs?${params}`);
+  return request(`/_fleet/api/features/${name}/logs?${params}`);
 }
 
 /** @param {string} name */
 export function stopFeature(name) {
-  return request(`/_qa/api/features/${name}/stop`, { method: 'POST' });
+  return request(`/_fleet/api/features/${name}/stop`, { method: 'POST' });
 }
 
 /** @param {string} name */
 export function startFeature(name) {
-  return request(`/_qa/api/features/${name}/start`, { method: 'POST' });
+  return request(`/_fleet/api/features/${name}/start`, { method: 'POST' });
 }
 
 /**
@@ -100,7 +100,7 @@ export function startFeature(name) {
  * @returns {Promise<{ cpuPercent: number, memUsageMB: number, memLimitMB: number, netRxMB: number, netTxMB: number }>}
  */
 export function getStats(name) {
-  return request(`/_qa/api/features/${name}/stats`);
+  return request(`/_fleet/api/features/${name}/stats`);
 }
 
 /**
@@ -112,5 +112,5 @@ export function getStats(name) {
  */
 export function syncFeature(name, { regenerateSources = false } = {}) {
   const params = regenerateSources ? '?regenerateSources=true' : '';
-  return request(`/_qa/api/features/${name}/sync${params}`, { method: 'POST' });
+  return request(`/_fleet/api/features/${name}/sync${params}`, { method: 'POST' });
 }
