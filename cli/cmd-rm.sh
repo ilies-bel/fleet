@@ -10,70 +10,71 @@ export FLEET_ROOT
 # shellcheck source=./common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-QA_FLEET_ROOT="${FLEET_ROOT}"
+# ─── _read_info_toml_services <name> ─────────────────────────────────────────
+# Prints newline-separated list of service names from .fleet/<name>/info.toml.
+# Prints nothing (empty) if the file is absent or has no services.
+_read_info_toml_services() {
+  local feature_name="$1"
+  local info_toml="${FLEET_ROOT}/.fleet/${feature_name}/info.toml"
 
-# ─── Load APP_ROOT (needed for worktree cleanup) ─────────────────────────────
-CONFIG_FILE="${QA_FLEET_ROOT}/.fleet-config"
-APP_ROOT=""
-if [ -f "${CONFIG_FILE}" ]; then
-  # shellcheck source=/dev/null
-  source "${CONFIG_FILE}"
-fi
+  [ -f "${info_toml}" ] || { echo ""; return 0; }
 
-# ─── Remove one feature ──────────────────────────────────────────────────────
+  local pybin
+  pybin=$(_find_python_with_tomllib) || {
+    warn "No python3 with tomllib/tomli found — cannot parse info.toml"
+    echo ""
+    return 0
+  }
+
+  "$pybin" - "${info_toml}" <<'PYEOF'
+import sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+with open(sys.argv[1], "rb") as fh:
+    data = tomllib.load(fh)
+
+for svc in data.get("services", []):
+    name = svc.get("name", "")
+    if name:
+        print(name)
+PYEOF
+}
+
+# ─── remove_feature <name> ────────────────────────────────────────────────────
 remove_feature() {
   local name="$1"
-  local compose_file="${QA_FLEET_ROOT}/.fleet/${name}/docker-compose.yml"
-  local info_file="${QA_FLEET_ROOT}/.fleet/${name}/info"
+  local feature_dir="${FLEET_ROOT}/.fleet/${name}"
+  local compose_file="${feature_dir}/docker-compose.yml"
+  local info_toml="${feature_dir}/info.toml"
 
   info "Removing feature: ${name}"
 
-  # Notify gateway (port 4000 is the admin port)
+  # Deregister from gateway (best-effort)
   curl -sf -X DELETE "http://localhost:4000/register-feature/${name}" >/dev/null 2>&1 \
     || warn "Could not notify gateway (is it running?)"
 
-  # Stop container and remove named volumes
+  # Stop each service container individually (best-effort per container)
+  local svc_names
+  svc_names=$(_read_info_toml_services "${name}")
+
+  if [ -n "${svc_names}" ]; then
+    while IFS= read -r svc_name; do
+      [ -z "${svc_name}" ] && continue
+      docker rm -f "fleet-${name}-${svc_name}" 2>/dev/null \
+        || warn "Container 'fleet-${name}-${svc_name}' not found"
+    done <<< "${svc_names}"
+  fi
+
+  # Bring down compose stack and remove named volumes
   if [ -f "${compose_file}" ]; then
     docker compose -f "${compose_file}" down -v 2>/dev/null || true
-  else
-    docker rm -f "fleet-${name}" 2>/dev/null || warn "Container 'fleet-${name}' not found"
   fi
 
-  # Read FRONTEND_DIR and BACKEND_DIR recorded at add time
-  local frontend_dir=""
-  local backend_dir=""
-  local feature_direct=false
-  if [ -f "${info_file}" ]; then
-    frontend_dir=$(grep '^FRONTEND_DIR=' "${info_file}" | cut -d= -f2 || true)
-    backend_dir=$(grep  '^BACKEND_DIR='  "${info_file}" | cut -d= -f2 || true)
-    local _d
-    _d=$(grep '^DIRECT=' "${info_file}" | cut -d= -f2 || true)
-    [ "${_d}" = "true" ] && feature_direct=true || true
-  fi
-
-  # Remove worktrees (skipped for direct-mounted features)
-  if [ "${feature_direct}" = "false" ] && [ -n "${APP_ROOT:-}" ]; then
-    local worktrees_dir="${APP_ROOT}/.fleet-worktrees"
-
-    # Build list of subdirs to clean up from what was recorded in info
-    local subdirs=()
-    [ -n "${frontend_dir}" ] && subdirs+=("${frontend_dir}")
-    [ -n "${backend_dir}"  ] && subdirs+=("${backend_dir}")
-
-    if (( ${#subdirs[@]} > 0 )); then
-      for sub in "${subdirs[@]}"; do
-        local wt="${worktrees_dir}/${name}/${sub}"
-        if [ -d "$wt" ]; then
-          git -C "${APP_ROOT}/${sub}" worktree remove --force "$wt" 2>/dev/null \
-            || warn "Could not remove worktree ${wt}"
-        fi
-      done
-    fi
-    rm -rf "${worktrees_dir}/${name}"
-  fi
-
-  # Remove build context and metadata
-  rm -rf "${QA_FLEET_ROOT}/.fleet/${name}"
+  # Remove .fleet/<name>/ directory
+  rm -rf "${feature_dir}"
 
   info "Removed '${name}'"
 }
@@ -83,7 +84,7 @@ MODE="${1:-}"
 
 if [ -z "$MODE" ]; then
   echo "Usage:"
-  echo "  fleet rm <name>      — remove one feature (container + volumes + worktree)"
+  echo "  fleet rm <name>      — remove one feature (containers + volumes)"
   echo "  fleet rm --all       — remove all features, keep gateway running"
   echo "  fleet rm --nuke      — remove everything including gateway and network"
   exit 1
@@ -92,47 +93,62 @@ fi
 case "$MODE" in
   --all)
     info "Removing all feature containers..."
-    for dir in "${QA_FLEET_ROOT}/.fleet"/*/; do
-      local_name=$(basename "$dir")
-      [ -d "$dir" ] && [ -f "${dir}info" ] || continue
-      remove_feature "$local_name"
+    shopt -s nullglob
+    for info_toml in "${FLEET_ROOT}/.fleet/"*/info.toml; do
+      local_name=$(basename "$(dirname "${info_toml}")")
+      remove_feature "${local_name}"
     done
+    shopt -u nullglob
     info "All features removed. Gateway still running."
     ;;
 
   --nuke)
     info "Nuking everything..."
 
-    for dir in "${QA_FLEET_ROOT}/.fleet"/*/; do
-      local_name=$(basename "$dir")
-      [ -d "$dir" ] && [ -f "${dir}info" ] || continue
-      remove_feature "$local_name" 2>/dev/null || true
+    shopt -s nullglob
+    for info_toml in "${FLEET_ROOT}/.fleet/"*/info.toml; do
+      local_name=$(basename "$(dirname "${info_toml}")")
+      remove_feature "${local_name}" 2>/dev/null || true
     done
+    shopt -u nullglob
 
-    docker rm -f fleet-gateway 2>/dev/null && info "Gateway removed" || warn "Gateway not found"
+    docker rm -f fleet-gateway 2>/dev/null && info "Gateway removed" \
+      || warn "Gateway not found"
     docker rmi fleet-gateway 2>/dev/null || true
-    docker rmi fleet-feature-base 2>/dev/null || true
-    docker network rm fleet-net 2>/dev/null && info "Network 'fleet-net' removed" || warn "Network not found"
 
-    RUNNER_PID_FILE="${QA_FLEET_ROOT}/.fleet-runner.pid"
+    # Remove all fleet base images (fleet-base-* glob)
+    while IFS= read -r img; do
+      [ -z "${img}" ] && continue
+      docker rmi "${img}" 2>/dev/null && info "Image '${img}' removed" \
+        || warn "Image '${img}' not found or in use"
+    done < <(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+               | grep '^fleet-base-' || true)
+
+    docker network rm fleet-net 2>/dev/null && info "Network 'fleet-net' removed" \
+      || warn "Network not found"
+
+    # Stop host-runner if PID file exists at .fleet/host-runner.pid
+    RUNNER_PID_FILE="${FLEET_ROOT}/.fleet/host-runner.pid"
     if [ -f "${RUNNER_PID_FILE}" ]; then
       RUNNER_PID=$(cat "${RUNNER_PID_FILE}")
-      kill "${RUNNER_PID}" 2>/dev/null && info "Host runner stopped (PID ${RUNNER_PID})" || warn "Host runner not running"
+      kill "${RUNNER_PID}" 2>/dev/null \
+        && info "Host runner stopped (PID ${RUNNER_PID})" \
+        || warn "Host runner not running"
       rm -f "${RUNNER_PID_FILE}"
     fi
 
-    rm -f "${QA_FLEET_ROOT}/.fleet-config"
     info "Nuke complete."
     ;;
 
   *)
     NAME="$MODE"
-    INFO_FILE="${QA_FLEET_ROOT}/.fleet/${NAME}/info"
+    validate_feature_name "${NAME}"
+    INFO_TOML="${FLEET_ROOT}/.fleet/${NAME}/info.toml"
 
-    if [ ! -f "${INFO_FILE}" ] && ! docker inspect "fleet-${NAME}" >/dev/null 2>&1; then
-      error "Feature '${NAME}' not found"
+    if [ ! -f "${INFO_TOML}" ] && ! docker inspect "fleet-${NAME}" >/dev/null 2>&1; then
+      error "Feature '${NAME}' not found. Run: fleet ls"
     fi
 
-    remove_feature "$NAME"
+    remove_feature "${NAME}"
     ;;
 esac
