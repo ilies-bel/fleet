@@ -10,50 +10,78 @@ export FLEET_ROOT
 # shellcheck source=./common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-QA_FLEET_ROOT="${FLEET_ROOT}"
-
 NAME="${1:-}"
 if [ -z "$NAME" ]; then
   echo "Usage: fleet push <feature-name>"
   exit 1
 fi
 
-load_qa_config
+validate_feature_name "${NAME}"
 
-INFO_FILE="${QA_FLEET_ROOT}/.fleet/${NAME}/info"
-[ -f "${INFO_FILE}" ] || error "Feature '${NAME}' not found (no .fleet/${NAME}/info)"
+INFO_TOML="${FLEET_ROOT}/.fleet/${NAME}/info.toml"
+[ -f "${INFO_TOML}" ] || error "Feature '${NAME}' not found (no .fleet/${NAME}/info.toml). Run: fleet add ${NAME}"
 
-# shellcheck source=/dev/null
-source "${INFO_FILE}"
+# ─── Parse services from info.toml ───────────────────────────────────────────
+_PYBIN=$(_find_python_with_tomllib) \
+  || error "No python3 with tomllib/tomli found. Install python >=3.11 or: pip3 install tomli"
 
-if [ "${DIRECT:-false}" = "true" ]; then
-  info "Direct mode — pushing from APP_ROOT..."
-  git -C "${APP_ROOT}" push
-  info "Pushed."
-else
-  # Worktree mode
-  PUSHED=0
-  for sub in "${FRONTEND_DIR:-}" "${BACKEND_DIR:-}"; do
-    [ -z "$sub" ] && continue
-    wt="${WORKTREE_PATH}/${sub}"
-    [ -d "${wt}" ] || { warn "  Worktree ${wt} not found — skipping"; continue; }
+# Read service entries as newline-separated "name|dir|branch" triples
+_SVC_ENTRIES=$("$_PYBIN" - "${INFO_TOML}" <<'PYEOF'
+import sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
-    # Check if this is a real git repo (not a gitfile pointer only)
-    if git -C "${wt}" rev-parse --git-dir >/dev/null 2>&1; then
-      remote_branch=$(git -C "${wt}" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "")
-      if [ -n "${remote_branch}" ]; then
-        info "Pushing ${sub} (branch: ${BRANCH})..."
-        git -C "${wt}" push
-      else
-        info "Pushing ${sub} (branch: ${BRANCH}, setting upstream)..."
-        git -C "${wt}" push --set-upstream origin "${BRANCH}"
-      fi
-      PUSHED=$((PUSHED + 1))
-    fi
-  done
+with open(sys.argv[1], "rb") as fh:
+    data = tomllib.load(fh)
 
-  if [ "${PUSHED}" -eq 0 ]; then
-    error "No worktrees found to push"
-  fi
-  info "Push complete (${PUSHED} repo(s))."
+for svc in data.get("services", []):
+    name   = svc.get("name", "")
+    dirval = svc.get("dir", "")
+    branch = svc.get("branch", "")
+    if name and dirval:
+        print(f"{name}|{dirval}|{branch}")
+PYEOF
+)
+
+if [ -z "${_SVC_ENTRIES}" ]; then
+  error "No services found in .fleet/${NAME}/info.toml. Run: fleet add ${NAME}"
 fi
+
+# ─── Push each service ───────────────────────────────────────────────────────
+PUSHED=0
+
+while IFS= read -r entry; do
+  [ -z "${entry}" ] && continue
+
+  IFS='|' read -r svc_name svc_dir svc_branch <<< "${entry}"
+
+  if [ ! -d "${svc_dir}" ]; then
+    warn "Service '${svc_name}': directory '${svc_dir}' not found — skipping"
+    continue
+  fi
+
+  if ! git -C "${svc_dir}" rev-parse --git-dir >/dev/null 2>&1; then
+    warn "Service '${svc_name}': '${svc_dir}' is not a git repository — skipping"
+    continue
+  fi
+
+  remote_branch=$(git -C "${svc_dir}" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "")
+
+  if [ -n "${remote_branch}" ]; then
+    info "Pushing '${svc_name}' (${svc_dir}, branch: ${svc_branch})..."
+    git -C "${svc_dir}" push
+  else
+    info "Pushing '${svc_name}' (${svc_dir}, branch: ${svc_branch}, setting upstream)..."
+    git -C "${svc_dir}" push --set-upstream origin "${svc_branch}"
+  fi
+
+  PUSHED=$((PUSHED + 1))
+done <<< "${_SVC_ENTRIES}"
+
+if [ "${PUSHED}" -eq 0 ]; then
+  error "No repos pushed — check service directories in .fleet/${NAME}/info.toml"
+fi
+
+info "Pushed ${PUSHED} repo(s)."
