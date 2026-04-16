@@ -19,7 +19,6 @@ case "$cmd" in
   add)      exec "$FLEET_ROOT/cli/cmd-add.sh" "$@" ;;
   rm)       exec "$FLEET_ROOT/cli/cmd-rm.sh" "$@" ;;
   restart)  exec "$FLEET_ROOT/cli/cmd-restart.sh" "$@" ;;
-  feature)  exec "$FLEET_ROOT/cli/cmd-feature.sh" "$@" ;;
   push)     exec "$FLEET_ROOT/cli/cmd-push.sh" "$@" ;;
   sync)     exec "$FLEET_ROOT/cli/cmd-sync.sh" "$@" ;;
   help|--help|-h) show_help ;;
