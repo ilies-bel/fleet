@@ -321,7 +321,6 @@ show_help() {
   echo -e "  ${BLUE}add${RESET}     <name> <branch> [--direct]   Start a QA feature container"
   echo -e "  ${BLUE}rm${RESET}      <name>|--all|--nuke          Remove feature(s) or everything"
   echo -e "  ${BLUE}restart${RESET} <name>                       Restart a feature container"
-  echo -e "  ${BLUE}feature${RESET} -c <name> [<branch>]         Create worktree+compose without starting"
   echo -e "  ${BLUE}push${RESET}    <name>                       Push worktree branch(es) to remote"
   echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] Pull latest code and rebuild"
   echo -e "  ${BLUE}help${RESET}                                 Show this help"
