@@ -1,8 +1,19 @@
 .fleet-ports
+# Per-feature directories (info.toml, docker-compose.yml, etc.)
 .fleet/*/
 !.fleet/.gitkeep
+!.fleet/fleet.toml.example
+!.fleet/shared.env.example
 .fleet-runner.pid
 .fleet-config
+# Fleet user config (per-machine, not tracked)
+.fleet/fleet.toml
+# Generated per-stack base image Dockerfiles
+.fleet/Dockerfile.feature-base.*
+# Shared env mounts (replaces .fleet-shared)
+.fleet/shared.env
+# Legacy
+.fleet-shared
 
 # Generated at fleet init time from config/nginx.conf.tmpl
 config/nginx.conf
