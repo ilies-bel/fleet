@@ -569,7 +569,7 @@ echo "${rendered_stacks}" | tr '|' '\n' | while read -r stack; do
   df="${FLEET_DIR}/Dockerfile.feature-base.${stack}"
   if [ -f "${df}" ]; then
     info "docker build -t fleet-base-${stack} ..."
-    docker build --load -t "fleet-base-${stack}" -f "${df}" "${FLEET_DIR}/"
+    docker build --load -t "fleet-base-${stack}" -f "${df}" "${FLEET_ROOT}"
   else
     warn "Dockerfile not found for stack '${stack}' — skipping build"
   fi
