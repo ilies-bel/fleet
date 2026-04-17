@@ -218,11 +218,8 @@ _first_svc=true
     echo "    image: ${svc_img}"
     echo "    container_name: fleet-${NAME}-${svc_nm}"
 
-    if [ "${_first_svc}" = "true" ] && [ -n "${FLEET_PORT_PROXY}" ]; then
-      echo "    ports:"
-      echo "      - \"${FLEET_PORT_PROXY}:${svc_port:-${FLEET_PORT_PROXY}}\""
-      _first_svc=false
-    fi
+    # Feature containers are internal — accessed via gateway proxy over fleet-net.
+    # No host port binding; avoids collisions with the gateway's own :3000/:4000.
 
     echo "    environment:"
     echo "      - APP_NAME=${NAME}-${svc_nm}"
