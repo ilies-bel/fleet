@@ -510,8 +510,8 @@ else
   echo -e "${GREEN}── Fleet: first-time project setup ──────────────────────────────${RESET}"
   echo ""
 
-  ask "Project root (absolute path)" "$(pwd)"; PROJECT_ROOT="${_PROMPT_RESULT}"
-  [ -d "${PROJECT_ROOT}" ] || error "Project root '${PROJECT_ROOT}' does not exist"
+  PROJECT_ROOT="$(pwd)"
+  info "Project root: ${PROJECT_ROOT}"
 
   local_default_name=$(basename "${PROJECT_ROOT}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
   ask "Project name" "${local_default_name}"; PROJECT_NAME="${_PROMPT_RESULT}"
