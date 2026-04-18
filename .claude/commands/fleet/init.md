@@ -2,7 +2,7 @@
 name: fleet:init
 description: End-to-end fleet init for a project. Auto-tunes fleet.conf for the detected stack, runs the bash fleet init, waits for the container, and verifies /actuator/health. Use instead of running 'fleet init' directly when you want it Just To Work.
 user-invocable: true
-argument-hint: "<project-path> [branch]"
+argument-hint: "[branch]"
 ---
 
 Run the full fleet init flow end-to-end: detect the project stack, auto-tune `fleet.conf`, invoke `fleet init` non-interactively via tmux, wait for the backend container, then verify `/actuator/health`.
@@ -17,19 +17,17 @@ Run the full fleet init flow end-to-end: detect the project stack, auto-tune `fl
 
 ---
 
-## Step 0 — Parse arguments and locate fleet root
+## Step 0 — Resolve project path and branch, locate fleet root
 
-The command receives arguments via `$ARGUMENTS`. Parse them:
+The project path is the current working directory. The branch comes from `$ARGUMENTS`:
 
 ```
-PROJECT_PATH = first token of $ARGUMENTS  (required — absolute or relative to cwd)
-BRANCH       = second token, default "main"
+PROJECT_PATH = $(pwd)
+BRANCH       = first token of $ARGUMENTS, default $(git -C "$PROJECT_PATH" rev-parse --abbrev-ref HEAD)
 ```
 
 **Validation:**
-- If `PROJECT_PATH` is empty → print `Error: project-path is required. Usage: /fleet:init <project-path> [branch]` and stop.
-- Resolve to absolute path (prepend cwd if relative).
-- If the resolved path does not exist → print `Error: path '<resolved>' does not exist.` and stop.
+- If `$PROJECT_PATH` is not a git repo and no branch was passed → print `Error: cwd is not a git repo and no branch was provided. Usage: /fleet:init [branch]` and stop.
 - If none of `pom.xml`, `package.json`, `build.gradle`, or subdirectory containing these exists in the project root → warn "No recognizable project files found. Proceeding anyway."
 
 Locate the fleet repo root:
@@ -260,7 +258,7 @@ while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
     echo "Recovery options:"
     echo "  1. Check build errors: docker logs fleet-main 2>&1 | grep -i error"
     echo "  2. Verify BACKEND_BUILD_CMD in ${PROJECT_PATH}/fleet.conf"
-    echo "  3. Re-run after fixing: /fleet:init $PROJECT_PATH $BRANCH"
+    echo "  3. Re-run after fixing (from $PROJECT_PATH): /fleet:init $BRANCH"
     exit 1
   fi
   echo "Waiting for backend... (attempt ${ATTEMPT}/${MAX_ATTEMPTS}, next check in 30s)"
