@@ -52,8 +52,9 @@ link_one() {
     echo "  replacing stale symlink: ${dest} -> ${current}"
     ln -sf "${src}" "${dest}"
   elif [ -e "${dest}" ]; then
-    echo "  warning: ${dest} exists and is not a symlink — skipping"
-    return 0
+    echo "  overwriting existing: ${dest}"
+    rm -rf "${dest}"
+    ln -s "${src}" "${dest}"
   else
     ln -s "${src}" "${dest}"
   fi
@@ -77,11 +78,14 @@ echo "Linking Claude Code assets into ${USER_CLAUDE}..."
 # Slash commands: every file under .claude/commands/fleet/
 link_glob "${REPO_CLAUDE}/commands/fleet" "${USER_CLAUDE}/commands/fleet" "*"
 
-# Skills: only fleet-* (avoid clobbering unrelated user skills)
-link_glob "${REPO_CLAUDE}/skills" "${USER_CLAUDE}/skills" "fleet-*"
+# Skills: every skill under .claude/skills/
+link_glob "${REPO_CLAUDE}/skills" "${USER_CLAUDE}/skills" "*"
 
 # Agents: every file under .claude/agents/
 link_glob "${REPO_CLAUDE}/agents" "${USER_CLAUDE}/agents" "*"
+
+# Hooks: every file under .claude/hooks/ (wire into settings.json separately)
+link_glob "${REPO_CLAUDE}/hooks" "${USER_CLAUDE}/hooks" "*"
 
 echo ""
 echo "Done. Verify:"
