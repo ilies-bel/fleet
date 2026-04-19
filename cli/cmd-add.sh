@@ -21,7 +21,7 @@ usage() {
   echo ""
   echo "Examples:"
   echo "  fleet add my-feature"
-  echo "  fleet add only-be --service backend=./d2r2-backend:fleet-base-spring"
+  echo "  fleet add only-be --service backend=./d2r2-backend:fleet-feature-base"
   exit 1
 }
 
@@ -157,7 +157,7 @@ else
     svc_run=$(  _at run)
     svc_port=$( _at port)
 
-    svc_image="fleet-base-${svc_stack}"
+    svc_image="fleet-feature-base"
     svc_abs_path="${FLEET_PROJECT_ROOT}/${svc_dir}"
 
     [ -d "${svc_abs_path}" ] \

@@ -1,9 +1,0 @@
-FROM node:${NODE_VERSION}-slim
-
-WORKDIR /app
-RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
-
-ENV NODE_ENV=development
-EXPOSE ${FRONTEND_PORT}
-
-CMD ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0 --port ${FRONTEND_PORT}"]

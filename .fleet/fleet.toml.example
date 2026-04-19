@@ -16,21 +16,6 @@ proxy = 3000    # nginx reverse proxy (public-facing)
 admin = 4000    # fleet gateway admin API
 db    = 5432    # host-mapped database port (optional; 0 = disabled)
 
-# ─── Stacks ───────────────────────────────────────────────────────────────────
-# One [[stacks]] entry per technology used by the project.
-# `type` is an identifier (spring | next | node | go | vite | …).
-# `dockerfile` is the path to the generated base image Dockerfile, relative to
-# the project root.  fleet init writes these files; you should not edit them by
-# hand unless you know what you are doing.
-
-[[stacks]]
-type       = "spring"
-dockerfile = ".fleet/Dockerfile.feature-base.spring"
-
-[[stacks]]
-type       = "next"
-dockerfile = ".fleet/Dockerfile.feature-base.next"
-
 # ─── Services ─────────────────────────────────────────────────────────────────
 # One [[services]] entry per deployable unit.
 # `name`  — logical identifier used in fleet commands (e.g. fleet add <name>)

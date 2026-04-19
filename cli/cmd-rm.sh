@@ -116,13 +116,10 @@ case "$MODE" in
       || warn "Gateway not found"
     docker rmi fleet-gateway 2>/dev/null || true
 
-    # Remove all fleet base images (fleet-base-* glob)
-    while IFS= read -r img; do
-      [ -z "${img}" ] && continue
-      docker rmi "${img}" 2>/dev/null && info "Image '${img}' removed" \
-        || warn "Image '${img}' not found or in use"
-    done < <(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
-               | grep '^fleet-base-' || true)
+    # Remove the unified fleet-feature-base image
+    docker rmi fleet-feature-base 2>/dev/null \
+      && info "Image 'fleet-feature-base' removed" \
+      || warn "Image 'fleet-feature-base' not found or in use"
 
     docker network rm fleet-net 2>/dev/null && info "Network 'fleet-net' removed" \
       || warn "Network not found"
