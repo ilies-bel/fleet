@@ -17,17 +17,106 @@ Developer Browser
       │         │                                  Feature management API
       │         │                                  OAuth relay
       │         │
-      └── localhost:3000  ──── Gateway Proxy ─────► fleet-<active>:3000 (internal)
+      └── localhost:3000  ──── Gateway Proxy ─────► fleet-<active>:80 (internal)
                                                           │
-                                          ┌───────────────┼───────────────┐
-                                          │               │               │
-                                       nginx:3000   Spring Boot:8081  PostgreSQL:5432
-                                          │               │
-                                   Next.js static    REST API
-                                    export (SSG)
+                                                    supervisord (PID 1)
+                                                          │
+                                    ┌─────────────────────┼─────────────────────┐
+                                    │                     │                     │
+                              nginx:80          Spring Boot:8081        PostgreSQL:5432
+                          (path fan-out)            REST API                (if configured)
+                           /backend → :8081
+                           /          → frontend
+                                          │
+                                    Next.js static
+                                    export (SPA fallback)
+                                    
+                                    peers: wiremock:8080, static-http:9090, etc.
 ```
 
-All feature containers run exclusively on the internal `fleet-net` Docker network — they are never exposed on host ports.
+All feature containers run exclusively on the internal `fleet-net` Docker network — they are never exposed on host ports. Each container is a self-contained unit with supervisord managing all processes (services and optional peers).
+
+---
+
+## Feature Container Topology (Mono-Container Model)
+
+Each feature runs as a **single container** named `fleet-${NAME}` where `${NAME}` matches the feature name passed to `fleet add`. The container is a complete, isolated runtime:
+
+- **Container name**: `fleet-${NAME}` (no per-service suffix)
+- **Valid feature names**: Must match `^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$`
+  - Valid: `login-fix`, `auth-v2`, `feat.auth`, `auth.v2-beta`
+  - Invalid: `MyFeature` (uppercase), `auth fix` (space), `auth_fix` (underscore), `auth.` (trailing dot)
+- **PID 1**: supervisord (not a shell or user app)
+- **Network**: Only reachable from gateway and sibling containers on `fleet-net`
+- **Port exposure**: None to host; gateway proxies `http://fleet-${NAME}:80`
+
+### Internal Process Layout
+
+Inside the container, supervisord manages multiple **programs** with priority ordering:
+
+1. **Database** (if configured) — PostgreSQL:5432, priority 10
+2. **Services** (from `[[services]]` in fleet.toml) — each as a supervisord program, priority 20+
+   - Name: sanitized service name (e.g. `backend`, `frontend`)
+   - Port: per service config
+3. **Peers** (from `[[peers]]` in fleet.toml) — optional stubs, priority 30+
+   - **wiremock**: WireMock jar running in standalone mode, mappings mounted from host
+   - **static-http**: Minimal Go/Node HTTP server, serves test fixtures
+   - **shell**: Arbitrary command (e.g. Node.js stub server, bash script)
+4. **nginx** (priority 40) — internal reverse proxy listening on :80
+   - Routes `/backend/` → service backend port
+   - Routes `/` → frontend service (or static export if Next.js)
+   - Peers are addressable at `localhost:${peer_port}` within the container
+
+All internal communication (services to peers, peer to peer) uses `localhost` — they share the container network namespace.
+
+### Peer Types
+
+Peers are optional stub services co-located in the feature container, defined in `fleet.toml` under `[[peers]]`. They are **not exposed to the gateway** — internal traffic only. Three types:
+
+| Type | Purpose | Configuration |
+|------|---------|---------------|
+| **wiremock** | Mock HTTP endpoints with stateful request/response mappings (WireMock jar) | `mappings` (path to mappings dir), `files` (path to __files dir), `port` (container-internal) |
+| **static-http** | Minimal static HTTP server for test fixtures | `port` only |
+| **shell** | Arbitrary shell command (e.g. Node.js stub server, bash script) | `cmd` (command to run), `port` (must match what cmd listens on) |
+
+Example (from `fleet.toml`):
+
+```toml
+[[peers]]
+name     = "wiremock-edf"
+type     = "wiremock"
+port     = 8080
+mappings = "wiremock-edf/mappings"
+files    = "wiremock-edf/__files"
+
+[[peers]]
+name = "mock-api"
+type = "static-http"
+port = 9090
+
+[[peers]]
+name = "custom-stub"
+type = "shell"
+port = 7070
+cmd  = "node /app/custom-stub/server.js"
+```
+
+Peers are useful for:
+- Decoupling service tests from external APIs (mock third-party services)
+- Testing error paths and edge cases (stateful request matching)
+- Isolating feature-branch behavior (each feature gets its own peer instances)
+
+### nginx Path Fanout
+
+The nginx configuration inside the container handles path-based routing:
+
+```
+:80 (external entry from gateway)
+  /backend/   → localhost:${backend_port} (Spring Boot, Go, etc.)
+  /           → localhost:${frontend_port} or /var/www/html (Next.js static export)
+```
+
+This allows a single port (80) exposed to the gateway while isolating internal service ports. Services and peers access each other via `localhost:${peer_port}`.
 
 ---
 
@@ -119,7 +208,7 @@ On gateway start, scans Docker for all `fleet-*` named containers (running or st
 
 ### `proxy.js` — Transparent Proxy
 
-Uses `http-proxy-middleware`. Routes all port-3000 traffic to `http://fleet-<activeFeature>:3000`.
+Uses `http-proxy-middleware`. Routes all port-3000 traffic to `http://fleet-<activeFeature>:80` (single container per feature, nginx inside).
 
 - Removes `etag` / `last-modified` headers to prevent cross-feature cache pollution
 - Sets `X-Fleet-Feature` request header
@@ -130,14 +219,15 @@ Uses `http-proxy-middleware`. Routes all port-3000 traffic to `http://fleet-<act
 
 **Registration** (`POST /register-feature`, `DELETE /register-feature/:name`): Called by `qa-add.sh` and `qa-teardown.sh` shell scripts.
 
-**OAuth relay** (`GET /auth/callback`): Decodes the base64 `state` parameter, extracts the `feature` key, activates that feature, then redirects the browser to `http://localhost:3000/auth/callback`. This allows a single OAuth callback URL to serve all features.
+**OAuth relay** (`GET /auth/callback`): Decodes the base64 `state` parameter, extracts the `feature` key, activates that feature container, then redirects the browser to `http://localhost:3000/auth/callback`. This allows a single OAuth callback URL to serve all features. The transparent proxy then routes the callback to the now-active `fleet-${feature}:80`.
 
 ```
 OAuth Provider → localhost:4000/auth/callback?code=...&state=<b64>
                     │ decode state → { feature: "login-fix" }
-                    │ activate "login-fix"
+                    │ activate "login-fix" container
                     └── redirect → localhost:3000/auth/callback?code=...&state=<b64>
-                                       │ proxied to fleet-login-fix:3000
+                                       │ proxied to fleet-login-fix:80
+                                       │ (nginx routes /auth/callback based on config)
 ```
 
 ---
@@ -155,39 +245,42 @@ Built once, reused for all features. Layers:
 5. Maven 3.9.6
 6. App directories + config files
 
-### Container Startup (`entrypoint.sh`) — 7 Stages
+### Container Startup (`entrypoint.sh`) — Multi-Stage Build
 
-Runs once on first container start. A sentinel file at `/tmp/.fleet-built` prevents re-running on restart.
+Runs once on first container start. A sentinel file at `/tmp/.fleet-built` prevents re-running on restart. Stages are driven by `FLEET_SERVICES_JSON` and `FLEET_PEERS_JSON` read from `.fleet/fleet.toml`:
 
-| Stage | Action |
-|-------|--------|
-| 1 | Seed `node_modules` from read-only volume mount (avoids full `npm install`) |
-| 2 | Patch platform binaries — fetch Linux arm64 variants of esbuild, swc, lightningcss, etc. |
-| 3 | `npm run build` — Next.js static export to `/var/www/html` |
-| 4 | Patch bundle URLs — replace `__FLEET_BACKEND_URL__` → `/backend`, `__FLEET_APP_URL__` → `localhost:3000` |
-| 5 | `mvn package -P jooq-codegen` — build Spring Boot JAR |
-| 6 | PostgreSQL `initdb`, create the configured database and user (from `DB_NAME` / `DB_USER`) |
-| 7 | `supervisord -n` — launch all processes (blocks, PID 1 equivalent) |
+1. **Seed phase**: Populate `node_modules` from read-only volume mount (avoids full `npm install`)
+2. **Platform binary patching**: Fetch Linux arm64 variants of esbuild, swc, lightningcss, etc. (for Next.js builds)
+3. **Build services**: For each service in `FLEET_SERVICES_JSON`:
+   - Run the service's `build` command (e.g. `npm run build`, `mvn package`)
+4. **Patch bundle URLs**: Replace `__FLEET_BACKEND_URL__` → `/backend`, `__FLEET_APP_URL__` → `localhost:3000` (for SPA config)
+5. **Initialize database** (if configured): PostgreSQL `initdb`, create database/user from fleet.toml
+6. **supervisord** (`supervisord -n`): PID 1, launch all programs (services, peers, database, nginx)
 
-### Process Management (`supervisord.conf`)
+### Process Management (supervisord)
 
-Three programs with explicit priority ordering:
+Processes are defined in `supervisord.conf` generated from `FLEET_SERVICES_JSON` and `FLEET_PEERS_JSON`. Explicit priority ordering ensures safe startup:
 
-| Priority | Program | Port |
-|----------|---------|------|
-| 10 | `postgresql` | 5432 |
-| 20 | `backend` (Spring Boot) | 8081 |
-| 30 | `nginx` | 3000 |
+| Priority | Type | Examples |
+|----------|------|----------|
+| 10 | Database | `postgresql:5432` (if `ports.db` is set and `DB_NAME` is configured) |
+| 20 | Services | `backend:8081`, `frontend:3000`, etc. |
+| 30 | Peers | `wiremock-edf:8080`, `mock-api:9090`, `custom-stub:7070` |
+| 40 | nginx | `nginx:80` (depends on all above) |
 
-`wait-for-pg.sh` ensures PostgreSQL accepts connections before Spring Boot starts.
+Each service and peer becomes a supervisord program with its own log stream. `wait-for-pg.sh` ensures PostgreSQL accepts connections before dependent services start.
 
-### nginx Routing (`nginx.conf`)
+### nginx Routing (internal path fan-out)
+
+The nginx configuration generated from `FLEET_SERVICES_JSON` handles path-based routing on `:80`:
 
 ```
-:3000
-  /backend/  →  localhost:8081 (Spring Boot REST API)
-  /          →  /var/www/html (Next.js static export, SPA fallback)
+:80 (incoming from gateway)
+  /backend/  →  localhost:${backend_port} (e.g. Spring Boot :8081)
+  /          →  localhost:${frontend_port} or /var/www/html (Next.js static)
 ```
+
+All routing happens internally — services and peers communicate via `localhost`. nginx is the single external interface the gateway proxies to.
 
 ---
 
@@ -327,11 +420,14 @@ Error: `{ error: "message" }` with appropriate HTTP status (404, 409, 502, 503)
 
 | Decision | Rationale |
 |----------|-----------|
-| Single base image for all features | Avoids rebuilding OS layer, JDK, Maven per feature |
-| Git worktrees instead of clones | Shares `.git` object store — fast, no disk duplication |
-| In-memory registry + reconcile | No database dependency; Docker itself is the source of truth |
-| Zero-dep Docker client | Reduces gateway image size and attack surface |
-| Supervisor in single container | Simpler than multi-container compose per feature; fewer moving parts |
-| Node_modules seed volume | Avoids re-downloading packages for every new feature branch |
-| Static Next.js export | No Node.js runtime needed in production container path; nginx serves directly |
-| Host runner for iTerm (port 4001) | Gateway is sandboxed in Docker; AppleScript must run on the host |
+| **Mono-container per feature** (`fleet-${NAME}`) | Simpler orchestration than multi-container compose; supervisord manages all processes (services, peers, database, nginx); no cross-container network latency |
+| Single base image for all features | Avoids rebuilding OS layer, JDK, Maven per feature; all features share base layers |
+| Git worktrees instead of clones | Shares `.git` object store — fast, no disk duplication; features don't shadow each other's git history |
+| In-memory registry + reconcile | No database dependency; Docker is source of truth; lightweight stateless gateway |
+| Zero-dep Docker client | Reduces gateway image size and attack surface; uses only Node.js built-in http module |
+| supervisord as PID 1 | Handles process supervision, signal propagation, log multiplexing; clean shutdown on container stop |
+| Internal nginx path fan-out | Single port (80) exposed to gateway; services/peers communicate via localhost; decouples internal port assignment from external topology |
+| Peer stubs (wiremock, static-http, shell) | Mock external services without external dependencies; each feature gets isolated peer instances |
+| Node_modules seed volume | Avoids full `npm install` per feature; shares base dependencies across branches |
+| Static Next.js export | No Node.js runtime in production path; nginx serves directly, reduces resource usage |
+| Host runner for iTerm (port 4001) | Gateway sandboxed in Docker; AppleScript must run on host to open iTerm tabs |
