@@ -20,7 +20,7 @@ export async function reconcileFromDocker() {
   const qaContainers = containers.filter((c) =>
     c.Names.some((n) => {
       const bare = n.replace(/^\//, '');
-      return /^fleet-[a-z0-9-]+$/.test(bare) && bare !== GATEWAY_NAME;
+      return /^fleet-[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$/.test(bare) && bare !== GATEWAY_NAME;
     })
   );
 
