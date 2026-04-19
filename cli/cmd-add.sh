@@ -198,6 +198,24 @@ if [ -f "${SHARED_ENV_FILE}" ]; then
   done < "${SHARED_ENV_FILE}"
 fi
 
+# ─── Decide whether to provision a Postgres sidecar ──────────────────────────
+# Spring / Gradle services almost always need a relational DB at startup
+# (Liquibase/Flyway migrations, JPA/jOOQ wiring). Provision a dedicated postgres
+# container per feature so migrations have somewhere to run without reaching
+# out to the host's `localhost:5432`. Credentials default to the project name;
+# override via DB_NAME / DB_USER / DB_PASSWORD env vars on the fleet caller's
+# shell (e.g. through .fleet/shared.env).
+NEEDS_DB=false
+for _entry in "${EFFECTIVE_SERVICES[@]}"; do
+  IFS='|' read -r _nm _path _img _st _bld _run _port <<< "${_entry}"
+  case "${_st}" in spring|gradle) NEEDS_DB=true ;; esac
+done
+
+SIDECAR_DB_NAME="${DB_NAME:-${FLEET_PROJECT_NAME}}"
+SIDECAR_DB_USER="${DB_USER:-${FLEET_PROJECT_NAME}}"
+SIDECAR_DB_PASSWORD="${DB_PASSWORD:-${FLEET_PROJECT_NAME}}"
+SIDECAR_DB_HOST="postgres"   # reachable via compose service DNS on fleet-net
+
 # ─── Generate docker-compose.yml ─────────────────────────────────────────────
 info "Generating .fleet/${NAME}/docker-compose.yml..."
 mkdir -p "${FEATURE_DIR}"
@@ -209,6 +227,27 @@ _first_svc=true
 
 {
   echo "services:"
+
+  # Postgres sidecar (emitted first so it's ready before JVM services connect)
+  if [ "${NEEDS_DB}" = true ]; then
+    echo "  postgres:"
+    echo "    image: postgres:16-alpine"
+    echo "    container_name: fleet-${NAME}-postgres"
+    echo "    environment:"
+    echo "      - POSTGRES_DB=${SIDECAR_DB_NAME}"
+    echo "      - POSTGRES_USER=${SIDECAR_DB_USER}"
+    echo "      - POSTGRES_PASSWORD=${SIDECAR_DB_PASSWORD}"
+    echo "    volumes:"
+    echo "      - fleet-${NAME}-pgdata:/var/lib/postgresql/data"
+    echo "    networks:"
+    echo "      - fleet-net"
+    echo "    healthcheck:"
+    echo "      test: [\"CMD-SHELL\", \"pg_isready -U ${SIDECAR_DB_USER} -d ${SIDECAR_DB_NAME}\"]"
+    echo "      interval: 5s"
+    echo "      timeout: 5s"
+    echo "      retries: 10"
+    echo ""
+  fi
 
   for i in "${!EFFECTIVE_SERVICES[@]}"; do
     IFS='|' read -r svc_nm svc_path svc_img svc_stack svc_build svc_run svc_port <<< "${EFFECTIVE_SERVICES[$i]}"
@@ -239,10 +278,21 @@ _first_svc=true
     # host's 'localhost' is not reachable. Spawned Testcontainers (Ryuk + fixtures)
     # bind ports on the Docker host; point clients at host.docker.internal so the
     # build container can reach them. Docker Desktop (macOS/Windows) auto-resolves
-    # this hostname; on Linux, fleet adds an extra_hosts entry below.
+    # this hostname; on Linux, configure --add-host at daemon level.
     case "${svc_stack}" in
       spring|gradle)
         echo "      - TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal"
+        # Point Spring Boot at the postgres sidecar. Env vars are higher priority
+        # than profile-packaged application-<profile>.yml (Boot property source
+        # order #10 > #13), so this beats any hardcoded localhost:5432 in the jar.
+        if [ "${NEEDS_DB}" = true ]; then
+          echo "      - SPRING_DATASOURCE_URL=jdbc:postgresql://${SIDECAR_DB_HOST}:5432/${SIDECAR_DB_NAME}"
+          echo "      - SPRING_DATASOURCE_USERNAME=${SIDECAR_DB_USER}"
+          echo "      - SPRING_DATASOURCE_PASSWORD=${SIDECAR_DB_PASSWORD}"
+          echo "      - SPRING_LIQUIBASE_URL=jdbc:postgresql://${SIDECAR_DB_HOST}:5432/${SIDECAR_DB_NAME}"
+          echo "      - SPRING_LIQUIBASE_USER=${SIDECAR_DB_USER}"
+          echo "      - SPRING_LIQUIBASE_PASSWORD=${SIDECAR_DB_PASSWORD}"
+        fi
         ;;
     esac
     # JVM stacks often use Testcontainers for integration-test / codegen workflows
@@ -270,6 +320,18 @@ _first_svc=true
     fi
     echo "    networks:"
     echo "      - fleet-net"
+    # Wait for postgres to be healthy before the JVM service starts. Harmless
+    # for non-DB services because they still get scheduled concurrently; only
+    # the service-healthy gate adds at most the postgres readiness delay.
+    if [ "${NEEDS_DB}" = true ]; then
+      case "${svc_stack}" in
+        spring|gradle)
+          echo "    depends_on:"
+          echo "      postgres:"
+          echo "        condition: service_healthy"
+          ;;
+      esac
+    fi
     # Note: Docker Desktop (macOS/Windows) auto-resolves host.docker.internal.
     # On native Linux, users must configure --add-host=host.docker.internal:host-gateway
     # at daemon level (via daemon.json) — fleet does not inject extra_hosts here
@@ -280,6 +342,13 @@ _first_svc=true
   echo "networks:"
   echo "  fleet-net:"
   echo "    external: true"
+
+  # Named volume for the postgres sidecar's data directory.
+  if [ "${NEEDS_DB}" = true ]; then
+    echo ""
+    echo "volumes:"
+    echo "  fleet-${NAME}-pgdata:"
+  fi
 } > "${COMPOSE_FILE}"
 
 # ─── Write .fleet/<name>/info.toml ───────────────────────────────────────────
