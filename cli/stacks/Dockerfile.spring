@@ -38,15 +38,18 @@ RUN pg_dropcluster --stop ${POSTGRES_VERSION} main 2>/dev/null || true \
  && chmod 700 /var/lib/postgresql/${POSTGRES_VERSION}/main
 
 # ── Config files ──────────────────────────────────────────────────────────────
-COPY config/nginx.conf       /etc/nginx/sites-available/qa
-COPY config/supervisord.conf /etc/supervisor/conf.d/qa.conf
-COPY config/wait-for-pg.sh   /usr/local/bin/wait-for-pg.sh
-COPY config/entrypoint.sh    /entrypoint.sh
+COPY config/nginx.conf           /etc/nginx/sites-available/qa
+COPY config/supervisord.conf     /etc/supervisor/conf.d/qa.conf
+COPY config/wait-for-pg.sh       /usr/local/bin/wait-for-pg.sh
+COPY config/entrypoint.sh        /entrypoint.sh
+COPY config/entrypoint-spring.sh /entrypoint-spring.sh
 
 RUN rm -f /etc/nginx/sites-enabled/default \
  && ln -s /etc/nginx/sites-available/qa /etc/nginx/sites-enabled/qa \
- && chmod +x /usr/local/bin/wait-for-pg.sh /entrypoint.sh
+ && chmod +x /usr/local/bin/wait-for-pg.sh /entrypoint.sh /entrypoint-spring.sh
 
-# /source is the read-only project volume mounted at runtime
-EXPOSE ${PROXY_PORT}
-ENTRYPOINT ["/entrypoint.sh"]
+# Per-service container model: each service container runs only its own build
+# + run commands. The legacy /entrypoint.sh remains for back-compat with the
+# monolithic single-container model.
+EXPOSE ${BACKEND_PORT}
+ENTRYPOINT ["/entrypoint-spring.sh"]
