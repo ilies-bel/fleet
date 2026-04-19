@@ -324,6 +324,7 @@ show_help() {
   echo -e "  ${BLUE}push${RESET}    <name>                       Push service branches to remote"
   echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] Pull latest code and rebuild"
   echo -e "  ${BLUE}install-claude${RESET} [--local|--global] [--force]  Install Claude Code assets (agents, skills, commands)"
+  echo -e "  ${BLUE}install-claude${RESET} [--local|--global] [--force]  Install Claude Code assets (agents, skills, commands)"
   echo -e "  ${BLUE}help${RESET}                                 Show this help"
   echo ""
   echo "Environment:"

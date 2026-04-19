@@ -81,7 +81,7 @@ pick_port() {
   printf '%s' "${_PROMPT_RESULT}"
 }
 
-# ─── Stack inference (implements fleet-init SKILL.md detection rules) ────────
+# ─── Stack inference ─────────────────────────────────────────────────────────
 
 # infer_stack SERVICE_DIR — prints the detected stack type.
 # Detection order: next → vite → spring → gradle → go → node → unknown
