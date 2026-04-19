@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+#
+# .fleet/Dockerfile.feature-base
+# Unified fleet feature-container base image.
+#
+# Bakes in every runtime a feature might need so no per-stack variant is
+# required.  The single tag `fleet-feature-base` is referenced by all
+# fleet add / reconcile operations.
+#
+# Contents:
+#   Ubuntu 24.04, Java 21 (Temurin), Node 20 LTS, PostgreSQL 16,
+#   nginx, supervisord, Python 3.12, curl / jq / git / tini,
+#   WireMock standalone jar at /opt/wiremock/wiremock.jar,
+#   non-root user `developer` (uid 1001).
+
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# ── Temurin 21 signing key + repo ─────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg \
+ && mkdir -p /etc/apt/keyrings \
+ && curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
+        | gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] \
+https://packages.adoptium.net/artifactory/deb \
+$(. /etc/os-release && echo $VERSION_CODENAME) main" \
+        > /etc/apt/sources.list.d/adoptium.list \
+ && rm -rf /var/lib/apt/lists/*
+
+# ── NodeSource 20.x signing key + repo ────────────────────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] \
+https://deb.nodesource.com/node_20.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list \
+ && rm -rf /var/lib/apt/lists/*
+
+# ── Main package install ───────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        temurin-21-jdk \
+        nodejs \
+        postgresql-16 \
+        nginx \
+        supervisor \
+        python3.12 python3.12-venv python3-pip \
+        git \
+        jq \
+        tini \
+        curl \
+        wget \
+        unzip \
+        lsof \
+        procps \
+ && rm -rf /var/lib/apt/lists/*
+
+# ── Non-root user ─────────────────────────────────────────────────────────────
+RUN useradd -m -u 1001 -s /bin/bash developer
+
+# ── WireMock standalone jar ───────────────────────────────────────────────────
+ARG WIREMOCK_VERSION=3.10.0
+RUN mkdir -p /opt/wiremock \
+ && curl -fsSL \
+    "https://repo1.maven.org/maven2/org/wiremock/wiremock-standalone/${WIREMOCK_VERSION}/wiremock-standalone-${WIREMOCK_VERSION}.jar" \
+    -o /opt/wiremock/wiremock.jar \
+ && chmod 644 /opt/wiremock/wiremock.jar
+
+# ── Drop the Ubuntu-created pg cluster so initdb runs clean ───────────────────
+# The postgresql-16 package runs pg_createcluster in post-install, leaving a
+# partial cluster at the default path.  Drop it so entrypoint.sh's own initdb
+# starts from a clean slate.
+RUN pg_dropcluster --stop 16 main 2>/dev/null || true \
+ && rm -rf /var/lib/postgresql/16/main \
+ && mkdir -p /var/lib/postgresql/16/main \
+ && chown -R postgres:postgres /var/lib/postgresql \
+ && chmod 700 /var/lib/postgresql/16/main
+
+# ── Directory structure ────────────────────────────────────────────────────────
+RUN mkdir -p /build /app /var/www/html /var/log/supervisor \
+ && chown developer:developer /build /app /var/www/html
+
+# ── Config files from qa-fleet ────────────────────────────────────────────────
+COPY config/nginx.conf.tmpl          /etc/nginx/sites-available/qa.tmpl
+COPY config/supervisord.conf         /etc/supervisor/conf.d/qa.conf
+COPY config/wait-for-pg.sh           /usr/local/bin/wait-for-pg.sh
+COPY config/entrypoint.sh            /entrypoint.sh
+COPY config/entrypoint-spring.sh     /entrypoint-spring.sh
+
+RUN rm -f /etc/nginx/sites-enabled/default \
+ && ln -s /etc/nginx/sites-available/qa.tmpl /etc/nginx/sites-enabled/qa \
+ && chmod +x /usr/local/bin/wait-for-pg.sh /entrypoint.sh /entrypoint-spring.sh
+
+# ── Default entrypoint uses tini as PID 1 ─────────────────────────────────────
+# Individual feature containers override CMD / ENTRYPOINT as needed.
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

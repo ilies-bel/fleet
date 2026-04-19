@@ -4,12 +4,11 @@
 !.fleet/.gitkeep
 !.fleet/fleet.toml.example
 !.fleet/shared.env.example
+!.fleet/Dockerfile.feature-base
 .fleet-runner.pid
 .fleet-config
 # Fleet user config (per-machine, not tracked)
 .fleet/fleet.toml
-# Generated per-stack base image Dockerfiles
-.fleet/Dockerfile.feature-base.*
 # Shared env mounts (replaces .fleet-shared)
 .fleet/shared.env
 # Legacy
