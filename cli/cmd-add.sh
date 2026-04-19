@@ -13,20 +13,25 @@ source "${SCRIPT_DIR}/common.sh"
 
 # ─── Usage ───────────────────────────────────────────────────────────────────
 usage() {
-  echo "Usage: fleet add <name>"
+  echo "Usage: fleet add <name> [--title <title>]"
   echo ""
-  echo "  name    Feature name (lowercase letters, numbers, hyphens, dots)"
+  echo "  name     Feature name (lowercase letters, numbers, hyphens, dots)"
+  echo "  --title  Human-readable title shown in the dashboard (optional)"
   echo ""
   echo "  Starts a single container fleet-<name> that runs every [[services]]"
   echo "  and [[peers]] entry from .fleet/fleet.toml under supervisord."
   echo ""
+  echo "  Requires a git worktree at the path resolved by [project].worktree_template."
+  echo "  Create one first: git worktree add .worktrees/<name> <branch>"
+  echo ""
   echo "Examples:"
   echo "  fleet add my-feature"
+  echo "  fleet add my-feature --title 'My feature title'"
   exit 1
 }
 
 # ─── Args ────────────────────────────────────────────────────────────────────
-if [ -z "${1:-}" ]; then
+if [ -z "${1:-}" ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   usage
 fi
 
@@ -35,15 +40,57 @@ shift
 
 validate_feature_name "${NAME}"
 
-if [ $# -gt 0 ]; then
-  error "fleet add no longer accepts extra arguments. All services run in one container."
-fi
+# Parse remaining args: accept only --title
+FEATURE_TITLE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --title)
+      [ -n "${2:-}" ] || error "fleet add: --title requires a value"
+      FEATURE_TITLE="$2"
+      shift 2
+      ;;
+    *)
+      error "fleet add: unknown argument '$1'. See: fleet add --help"
+      ;;
+  esac
+done
 
 # ─── Load fleet.toml ─────────────────────────────────────────────────────────
 load_fleet_toml
 
 _PYBIN=$(_find_python_with_tomllib) \
   || error "No python3 with tomllib/tomli found. Install python >=3.11 or: pip3 install tomli"
+
+# ─── Resolve worktree path (hard-required) ───────────────────────────────────
+# worktree_template must be set in fleet.toml [project] section.
+if [ -z "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
+  error "fleet add: [project].worktree_template is not set in .fleet/fleet.toml.
+  Add it under [project]:
+    worktree_template = \".worktrees/{name}\"
+  Then run: fleet init (to regenerate) or edit .fleet/fleet.toml manually."
+fi
+
+WORKTREE_PATH=$(fleet_resolve_worktree "${NAME}")
+
+# Verify the resolved path is an active git worktree (not just any directory)
+if ! git -C "${WORKTREE_PATH}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  error "fleet add: worktree '${WORKTREE_PATH}' does not exist.
+  Create it first:
+    git worktree add ${WORKTREE_PATH} <branch>
+  Or check worktree_template in .fleet/fleet.toml."
+fi
+
+# ─── Resolve the feature title ────────────────────────────────────────────────
+# --title flag takes precedence; interactive prompt if tty; fallback to NAME.
+if [ -z "${FEATURE_TITLE}" ]; then
+  if [ -t 0 ]; then
+    printf "  Feature title (shown in dashboard) [%s]: " "${NAME}"
+    read -r FEATURE_TITLE </dev/tty
+    FEATURE_TITLE="${FEATURE_TITLE:-${NAME}}"
+  else
+    FEATURE_TITLE="${NAME}"
+  fi
+fi
 
 # ─── Guard: duplicate feature ────────────────────────────────────────────────
 FEATURE_DIR="${FLEET_ROOT}/.fleet/${NAME}"
@@ -75,11 +122,18 @@ for idx in $(seq 0 $((svc_count - 1))); do
   svc_run=$(  _at run)
   svc_port=$( _at port)
 
-  svc_abs_path="${FLEET_PROJECT_ROOT}/${svc_dir}"
+  # Mount from the worktree, not the primary checkout
+  svc_abs_path="${WORKTREE_PATH}/${svc_dir}"
   [ -d "${svc_abs_path}" ] \
-    || error "Service '${svc_name}': '${svc_abs_path}' does not exist. Check project.root in .fleet/fleet.toml."
+    || error "Service '${svc_name}': '${svc_abs_path}' does not exist in worktree.
+  Expected: ${WORKTREE_PATH}/${svc_dir}
+  Check that the worktree branch has the service directory and that 'dir' in .fleet/fleet.toml is correct."
 
-  branch=$(git -C "${svc_abs_path}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+  # Read the real branch from the worktree itself
+  branch=$(git -C "${WORKTREE_PATH}" branch --show-current 2>/dev/null || echo "")
+  if [ -z "${branch}" ]; then
+    branch=$(git -C "${WORKTREE_PATH}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+  fi
   [ "${branch}" = "HEAD" ] && branch="main"
 
   SVC_NAMES+=("${svc_name}")
@@ -127,7 +181,8 @@ SIDECAR_DB_NAME="${DB_NAME:-${FLEET_PROJECT_NAME}}"
 SIDECAR_DB_USER="${DB_USER:-${FLEET_PROJECT_NAME}}"
 SIDECAR_DB_PASSWORD="${DB_PASSWORD:-${FLEET_PROJECT_NAME}}"
 
-# ─── Representative branch (first service) ───────────────────────────────────
+# ─── Representative branch (read from the worktree itself) ───────────────────
+# SVC_BRANCHES[0] already reflects the worktree's real branch (set above).
 FIRST_BRANCH="${SVC_BRANCHES[0]}"
 
 # ─── Create feature dir ───────────────────────────────────────────────────────
@@ -217,7 +272,9 @@ info "Writing .fleet/${NAME}/info.toml..."
 {
   echo "[feature]"
   echo "name    = \"${NAME}\""
+  echo "title   = \"${FEATURE_TITLE}\""
   echo "project = \"${FLEET_PROJECT_NAME}\""
+  echo "worktree = \"${WORKTREE_PATH}\""
   echo ""
   for i in "${!SVC_NAMES[@]}"; do
     echo "[[services]]"
@@ -253,7 +310,7 @@ print(json.dumps(out))
 
 info "Registering '${NAME}' with gateway..."
 HTTP_STATUS=$(gateway_post "register-feature" \
-  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${FLEET_PROJECT_ROOT}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"services\":${services_json}}")
+  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"services\":${services_json}}")
 
 if [ "${HTTP_STATUS}" != "200" ]; then
   warn "Gateway registration returned HTTP ${HTTP_STATUS} (is the gateway running?)"

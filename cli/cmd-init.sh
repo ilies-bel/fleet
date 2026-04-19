@@ -303,7 +303,7 @@ detect_services() {
 # ─── Write canonical fleet.toml ──────────────────────────────────────────────
 
 write_fleet_toml() {
-  local proj_root="$1" proj_name="$2" proxy_port="$3" admin_port="$4" db_port="$5"
+  local proj_root="$1" proj_name="$2" proxy_port="$3" admin_port="$4" db_port="$5" worktree_tmpl="${6:-}"
   local i stack
 
   mkdir -p "${FLEET_DIR}"
@@ -314,6 +314,7 @@ write_fleet_toml() {
     echo "[project]"
     echo "name = \"${proj_name}\""
     echo "root = \"${proj_root}\""
+    echo "worktree_template = \"${worktree_tmpl}\""
     echo ""
     echo "[ports]"
     echo "proxy = ${proxy_port}"
@@ -366,6 +367,7 @@ PROJECT_NAME=""
 PROXY_PORT="3000"
 ADMIN_PORT="4000"
 DB_PORT="5432"
+WORKTREE_TEMPLATE=".worktrees/{name}"
 
 if [ -f "${FLEET_TOML}" ]; then
   info "Found existing ${FLEET_TOML} — reconfiguring idempotently"
@@ -376,6 +378,8 @@ if [ -f "${FLEET_TOML}" ]; then
   PROXY_PORT="${FLEET_PORT_PROXY:-3000}"
   ADMIN_PORT="${FLEET_PORT_ADMIN:-4000}"
   DB_PORT="${FLEET_PORT_DB:-5432}"
+  # Preserve existing worktree_template if set; otherwise keep the default
+  WORKTREE_TEMPLATE="${FLEET_WORKTREE_TEMPLATE:-.worktrees/{name}}"
   export PROXY_PORT ADMIN_PORT DB_PORT
 
   # Rebuild SVC_* arrays from loaded TOML using python
@@ -433,9 +437,12 @@ else
   ADMIN_PORT=$(pick_port "4000"); export ADMIN_PORT
   DB_PORT="5432"; export DB_PORT
 
+  ask "Worktree template (use {name} as placeholder)" ".worktrees/{name}"
+  WORKTREE_TEMPLATE="${_PROMPT_RESULT}"
+
   detect_services "${PROJECT_ROOT}"
 
-  write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}"
+  write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}" "${WORKTREE_TEMPLATE}"
 fi
 
 # ─── Hot-reload advisory (runs without Dockerfile generation now) ─────────────
@@ -446,7 +453,7 @@ while [ "${idx}" -lt "${#SVC_NAMES[@]}" ]; do
 done
 
 # ─── Re-emit canonical fleet.toml (normalize format on idempotent runs) ──────
-write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}"
+write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}" "${WORKTREE_TEMPLATE}"
 
 # ─── Seed .fleet/.gitignore (idempotent) ─────────────────────────────────────
 write_fleet_gitignore

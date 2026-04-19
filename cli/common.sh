@@ -61,14 +61,15 @@ _find_python_with_tomllib() {
 
 # load_fleet_toml — parse fleet.toml and export env vars:
 #
-#   FLEET_PROJECT_NAME   — project.name
-#   FLEET_PROJECT_ROOT   — project.root
-#   FLEET_PORT_PROXY     — ports.proxy
-#   FLEET_PORT_ADMIN     — ports.admin
-#   FLEET_PORT_DB        — ports.db
-#   FLEET_STACKS_JSON    — [[stacks]] as a JSON array of {type,dockerfile}
-#   FLEET_SERVICES_JSON  — [[services]] as a JSON array of {name,dir,stack,port,build,run}
-#   FLEET_PEERS_JSON     — [[peers]] as a JSON array of {name,type,port,mappings,files}
+#   FLEET_PROJECT_NAME      — project.name
+#   FLEET_PROJECT_ROOT      — project.root
+#   FLEET_WORKTREE_TEMPLATE — project.worktree_template (may be empty if key absent)
+#   FLEET_PORT_PROXY        — ports.proxy
+#   FLEET_PORT_ADMIN        — ports.admin
+#   FLEET_PORT_DB           — ports.db
+#   FLEET_STACKS_JSON       — [[stacks]] as a JSON array of {type,dockerfile}
+#   FLEET_SERVICES_JSON     — [[services]] as a JSON array of {name,dir,stack,port,build,run}
+#   FLEET_PEERS_JSON        — [[peers]] as a JSON array of {name,type,port,mappings,files}
 #
 # Peer type whitelist: wiremock, static-http, shell.
 # Unknown peer type → error "Unknown peer type 'X'. Allowed: wiremock, static-http, shell"
@@ -132,11 +133,12 @@ for p in peers:
         sys.exit(2)
 
 out = {
-    "project_name":   project.get("name", ""),
-    "project_root":   project.get("root", ""),
-    "port_proxy":     str(ports.get("proxy", "")),
-    "port_admin":     str(ports.get("admin", "")),
-    "port_db":        str(ports.get("db", "")),
+    "project_name":        project.get("name", ""),
+    "project_root":        project.get("root", ""),
+    "worktree_template":   project.get("worktree_template", ""),
+    "port_proxy":          str(ports.get("proxy", "")),
+    "port_admin":          str(ports.get("admin", "")),
+    "port_db":             str(ports.get("db", "")),
     "stacks_json":    json.dumps([
         {"type": s.get("type",""), "dockerfile": s.get("dockerfile","")}
         for s in stacks
@@ -174,6 +176,7 @@ PYEOF
 
   FLEET_PROJECT_NAME=$(_get project_name)
   FLEET_PROJECT_ROOT=$(_get project_root)
+  FLEET_WORKTREE_TEMPLATE=$(_get worktree_template)
   FLEET_PORT_PROXY=$(_get port_proxy)
   FLEET_PORT_ADMIN=$(_get port_admin)
   FLEET_PORT_DB=$(_get port_db)
@@ -181,7 +184,7 @@ PYEOF
   FLEET_SERVICES_JSON=$(_get services_json)
   FLEET_PEERS_JSON=$(_get peers_json)
 
-  export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT \
+  export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT FLEET_WORKTREE_TEMPLATE \
          FLEET_PORT_PROXY FLEET_PORT_ADMIN FLEET_PORT_DB \
          FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON
 }
@@ -221,7 +224,35 @@ fleet_project_root() {
   printf '%s\n' "${FLEET_PROJECT_ROOT}"
 }
 
-export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_stack_for_service fleet_project_root
+# fleet_resolve_worktree <name> — resolve the worktree template for a feature name.
+#
+# Substitutes {name} in FLEET_WORKTREE_TEMPLATE with the argument.
+# If the result is relative, it is resolved against FLEET_PROJECT_ROOT.
+# Echoes the absolute path.
+#
+# Requires load_fleet_toml to have been called first (exports FLEET_WORKTREE_TEMPLATE
+# and FLEET_PROJECT_ROOT).
+fleet_resolve_worktree() {
+  local name="${1:-}"
+  [ -n "${name}" ] || error "fleet_resolve_worktree: feature name required"
+
+  local template="${FLEET_WORKTREE_TEMPLATE:-}"
+  [ -n "${template}" ] \
+    || error "fleet_resolve_worktree: FLEET_WORKTREE_TEMPLATE is not set. Add 'worktree_template' under [project] in .fleet/fleet.toml."
+
+  # Substitute {name} placeholder
+  local resolved="${template//\{name\}/${name}}"
+
+  # If relative, join with project root
+  case "${resolved}" in
+    /*) ;;
+    *)  resolved="${FLEET_PROJECT_ROOT}/${resolved}" ;;
+  esac
+
+  printf '%s\n' "${resolved}"
+}
+
+export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_stack_for_service fleet_project_root fleet_resolve_worktree
 
 # ─── Config loaders (legacy shims) ───────────────────────────────────────────
 # These kept for backward compatibility while cmd-*.sh scripts are migrated.
