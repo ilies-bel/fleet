@@ -55,3 +55,21 @@ stack = "next"
 port  = 3000
 build = "npm run build"
 run   = "npm run dev"
+
+# ─── Peers ────────────────────────────────────────────────────────────────────
+# Optional stub services co-located in the feature container (127.0.0.1).
+# Peers are started by supervisord alongside the main services; they are NOT
+# exposed externally — internal traffic only.
+#
+# `name`     — unique identifier for this peer (used in supervisord program name)
+# `type`     — one of: wiremock | static-http | shell
+# `port`     — container-internal port the peer listens on
+# `mappings` — (wiremock only) path to WireMock mappings dir, relative to project.root
+# `files`    — (wiremock only) path to WireMock __files dir, relative to project.root
+#
+# [[peers]]
+# name     = "wiremock-edf"
+# type     = "wiremock"
+# port     = 8080
+# mappings = "wiremock-edf/mappings"
+# files    = "wiremock-edf/__files"

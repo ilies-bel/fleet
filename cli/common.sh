@@ -68,6 +68,10 @@ _find_python_with_tomllib() {
 #   FLEET_PORT_DB        — ports.db
 #   FLEET_STACKS_JSON    — [[stacks]] as a JSON array of {type,dockerfile}
 #   FLEET_SERVICES_JSON  — [[services]] as a JSON array of {name,dir,stack,port,build,run}
+#   FLEET_PEERS_JSON     — [[peers]] as a JSON array of {name,type,port,mappings,files}
+#
+# Peer type whitelist: wiremock, static-http, shell.
+# Unknown peer type → error "Unknown peer type 'X'. Allowed: wiremock, static-http, shell"
 #
 # Errors clearly if the file is missing or if no suitable python3 is found.
 load_fleet_toml() {
@@ -95,6 +99,8 @@ except ModuleNotFoundError:
         print("ERROR: tomllib/tomli not available", file=sys.stderr)
         sys.exit(1)
 
+ALLOWED_PEER_TYPES = {"wiremock", "static-http", "shell"}
+
 toml_path = sys.argv[1]
 with open(toml_path, "rb") as fh:
     data = tomllib.load(fh)
@@ -103,6 +109,17 @@ project  = data.get("project", {})
 ports    = data.get("ports", {})
 stacks   = data.get("stacks", [])
 services = data.get("services", [])
+peers    = data.get("peers", [])
+
+# Validate peer types before emitting any output
+for p in peers:
+    peer_type = p.get("type", "")
+    if peer_type not in ALLOWED_PEER_TYPES:
+        print(
+            f"Unknown peer type '{peer_type}'. Allowed: wiremock, static-http, shell",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 out = {
     "project_name":   project.get("name", ""),
@@ -125,6 +142,16 @@ out = {
         }
         for sv in services
     ]),
+    "peers_json":     json.dumps([
+        {
+            "name":     p.get("name",""),
+            "type":     p.get("type",""),
+            "port":     str(p.get("port","")),
+            "mappings": p.get("mappings",""),
+            "files":    p.get("files",""),
+        }
+        for p in peers
+    ]),
 }
 print(json.dumps(out))
 PYEOF
@@ -141,15 +168,21 @@ PYEOF
   FLEET_PORT_DB=$(_get port_db)
   FLEET_STACKS_JSON=$(_get stacks_json)
   FLEET_SERVICES_JSON=$(_get services_json)
+  FLEET_PEERS_JSON=$(_get peers_json)
 
   export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT \
          FLEET_PORT_PROXY FLEET_PORT_ADMIN FLEET_PORT_DB \
-         FLEET_STACKS_JSON FLEET_SERVICES_JSON
+         FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON
 }
 
 # fleet_services_json — print FLEET_SERVICES_JSON
 fleet_services_json() {
   printf '%s\n' "${FLEET_SERVICES_JSON}"
+}
+
+# fleet_peers_json — print FLEET_PEERS_JSON
+fleet_peers_json() {
+  printf '%s\n' "${FLEET_PEERS_JSON}"
 }
 
 # fleet_stack_for_service <svc_name> — print the stack type for a named service
@@ -177,7 +210,7 @@ fleet_project_root() {
   printf '%s\n' "${FLEET_PROJECT_ROOT}"
 }
 
-export -f load_fleet_toml fleet_services_json fleet_stack_for_service fleet_project_root
+export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_stack_for_service fleet_project_root
 
 # ─── Config loaders (legacy shims) ───────────────────────────────────────────
 # These kept for backward compatibility while cmd-*.sh scripts are migrated.
