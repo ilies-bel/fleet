@@ -9,15 +9,24 @@ const router = Router();
  * Body: { name, branch }
  */
 router.post('/register-feature', (req, res) => {
-  const { name, branch, worktreePath = null, project = null, status = 'running' } = req.body;
+  const { name, branch, worktreePath = null, project = null, status = 'running', services = [] } = req.body;
 
   if (!name || !branch) {
     return res.status(400).json({ error: 'name and branch are required' });
   }
 
-  register(name, branch, worktreePath, project, status);
+  // Normalize services payload: {name, port} per entry. Malformed entries are
+  // dropped rather than erroring to keep register-feature backwards-compatible
+  // with callers that omit the field entirely.
+  const normalizedServices = Array.isArray(services)
+    ? services
+        .filter(s => s && typeof s === 'object' && typeof s.name === 'string' && Number.isFinite(Number(s.port)))
+        .map(s => ({ name: s.name, port: Number(s.port) }))
+    : [];
 
-  res.json({ ok: true, name, branch });
+  register(name, branch, worktreePath, project, status, normalizedServices);
+
+  res.json({ ok: true, name, branch, services: normalizedServices });
 });
 
 /**

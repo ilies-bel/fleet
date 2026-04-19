@@ -379,13 +379,23 @@ info "Starting containers for '${NAME}'..."
 docker compose -f "${COMPOSE_FILE}" up -d
 
 # ─── Register with gateway ───────────────────────────────────────────────────
-# Payload contract: {name, branch, worktreePath: project.root, project}
+# Payload contract: {name, branch, worktreePath, project, services:[{name,port}]}
 # branch = git HEAD of first service (representative for the feature)
+# services = list used by the gateway proxy to route /<svc>/... path prefixes.
 FIRST_BRANCH="${SVC_BRANCHES[0]}"
+
+# Build the services JSON array (comma-separated {name, port} objects).
+services_json=""
+for i in "${!EFFECTIVE_SERVICES[@]}"; do
+  IFS='|' read -r _svc_nm _svc_path _svc_img _svc_stack _svc_bld _svc_run _svc_port <<< "${EFFECTIVE_SERVICES[$i]}"
+  [ -z "${_svc_port}" ] && continue
+  [ -n "${services_json}" ] && services_json="${services_json},"
+  services_json="${services_json}{\"name\":\"${_svc_nm}\",\"port\":${_svc_port}}"
+done
 
 info "Registering '${NAME}' with gateway..."
 HTTP_STATUS=$(gateway_post "register-feature" \
-  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${FLEET_PROJECT_ROOT}\",\"project\":\"${FLEET_PROJECT_NAME}\"}")
+  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${FLEET_PROJECT_ROOT}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"services\":[${services_json}]}")
 
 if [ "${HTTP_STATUS}" != "200" ]; then
   warn "Gateway registration returned HTTP ${HTTP_STATUS} (is the gateway running?)"
