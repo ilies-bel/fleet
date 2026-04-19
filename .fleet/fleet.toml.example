@@ -17,6 +17,23 @@ proxy = 3000    # nginx reverse proxy (public-facing)
 admin = 4000    # fleet gateway admin API
 db    = 5432    # host-mapped database port (optional; 0 = disabled)
 
+# ─── Stacks ───────────────────────────────────────────────────────────────────
+# Optional. Define custom build stacks used by [[services]].
+# `type`         — identifier referenced by services[].stack
+# `dockerfile`   — path to the Dockerfile template, relative to project.root
+# `shared_paths` — (optional) list of paths, relative to each service's dir,
+#                  to bind-mount READ-ONLY from the PRIMARY checkout into every
+#                  feature container. Use this to share gitignored build output
+#                  (e.g. node_modules) without reinstalling per worktree.
+#                  fleet add auto-runs `npm install` in the primary checkout if
+#                  node_modules is missing; for other stacks it errors and asks
+#                  you to populate the directory manually.
+#
+# [[stacks]]
+# type         = "vite"
+# dockerfile   = ".fleet/Dockerfile.feature-base.vite"
+# shared_paths = ["node_modules"]   # RO-mounted from primary checkout; worktrees share it
+
 # ─── Services ─────────────────────────────────────────────────────────────────
 # One [[services]] entry per deployable unit.
 # `name`  — logical identifier used in fleet commands (e.g. fleet add <name>)

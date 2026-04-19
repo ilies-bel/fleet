@@ -227,8 +227,26 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
   echo "      - feature.env"
   echo "    volumes:"
   # Each service source tree → /app/<svc_name>
+  # Followed by any stack shared_paths (e.g. node_modules) from the PRIMARY checkout (RO).
   for i in "${!SVC_NAMES[@]}"; do
     echo "      - ${SVC_ABS_PATHS[$i]}:/app/${SVC_NAMES[$i]}:cached"
+    svc_stack_type="${SVC_STACKS[$i]}"
+    svc_dir_rel="${SVC_ABS_PATHS[$i]#${WORKTREE_PATH}/}"  # strip worktree prefix → relative dir
+    while IFS= read -r shared_path; do
+      [ -z "${shared_path}" ] && continue
+      SOURCE="${FLEET_PROJECT_ROOT}/${svc_dir_rel}/${shared_path}"
+      TARGET="/app/${SVC_NAMES[$i]}/${shared_path}"
+      if [ ! -d "${SOURCE}" ]; then
+        if [ -f "${FLEET_PROJECT_ROOT}/${svc_dir_rel}/package.json" ]; then
+          info "Installing shared deps: npm install in ${FLEET_PROJECT_ROOT}/${svc_dir_rel}..."
+          ( cd "${FLEET_PROJECT_ROOT}/${svc_dir_rel}" && npm install --no-audit --no-fund ) \
+            || error "npm install failed in ${FLEET_PROJECT_ROOT}/${svc_dir_rel}. Fix the error above and retry."
+        else
+          error "Shared path source missing: ${SOURCE}. Populate it first (e.g. install deps in ${FLEET_PROJECT_ROOT}/${svc_dir_rel})."
+        fi
+      fi
+      echo "      - ${SOURCE}:${TARGET}:ro"
+    done < <(fleet_stack_shared_paths "${svc_stack_type}" 2>/dev/null || true)
   done
   # Wiremock peers: bind mappings → /app/<peer_name>/mappings
   #                               → /app/<peer_name>/__files

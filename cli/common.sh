@@ -67,7 +67,7 @@ _find_python_with_tomllib() {
 #   FLEET_PORT_PROXY        — ports.proxy
 #   FLEET_PORT_ADMIN        — ports.admin
 #   FLEET_PORT_DB           — ports.db
-#   FLEET_STACKS_JSON       — [[stacks]] as a JSON array of {type,dockerfile}
+#   FLEET_STACKS_JSON       — [[stacks]] as a JSON array of {type,dockerfile,shared_paths}
 #   FLEET_SERVICES_JSON     — [[services]] as a JSON array of {name,dir,stack,port,build,run}
 #   FLEET_PEERS_JSON        — [[peers]] as a JSON array of {name,type,port,mappings,files}
 #
@@ -140,7 +140,7 @@ out = {
     "port_admin":          str(ports.get("admin", "")),
     "port_db":             str(ports.get("db", "")),
     "stacks_json":    json.dumps([
-        {"type": s.get("type",""), "dockerfile": s.get("dockerfile","")}
+        {"type": s.get("type",""), "dockerfile": s.get("dockerfile",""), "shared_paths": s.get("shared_paths", [])}
         for s in stacks
     ]),
     "services_json":  json.dumps([
@@ -219,6 +219,26 @@ sys.exit(1)
     || error "fleet_stack_for_service: no service named '${svc_name}' in FLEET_SERVICES_JSON"
 }
 
+# fleet_stack_shared_paths <stack_type> — print newline-separated shared_paths for a stack.
+# Prints nothing if the stack is not found or has no shared_paths declared.
+fleet_stack_shared_paths() {
+  local stack_type="${1:-}"
+  [ -n "$stack_type" ] || error "fleet_stack_shared_paths: stack type required"
+  local pybin
+  pybin=$(_find_python_with_tomllib) \
+    || error "No python3 with tomllib/tomli found"
+  "$pybin" -c "
+import sys, json
+stacks     = json.loads(sys.argv[1])
+stack_type = sys.argv[2]
+for s in stacks:
+    if s.get('type') == stack_type:
+        for p in s.get('shared_paths', []):
+            print(p)
+        sys.exit(0)
+" "${FLEET_STACKS_JSON}" "$stack_type"
+}
+
 # fleet_project_root — print FLEET_PROJECT_ROOT
 fleet_project_root() {
   printf '%s\n' "${FLEET_PROJECT_ROOT}"
@@ -252,7 +272,7 @@ fleet_resolve_worktree() {
   printf '%s\n' "${resolved}"
 }
 
-export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_stack_for_service fleet_project_root fleet_resolve_worktree
+export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_stack_for_service fleet_stack_shared_paths fleet_project_root fleet_resolve_worktree
 
 # ─── Config loaders (legacy shims) ───────────────────────────────────────────
 # These kept for backward compatibility while cmd-*.sh scripts are migrated.
