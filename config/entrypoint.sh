@@ -132,7 +132,7 @@ for svc in svcs:
 find_jar() { local d=\"\$1\"; [ -d \"\$d\" ] || return 1; find \"\$d\" -maxdepth 1 -type f -name \"*.jar\" \\! -name \"*-plain.jar\" \\! -name \"*-sources.jar\" \\! -name \"*-javadoc.jar\" 2>/dev/null | head -n 1; }
 JAR=\"\"
 for _d in build/libs target; do JAR=\$(find_jar \"\$_d\" || true); [ -n \"\$JAR\" ] && break; done
-if [ -n \"\$JAR\" ]; then cp \"\$JAR\" /home/developer/backend.jar; fi
+if [ -n \"\$JAR\" ]; then cp \"\$JAR\" /home/developer/''' + name + '''.jar; fi
 ''')
             if needs_db:
                 f.write('/usr/local/bin/wait-for-pg.sh\n')

@@ -273,8 +273,8 @@ detect_services() {
 
     local default_port="3000" default_build="" default_run=""
     case "${stack}" in
-      spring)  default_port="8081"; default_build="mvn package -DskipTests -q"; default_run="java -jar /home/developer/backend.jar" ;;
-      gradle)  default_port="8081"; default_build="gradle build -x test";       default_run="java -jar /home/developer/backend.jar" ;;
+      spring)  default_port="8081"; default_build="mvn package -DskipTests -q"; default_run="java -jar /home/developer/${dname}.jar" ;;
+      gradle)  default_port="8081"; default_build="gradle build -x test";       default_run="java -jar /home/developer/${dname}.jar" ;;
       go)      default_port="8080"; default_build="go build -o server .";       default_run="/app/${dname}/server" ;;
       node)    default_port="3000"; default_build="npm run build";              default_run="node dist/index.js" ;;
       next)    default_port="3000"; default_build="npm run build";              default_run="npm run dev" ;;

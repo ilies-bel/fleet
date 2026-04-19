@@ -42,6 +42,11 @@ db    = 5432    # host-mapped database port (optional; 0 = disabled)
 # `port`  — container-internal port the service listens on
 # `build` — command that produces the deployable artefact (run inside the container)
 # `run`   — command that starts the service (run inside the container)
+#
+# JAR NAMING CONVENTION (gradle/spring stacks):
+# Each gradle/spring service's built jar is copied to /home/developer/<service-name>.jar.
+# Your `run` command must reference that path — i.e. use the service `name` field, not
+# a hardcoded "backend". Example: a service named "jira-proxy" uses /home/developer/jira-proxy.jar.
 
 [[services]]
 name  = "backend"
@@ -49,6 +54,7 @@ dir   = "d2r2-backend"
 stack = "spring"
 port  = 8081
 build = "mvn package -DskipTests -q"
+# uses /home/developer/<service-name>.jar — fleet copies the built jar there per-service.
 run   = "java -jar /home/developer/backend.jar"
 
 [[services]]
