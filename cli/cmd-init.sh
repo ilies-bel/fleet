@@ -25,7 +25,9 @@ if [ $# -gt 0 ]; then
 fi
 
 # ─── Constants ───────────────────────────────────────────────────────────────
-FLEET_DIR="${FLEET_ROOT}/.fleet"
+# fleet init is a per-project bootstrap: write .fleet/ into the project working
+# directory (PWD), not into the CLI install directory (FLEET_ROOT).
+FLEET_DIR="${PWD}/.fleet"
 FLEET_TOML="${FLEET_DIR}/fleet.toml"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

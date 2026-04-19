@@ -59,7 +59,7 @@ _find_python_with_tomllib() {
   return 1
 }
 
-# load_fleet_toml — parse ${FLEET_ROOT}/.fleet/fleet.toml and export env vars:
+# load_fleet_toml — parse fleet.toml and export env vars:
 #
 #   FLEET_PROJECT_NAME   — project.name
 #   FLEET_PROJECT_ROOT   — project.root
@@ -73,12 +73,22 @@ _find_python_with_tomllib() {
 # Peer type whitelist: wiremock, static-http, shell.
 # Unknown peer type → error "Unknown peer type 'X'. Allowed: wiremock, static-http, shell"
 #
-# Errors clearly if the file is missing or if no suitable python3 is found.
+# Resolution order (first file that exists wins):
+#   1. ${PWD}/.fleet/fleet.toml      — project-level config (source of truth)
+#   2. ${FLEET_ROOT}/.fleet/fleet.toml — CLI install fallback (backwards compat)
+#
+# Errors clearly if neither file is found or if no suitable python3 is found.
 load_fleet_toml() {
-  local toml_file="${FLEET_ROOT}/.fleet/fleet.toml"
+  local toml_file
 
-  if [ ! -f "${toml_file}" ]; then
-    error ".fleet/fleet.toml not found in ${FLEET_ROOT}. Run: fleet init"
+  # Precedence: project-local first, CLI install as fallback.
+  if [ -f "${PWD}/.fleet/fleet.toml" ]; then
+    toml_file="${PWD}/.fleet/fleet.toml"
+  elif [ -f "${FLEET_ROOT}/.fleet/fleet.toml" ]; then
+    # Fallback for backwards compatibility — running fleet outside a project dir
+    toml_file="${FLEET_ROOT}/.fleet/fleet.toml"
+  else
+    error ".fleet/fleet.toml not found. Checked: ${PWD}/.fleet/fleet.toml and ${FLEET_ROOT}/.fleet/fleet.toml. Run: fleet init"
   fi
 
   local pybin
