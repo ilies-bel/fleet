@@ -56,19 +56,11 @@ remove_feature() {
   curl -sf -X DELETE "http://localhost:4000/register-feature/${name}" >/dev/null 2>&1 \
     || warn "Could not notify gateway (is it running?)"
 
-  # Stop each service container individually (best-effort per container)
-  local svc_names
-  svc_names=$(_read_info_toml_services "${name}")
+  # Stop the single feature container (mono-container architecture)
+  docker rm -f "fleet-${name}" 2>/dev/null \
+    || warn "Container 'fleet-${name}' not found (already removed?)"
 
-  if [ -n "${svc_names}" ]; then
-    while IFS= read -r svc_name; do
-      [ -z "${svc_name}" ] && continue
-      docker rm -f "fleet-${name}-${svc_name}" 2>/dev/null \
-        || warn "Container 'fleet-${name}-${svc_name}' not found"
-    done <<< "${svc_names}"
-  fi
-
-  # Bring down compose stack and remove named volumes
+  # Bring down compose stack (removes any lingering compose-managed resources)
   if [ -f "${compose_file}" ]; then
     docker compose -f "${compose_file}" down -v 2>/dev/null || true
   fi

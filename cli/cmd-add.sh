@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 set -euo pipefail
 
 # ─── Resolve paths ───────────────────────────────────────────────────────────
@@ -12,43 +13,16 @@ source "${SCRIPT_DIR}/common.sh"
 
 # ─── Usage ───────────────────────────────────────────────────────────────────
 usage() {
-  echo "Usage: fleet add <name> [--service <svc>=<path>:<image> ...]"
+  echo "Usage: fleet add <name>"
   echo ""
-  echo "  name                     Feature name (lowercase letters, numbers, hyphens)"
-  echo "  --service svc=path:image Override path and image for a named service."
-  echo "                           Repeat for each service you want. If omitted,"
-  echo "                           all services from fleet.toml are spun up."
+  echo "  name    Feature name (lowercase letters, numbers, hyphens, dots)"
+  echo ""
+  echo "  Starts a single container fleet-<name> that runs every [[services]]"
+  echo "  and [[peers]] entry from .fleet/fleet.toml under supervisord."
   echo ""
   echo "Examples:"
   echo "  fleet add my-feature"
-  echo "  fleet add only-be --service backend=./d2r2-backend:fleet-feature-base"
   exit 1
-}
-
-# ─── _parse_service_override "svcName=<path>:<image>" ────────────────────────
-# Must be defined before the arg-parsing loop that calls it.
-# Appends to _SVC_NAMES, _SVC_PATHS, _SVC_IMAGES on success; returns 1 on bad format.
-_parse_service_override() {
-  local raw="$1"
-  # Split on FIRST '=' to isolate svc_name from path:image
-  local svc_name="${raw%%=*}"
-  local rest="${raw#*=}"
-  # Guard: no '=' found, or empty name
-  [ -z "$svc_name" ] && return 1
-  [ "$svc_name" = "$raw" ] && return 1
-
-  # Split on LAST ':' — image tags contain ':', paths should not
-  local path="${rest%:*}"
-  local image="${rest##*:}"
-  # Guard: no ':' found, or empty path/image
-  [ -z "$path" ]  && return 1
-  [ -z "$image" ] && return 1
-  [ "$path" = "$rest" ] && return 1
-
-  _SVC_NAMES+=("$svc_name")
-  _SVC_PATHS+=("$path")
-  _SVC_IMAGES+=("$image")
-  return 0
 }
 
 # ─── Args ────────────────────────────────────────────────────────────────────
@@ -61,30 +35,9 @@ shift
 
 validate_feature_name "${NAME}"
 
-# Parallel arrays for --service overrides
-declare -a _SVC_NAMES=()
-declare -a _SVC_PATHS=()
-declare -a _SVC_IMAGES=()
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --service)
-      shift
-      [ -z "${1:-}" ] && error "--service requires an argument: svc=<path>:<image>"
-      _parse_service_override "$1" \
-        || error "Invalid --service format '$1': expected svc=<path>:<image>"
-      shift
-      ;;
-    --service=*)
-      _parse_service_override "${1#--service=}" \
-        || error "Invalid --service format '${1#--service=}': expected svc=<path>:<image>"
-      shift
-      ;;
-    *)
-      error "Unknown argument: $1"
-      ;;
-  esac
-done
+if [ $# -gt 0 ]; then
+  error "fleet add no longer accepts extra arguments. All services run in one container."
+fi
 
 # ─── Load fleet.toml ─────────────────────────────────────────────────────────
 load_fleet_toml
@@ -100,255 +53,162 @@ if [ -f "${INFO_TOML}" ]; then
   error "Feature '${NAME}' already exists (.fleet/${NAME}/info.toml). Run: fleet rm ${NAME}"
 fi
 
-# ─── _svc_field <json> <svc_name> <field> ────────────────────────────────────
-# Prints the value of <field> for the service named <svc_name> in <json>.
-# Prints empty string if service or field not found. Never fails.
-_svc_field() {
-  "$_PYBIN" -c "
-import sys, json
-services = json.loads(sys.argv[1])
-name  = sys.argv[2]
-field = sys.argv[3]
-for s in services:
-    if s.get('name') == name:
-        print(s.get(field, ''))
-        raise SystemExit(0)
-print('')
-" "$1" "$2" "$3" 2>/dev/null || true
-}
-
-# ─── Build effective service list ────────────────────────────────────────────
-# Each entry is a pipe-delimited string: name|abs_path|image|stack|build|run|port
-# Using a pipe delimiter because all fields can contain spaces except image names.
-
-declare -a EFFECTIVE_SERVICES=()
-
-if [ "${#_SVC_NAMES[@]}" -gt 0 ]; then
-  # --service overrides: only the named services, with caller-supplied path/image
-  for i in "${!_SVC_NAMES[@]}"; do
-    ov_svc="${_SVC_NAMES[$i]}"
-    ov_path="${_SVC_PATHS[$i]}"
-    ov_image="${_SVC_IMAGES[$i]}"
-
-    ov_abs_path="$(cd "${ov_path}" 2>/dev/null && pwd)" \
-      || error "Service '${ov_svc}': path '${ov_path}' does not exist on disk"
-
-    ov_stack=$(_svc_field "${FLEET_SERVICES_JSON}" "${ov_svc}" "stack")
-    ov_build=$(_svc_field "${FLEET_SERVICES_JSON}" "${ov_svc}" "build")
-    ov_run=$(  _svc_field "${FLEET_SERVICES_JSON}" "${ov_svc}" "run")
-    ov_port=$( _svc_field "${FLEET_SERVICES_JSON}" "${ov_svc}" "port")
-
-    EFFECTIVE_SERVICES+=("${ov_svc}|${ov_abs_path}|${ov_image}|${ov_stack}|${ov_build}|${ov_run}|${ov_port}")
-  done
-else
-  # Default: all services from fleet.toml
-  svc_count=$("$_PYBIN" -c "import sys,json; print(len(json.loads(sys.argv[1])))" "${FLEET_SERVICES_JSON}")
-  if [ "${svc_count}" -eq 0 ]; then
-    error "No [[services]] defined in .fleet/fleet.toml. Run: fleet init"
-  fi
-
-  for idx in $(seq 0 $((svc_count - 1))); do
-    _at() { "$_PYBIN" -c "import sys,json; a=json.loads(sys.argv[1]); print(a[int(sys.argv[2])].get(sys.argv[3],''))" "${FLEET_SERVICES_JSON}" "$idx" "$1"; }
-
-    svc_name=$(_at name)
-    svc_dir=$(  _at dir)
-    svc_stack=$(_at stack)
-    svc_build=$(_at build)
-    svc_run=$(  _at run)
-    svc_port=$( _at port)
-
-    svc_image="fleet-feature-base"
-    svc_abs_path="${FLEET_PROJECT_ROOT}/${svc_dir}"
-
-    [ -d "${svc_abs_path}" ] \
-      || error "Service '${svc_name}': '${svc_abs_path}' does not exist. Check project.root in .fleet/fleet.toml."
-
-    EFFECTIVE_SERVICES+=("${svc_name}|${svc_abs_path}|${svc_image}|${svc_stack}|${svc_build}|${svc_run}|${svc_port}")
-  done
+# ─── Validate + enumerate services ───────────────────────────────────────────
+svc_count=$("${_PYBIN}" -c "import sys,json; print(len(json.loads(sys.argv[1])))" "${FLEET_SERVICES_JSON}")
+if [ "${svc_count}" -eq 0 ]; then
+  error "No [[services]] defined in .fleet/fleet.toml. Run: fleet init"
 fi
 
-[ "${#EFFECTIVE_SERVICES[@]}" -gt 0 ] \
-  || error "No services resolved. Check --service arguments or [[services]] in .fleet/fleet.toml."
-
-# ─── Resolve branch per service path ─────────────────────────────────────────
+declare -a SVC_NAMES=()
+declare -a SVC_ABS_PATHS=()
+declare -a SVC_STACKS=()
+declare -a SVC_RUNS=()
+declare -a SVC_PORTS=()
 declare -a SVC_BRANCHES=()
 
-for entry in "${EFFECTIVE_SERVICES[@]}"; do
-  IFS='|' read -r _nm _path _img _st _bld _run _port <<< "$entry"
-  branch=$(git -C "${_path}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-  # Detached HEAD → normalize to "main"
+for idx in $(seq 0 $((svc_count - 1))); do
+  _at() { "${_PYBIN}" -c "import sys,json; a=json.loads(sys.argv[1]); print(a[int(sys.argv[2])].get(sys.argv[3],''))" "${FLEET_SERVICES_JSON}" "$idx" "$1"; }
+
+  svc_name=$(_at name)
+  svc_dir=$(  _at dir)
+  svc_stack=$(_at stack)
+  svc_run=$(  _at run)
+  svc_port=$( _at port)
+
+  svc_abs_path="${FLEET_PROJECT_ROOT}/${svc_dir}"
+  [ -d "${svc_abs_path}" ] \
+    || error "Service '${svc_name}': '${svc_abs_path}' does not exist. Check project.root in .fleet/fleet.toml."
+
+  branch=$(git -C "${svc_abs_path}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
   [ "${branch}" = "HEAD" ] && branch="main"
+
+  SVC_NAMES+=("${svc_name}")
+  SVC_ABS_PATHS+=("${svc_abs_path}")
+  SVC_STACKS+=("${svc_stack}")
+  SVC_RUNS+=("${svc_run}")
+  SVC_PORTS+=("${svc_port}")
   SVC_BRANCHES+=("${branch}")
 done
 
-# ─── Load shared mounts from .fleet/shared.env ───────────────────────────────
-SHARED_ENV_FILE="${FLEET_ROOT}/.fleet/shared.env"
-declare -a SHARED_MOUNTS=()
+# ─── Enumerate peers ─────────────────────────────────────────────────────────
+peer_count=$("${_PYBIN}" -c "import sys,json; print(len(json.loads(sys.argv[1])))" "${FLEET_PEERS_JSON}")
 
-if [ -f "${SHARED_ENV_FILE}" ]; then
-  while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    [[ "$line" == \#* ]] && continue
-    src="${FLEET_PROJECT_ROOT}/${line}"
-    if [ -e "$src" ]; then
-      SHARED_MOUNTS+=("${src}:/app/${line}:ro")
-    else
-      warn "shared.env: '${line}' not found at '${src}', skipping"
-    fi
-  done < "${SHARED_ENV_FILE}"
+declare -a PEER_NAMES=()
+declare -a PEER_TYPES=()
+declare -a PEER_PORTS=()
+declare -a PEER_MAPPINGS_ABS=()
+declare -a PEER_FILES_ABS=()
+
+if [ "${peer_count}" -gt 0 ]; then
+  for idx in $(seq 0 $((peer_count - 1))); do
+    _pat() { "${_PYBIN}" -c "import sys,json; a=json.loads(sys.argv[1]); print(a[int(sys.argv[2])].get(sys.argv[3],''))" "${FLEET_PEERS_JSON}" "$idx" "$1"; }
+
+    peer_name=$(_pat name)
+    peer_type=$(_pat type)
+    peer_port=$(_pat port)
+    peer_mappings=$(_pat mappings)
+    peer_files=$(_pat files)
+
+    PEER_NAMES+=("${peer_name}")
+    PEER_TYPES+=("${peer_type}")
+    PEER_PORTS+=("${peer_port}")
+    [ -n "${peer_mappings}" ] && PEER_MAPPINGS_ABS+=("${FLEET_PROJECT_ROOT}/${peer_mappings}") || PEER_MAPPINGS_ABS+=("")
+    [ -n "${peer_files}" ]    && PEER_FILES_ABS+=("${FLEET_PROJECT_ROOT}/${peer_files}")       || PEER_FILES_ABS+=("")
+  done
 fi
 
-# ─── Decide whether to provision a Postgres sidecar ──────────────────────────
-# Spring / Gradle services almost always need a relational DB at startup
-# (Liquibase/Flyway migrations, JPA/jOOQ wiring). Provision a dedicated postgres
-# container per feature so migrations have somewhere to run without reaching
-# out to the host's `localhost:5432`. Credentials default to the project name;
-# override via DB_NAME / DB_USER / DB_PASSWORD env vars on the fleet caller's
-# shell (e.g. through .fleet/shared.env).
+# ─── Determine if postgres is needed (spring/gradle services) ────────────────
 NEEDS_DB=false
-for _entry in "${EFFECTIVE_SERVICES[@]}"; do
-  IFS='|' read -r _nm _path _img _st _bld _run _port <<< "${_entry}"
-  case "${_st}" in spring|gradle) NEEDS_DB=true ;; esac
+for stack in "${SVC_STACKS[@]}"; do
+  case "${stack}" in spring|gradle) NEEDS_DB=true ;; esac
 done
 
 SIDECAR_DB_NAME="${DB_NAME:-${FLEET_PROJECT_NAME}}"
 SIDECAR_DB_USER="${DB_USER:-${FLEET_PROJECT_NAME}}"
 SIDECAR_DB_PASSWORD="${DB_PASSWORD:-${FLEET_PROJECT_NAME}}"
-SIDECAR_DB_HOST="postgres"   # reachable via compose service DNS on fleet-net
 
-# ─── Generate docker-compose.yml ─────────────────────────────────────────────
-info "Generating .fleet/${NAME}/docker-compose.yml..."
+# ─── Representative branch (first service) ───────────────────────────────────
+FIRST_BRANCH="${SVC_BRANCHES[0]}"
+
+# ─── Create feature dir ───────────────────────────────────────────────────────
 mkdir -p "${FEATURE_DIR}"
-COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
 
-# Only the first service (fleet.toml order) gets a host port binding.
-# All others are reachable via container DNS on fleet-net only.
-_first_svc=true
+# ─── Write feature.env (holds JSON payloads; avoids YAML quoting hazards) ────
+# Docker Compose env_file= reads KEY=VALUE lines. JSON values are safe here
+# because the file is parsed as raw text before being passed to the container.
+ENV_FILE="${FEATURE_DIR}/feature.env"
+{
+  printf 'APP_NAME=%s\n'              "${NAME}"
+  printf 'BRANCH=%s\n'               "${FIRST_BRANCH}"
+  printf 'PROJECT_NAME=%s\n'         "${FLEET_PROJECT_NAME}"
+  printf 'FLEET_SERVICES_JSON=%s\n'  "${FLEET_SERVICES_JSON}"
+  printf 'FLEET_PEERS_JSON=%s\n'     "${FLEET_PEERS_JSON}"
+  if [ "${NEEDS_DB}" = true ]; then
+    printf 'DB_NAME=%s\n'                    "${SIDECAR_DB_NAME}"
+    printf 'DB_USER=%s\n'                    "${SIDECAR_DB_USER}"
+    printf 'DB_PASSWORD=%s\n'               "${SIDECAR_DB_PASSWORD}"
+    printf 'SPRING_DATASOURCE_URL=%s\n'      "jdbc:postgresql://127.0.0.1:5432/${SIDECAR_DB_NAME}"
+    printf 'SPRING_DATASOURCE_USERNAME=%s\n' "${SIDECAR_DB_USER}"
+    printf 'SPRING_DATASOURCE_PASSWORD=%s\n' "${SIDECAR_DB_PASSWORD}"
+    printf 'SPRING_LIQUIBASE_URL=%s\n'       "jdbc:postgresql://127.0.0.1:5432/${SIDECAR_DB_NAME}"
+    printf 'SPRING_LIQUIBASE_USER=%s\n'      "${SIDECAR_DB_USER}"
+    printf 'SPRING_LIQUIBASE_PASSWORD=%s\n'  "${SIDECAR_DB_PASSWORD}"
+    printf 'TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal\n'
+  fi
+  [ -n "${JWT_SECRET:-}" ] && printf 'JWT_SECRET=%s\n' "${JWT_SECRET}"
+  [ -n "${JWT_ISSUER:-}" ] && printf 'JWT_ISSUER=%s\n'  "${JWT_ISSUER}"
+} > "${ENV_FILE}"
+
+# ─── Generate docker-compose.yml (ONE service per feature) ───────────────────
+info "Generating .fleet/${NAME}/docker-compose.yml..."
+COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
 
 {
   echo "services:"
-
-  # Postgres sidecar (emitted first so it's ready before JVM services connect)
-  if [ "${NEEDS_DB}" = true ]; then
-    echo "  postgres:"
-    echo "    image: postgres:16-alpine"
-    echo "    container_name: fleet-${NAME}-postgres"
-    echo "    environment:"
-    echo "      - POSTGRES_DB=${SIDECAR_DB_NAME}"
-    echo "      - POSTGRES_USER=${SIDECAR_DB_USER}"
-    echo "      - POSTGRES_PASSWORD=${SIDECAR_DB_PASSWORD}"
-    echo "    volumes:"
-    echo "      - fleet-${NAME}-pgdata:/var/lib/postgresql/data"
-    echo "    networks:"
-    echo "      - fleet-net"
-    echo "    healthcheck:"
-    echo "      test: [\"CMD-SHELL\", \"pg_isready -U ${SIDECAR_DB_USER} -d ${SIDECAR_DB_NAME}\"]"
-    echo "      interval: 5s"
-    echo "      timeout: 5s"
-    echo "      retries: 10"
-    echo ""
-  fi
-
-  for i in "${!EFFECTIVE_SERVICES[@]}"; do
-    IFS='|' read -r svc_nm svc_path svc_img svc_stack svc_build svc_run svc_port <<< "${EFFECTIVE_SERVICES[$i]}"
-    svc_branch="${SVC_BRANCHES[$i]}"
-
-    echo "  ${NAME}-${svc_nm}:"
-    echo "    image: ${svc_img}"
-    echo "    container_name: fleet-${NAME}-${svc_nm}"
-
-    # Feature containers are internal — accessed via gateway proxy over fleet-net.
-    # No host port binding; avoids collisions with the gateway's own :3000/:4000.
-
-    echo "    environment:"
-    echo "      - APP_NAME=${NAME}-${svc_nm}"
-    echo "      - BRANCH=${svc_branch}"
-    echo "      - PROJECT_NAME=${FLEET_PROJECT_NAME}"
-    [ -n "${svc_build}" ]       && echo "      - BACKEND_BUILD_CMD=${svc_build}"
-    [ -n "${svc_run}" ]         && echo "      - BACKEND_RUN_CMD=${svc_run}"
-    [ -n "${svc_port}" ]        && echo "      - BACKEND_PORT=${svc_port}"
-    [ -n "${FLEET_PORT_DB}" ]   && echo "      - DB_PORT=${FLEET_PORT_DB}"
-    [ -n "${DB_NAME:-}" ]       && echo "      - DB_NAME=${DB_NAME}"
-    [ -n "${DB_USER:-}" ]       && echo "      - DB_USER=${DB_USER}"
-    [ -n "${DB_PASSWORD:-}" ]   && echo "      - DB_PASSWORD=${DB_PASSWORD}"
-    [ -n "${DB_NAME:-}" ]       && echo "      - DB_HOST=127.0.0.1"
-    [ -n "${JWT_SECRET:-}" ]    && echo "      - JWT_SECRET=${JWT_SECRET}"
-    [ -n "${JWT_ISSUER:-}" ]    && echo "      - JWT_ISSUER=${JWT_ISSUER}"
-    # Testcontainers host override: from inside a container on fleet-net, the
-    # host's 'localhost' is not reachable. Spawned Testcontainers (Ryuk + fixtures)
-    # bind ports on the Docker host; point clients at host.docker.internal so the
-    # build container can reach them. Docker Desktop (macOS/Windows) auto-resolves
-    # this hostname; on Linux, configure --add-host at daemon level.
-    case "${svc_stack}" in
-      spring|gradle)
-        echo "      - TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal"
-        # Point Spring Boot at the postgres sidecar. Env vars are higher priority
-        # than profile-packaged application-<profile>.yml (Boot property source
-        # order #10 > #13), so this beats any hardcoded localhost:5432 in the jar.
-        if [ "${NEEDS_DB}" = true ]; then
-          echo "      - SPRING_DATASOURCE_URL=jdbc:postgresql://${SIDECAR_DB_HOST}:5432/${SIDECAR_DB_NAME}"
-          echo "      - SPRING_DATASOURCE_USERNAME=${SIDECAR_DB_USER}"
-          echo "      - SPRING_DATASOURCE_PASSWORD=${SIDECAR_DB_PASSWORD}"
-          echo "      - SPRING_LIQUIBASE_URL=jdbc:postgresql://${SIDECAR_DB_HOST}:5432/${SIDECAR_DB_NAME}"
-          echo "      - SPRING_LIQUIBASE_USER=${SIDECAR_DB_USER}"
-          echo "      - SPRING_LIQUIBASE_PASSWORD=${SIDECAR_DB_PASSWORD}"
-        fi
-        ;;
-    esac
-    # JVM stacks often use Testcontainers for integration-test / codegen workflows
-    # (e.g. jOOQ-codegen backed by a throw-away Postgres). Mount the host Docker
-    # socket so Testcontainers can launch sibling containers, and disable SELinux
-    # labeling so the container user can actually access the socket node.
-    # Security trade-off accepted for local dev; do NOT ship this to shared infra.
-    case "${svc_stack}" in
-      spring|gradle)
-        echo "    security_opt:"
-        echo "      - label:disable"
-        ;;
-    esac
-    echo "    volumes:"
-    echo "      - ${svc_path}:/app:cached"
-    case "${svc_stack}" in
-      spring|gradle)
-        echo "      - /var/run/docker.sock:/var/run/docker.sock"
-        ;;
-    esac
-    if [ "${#SHARED_MOUNTS[@]}" -gt 0 ]; then
-      for mount in "${SHARED_MOUNTS[@]}"; do
-        echo "      - ${mount}"
-      done
-    fi
-    echo "    networks:"
-    echo "      - fleet-net"
-    # Wait for postgres to be healthy before the JVM service starts. Harmless
-    # for non-DB services because they still get scheduled concurrently; only
-    # the service-healthy gate adds at most the postgres readiness delay.
-    if [ "${NEEDS_DB}" = true ]; then
-      case "${svc_stack}" in
-        spring|gradle)
-          echo "    depends_on:"
-          echo "      postgres:"
-          echo "        condition: service_healthy"
-          ;;
-      esac
-    fi
-    # Note: Docker Desktop (macOS/Windows) auto-resolves host.docker.internal.
-    # On native Linux, users must configure --add-host=host.docker.internal:host-gateway
-    # at daemon level (via daemon.json) — fleet does not inject extra_hosts here
-    # because some Docker setups reject the host-gateway sentinel.
-    echo ""
+  echo "  ${NAME}:"
+  echo "    image: fleet-feature-base"
+  echo "    container_name: fleet-${NAME}"
+  echo "    env_file:"
+  echo "      - feature.env"
+  echo "    volumes:"
+  # Each service source tree → /app/<svc_name>
+  for i in "${!SVC_NAMES[@]}"; do
+    echo "      - ${SVC_ABS_PATHS[$i]}:/app/${SVC_NAMES[$i]}:cached"
   done
-
+  # Wiremock peers: bind mappings → /app/<peer_name>/mappings
+  #                               → /app/<peer_name>/__files
+  # static-http peers: bind root dir → /app/<peer_name>
+  for i in "${!PEER_NAMES[@]}"; do
+    peer_nm="${PEER_NAMES[$i]}"
+    peer_tp="${PEER_TYPES[$i]}"
+    peer_map="${PEER_MAPPINGS_ABS[$i]}"
+    peer_fil="${PEER_FILES_ABS[$i]}"
+    if [ "${peer_tp}" = "wiremock" ]; then
+      [ -n "${peer_map}" ] && echo "      - ${peer_map}:/app/${peer_nm}/mappings:ro"
+      [ -n "${peer_fil}" ] && echo "      - ${peer_fil}:/app/${peer_nm}/__files:ro"
+    elif [ "${peer_tp}" = "static-http" ]; then
+      [ -n "${peer_map}" ] && echo "      - ${peer_map}:/app/${peer_nm}:ro"
+    fi
+  done
+  # Docker socket for Testcontainers (spring/gradle stacks only)
+  _needs_sock=false
+  for stack in "${SVC_STACKS[@]}"; do
+    case "${stack}" in spring|gradle) _needs_sock=true ;; esac
+  done
+  if [ "${_needs_sock}" = true ]; then
+    echo "      - /var/run/docker.sock:/var/run/docker.sock"
+  fi
+  echo "    networks:"
+  echo "      - fleet-net"
+  # label:disable only needed when docker.sock is mounted
+  if [ "${_needs_sock}" = true ]; then
+    echo "    security_opt:"
+    echo "      - label:disable"
+  fi
+  echo ""
   echo "networks:"
   echo "  fleet-net:"
   echo "    external: true"
-
-  # Named volume for the postgres sidecar's data directory.
-  if [ "${NEEDS_DB}" = true ]; then
-    echo ""
-    echo "volumes:"
-    echo "  fleet-${NAME}-pgdata:"
-  fi
 } > "${COMPOSE_FILE}"
 
 # ─── Write .fleet/<name>/info.toml ───────────────────────────────────────────
@@ -359,43 +219,41 @@ info "Writing .fleet/${NAME}/info.toml..."
   echo "name    = \"${NAME}\""
   echo "project = \"${FLEET_PROJECT_NAME}\""
   echo ""
-
-  for i in "${!EFFECTIVE_SERVICES[@]}"; do
-    IFS='|' read -r svc_nm svc_path svc_img svc_stack svc_build svc_run svc_port <<< "${EFFECTIVE_SERVICES[$i]}"
-    svc_branch="${SVC_BRANCHES[$i]}"
+  for i in "${!SVC_NAMES[@]}"; do
     echo "[[services]]"
-    echo "name   = \"${svc_nm}\""
-    echo "dir    = \"${svc_path}\""
-    echo "image  = \"${svc_img}\""
-    echo "branch = \"${svc_branch}\""
-    [ -n "${svc_stack}" ] && echo "stack  = \"${svc_stack}\""
-    [ -n "${svc_port}" ]  && echo "port   = ${svc_port}"
+    echo "name   = \"${SVC_NAMES[$i]}\""
+    echo "dir    = \"${SVC_ABS_PATHS[$i]}\""
+    echo "branch = \"${SVC_BRANCHES[$i]}\""
+    [ -n "${SVC_STACKS[$i]}" ] && echo "stack  = \"${SVC_STACKS[$i]}\""
+    [ -n "${SVC_PORTS[$i]}" ]  && echo "port   = ${SVC_PORTS[$i]}"
+    echo ""
+  done
+  for i in "${!PEER_NAMES[@]}"; do
+    echo "[[peers]]"
+    echo "name = \"${PEER_NAMES[$i]}\""
+    echo "type = \"${PEER_TYPES[$i]}\""
+    [ -n "${PEER_PORTS[$i]}" ] && echo "port = ${PEER_PORTS[$i]}"
     echo ""
   done
 } > "${INFO_TOML}"
 
-# ─── Bring up containers ─────────────────────────────────────────────────────
-info "Starting containers for '${NAME}'..."
+# ─── Bring up the single feature container ───────────────────────────────────
+info "Starting container fleet-${NAME}..."
 docker compose -f "${COMPOSE_FILE}" up -d
 
 # ─── Register with gateway ───────────────────────────────────────────────────
-# Payload contract: {name, branch, worktreePath, project, services:[{name,port}]}
-# branch = git HEAD of first service (representative for the feature)
-# services = list used by the gateway proxy to route /<svc>/... path prefixes.
-FIRST_BRANCH="${SVC_BRANCHES[0]}"
-
-# Build the services JSON array (comma-separated {name, port} objects).
-services_json=""
-for i in "${!EFFECTIVE_SERVICES[@]}"; do
-  IFS='|' read -r _svc_nm _svc_path _svc_img _svc_stack _svc_bld _svc_run _svc_port <<< "${EFFECTIVE_SERVICES[$i]}"
-  [ -z "${_svc_port}" ] && continue
-  [ -n "${services_json}" ] && services_json="${services_json},"
-  services_json="${services_json}{\"name\":\"${_svc_nm}\",\"port\":${_svc_port}}"
-done
+# Payload: {name, branch, worktreePath, project, services:[{name,port}]}
+# Peers are internal-only — not included in the gateway registration payload.
+services_json=$("${_PYBIN}" -c "
+import sys, json
+svcs = json.loads(sys.argv[1])
+out = [{'name': s['name'], 'port': int(s['port'])} for s in svcs if s.get('port')]
+print(json.dumps(out))
+" "${FLEET_SERVICES_JSON}")
 
 info "Registering '${NAME}' with gateway..."
 HTTP_STATUS=$(gateway_post "register-feature" \
-  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${FLEET_PROJECT_ROOT}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"services\":[${services_json}]}")
+  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${FLEET_PROJECT_ROOT}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"services\":${services_json}}")
 
 if [ "${HTTP_STATUS}" != "200" ]; then
   warn "Gateway registration returned HTTP ${HTTP_STATUS} (is the gateway running?)"
@@ -404,11 +262,13 @@ fi
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}┌──────────────────────────────────────────────────────────────┐${RESET}"
-echo -e "${GREEN}│  '${NAME}' started (${#EFFECTIVE_SERVICES[@]} service(s))${RESET}"
-for i in "${!EFFECTIVE_SERVICES[@]}"; do
-  IFS='|' read -r svc_nm svc_path svc_img _ _ _ _ <<< "${EFFECTIVE_SERVICES[$i]}"
-  echo -e "${GREEN}│    fleet-${NAME}-${svc_nm}  image=${svc_img}${RESET}"
-done
-echo -e "${GREEN}│  Proxy  → http://localhost:${FLEET_PORT_PROXY}${RESET}"
-echo -e "${GREEN}│  Logs   → docker compose -f .fleet/${NAME}/docker-compose.yml logs -f${RESET}"
+echo -e "${GREEN}│  '${NAME}' started                                           ${RESET}"
+echo -e "${GREEN}│    container : fleet-${NAME}                                 ${RESET}"
+echo -e "${GREEN}│    services  : ${svc_count}                                  ${RESET}"
+if [ "${peer_count}" -gt 0 ]; then
+  echo -e "${GREEN}│    peers     : ${peer_count} (internal)                    ${RESET}"
+fi
+echo -e "${GREEN}│  Proxy  → http://localhost:${FLEET_PORT_PROXY}               ${RESET}"
+echo -e "${GREEN}│  Logs   → docker logs -f fleet-${NAME}                       ${RESET}"
+echo -e "${GREEN}│  Status → docker exec fleet-${NAME} supervisorctl status     ${RESET}"
 echo -e "${GREEN}└──────────────────────────────────────────────────────────────┘${RESET}"

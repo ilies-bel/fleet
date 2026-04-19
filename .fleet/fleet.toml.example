@@ -51,6 +51,7 @@ run   = "npm run dev"
 # `port`     — container-internal port the peer listens on
 # `mappings` — (wiremock only) path to WireMock mappings dir, relative to project.root
 # `files`    — (wiremock only) path to WireMock __files dir, relative to project.root
+# `cmd`      — (shell only) command to run as the peer process
 #
 # [[peers]]
 # name     = "wiremock-edf"
@@ -58,3 +59,14 @@ run   = "npm run dev"
 # port     = 8080
 # mappings = "wiremock-edf/mappings"
 # files    = "wiremock-edf/__files"
+#
+# [[peers]]
+# name = "mock-api"
+# type = "static-http"
+# port = 9090
+#
+# [[peers]]
+# name = "custom-stub"
+# type = "shell"
+# port = 7070
+# cmd  = "node /app/custom-stub/server.js"

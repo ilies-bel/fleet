@@ -149,6 +149,7 @@ out = {
             "port":     str(p.get("port","")),
             "mappings": p.get("mappings",""),
             "files":    p.get("files",""),
+            "cmd":      p.get("cmd",""),
         }
         for p in peers
     ]),

@@ -1,137 +1,56 @@
 #!/bin/bash
+# config/entrypoint.sh
+# Unified fleet feature-container entrypoint.
+#
+# Reads FLEET_SERVICES_JSON and FLEET_PEERS_JSON (set by docker-compose) and:
+#   1. Optionally initialises an embedded PostgreSQL cluster (if any service is
+#      stack=spring or stack=gradle).
+#   2. Generates /etc/supervisor/conf.d/fleet.conf with one [program:] block
+#      per [[services]] entry and one per [[peers]] entry.
+#   3. Generates /etc/nginx/conf.d/feature.conf with a location block for
+#      each service (peers are internal-only — not routed through nginx).
+#   4. Execs supervisord as PID 1 via tini.
 set -e
 
-# ── Config injected by docker-compose (sourced from fleet.conf) ───────────────
+# ─── Required env ────────────────────────────────────────────────────────────
 APP_NAME="${APP_NAME:-fleet-feature}"
-BRANCH="${BRANCH:?BRANCH env var is required}"
-FRONTEND_DIR="${FRONTEND_DIR:?FRONTEND_DIR env var is required}"
-FRONTEND_OUT_DIR="${FRONTEND_OUT_DIR:-out}"
-BACKEND_DIR="${BACKEND_DIR:-}"
-BACKEND_BUILD_CMD="${BACKEND_BUILD_CMD:-}"
-BACKEND_ARTIFACT_PATH="${BACKEND_ARTIFACT_PATH:-/home/developer/backend.jar}"
-BACKEND_RUN_CMD="${BACKEND_RUN_CMD:-java -jar ${BACKEND_ARTIFACT_PATH}}"
-BACKEND_PORT="${BACKEND_PORT:-8081}"
-DB_NAME="${DB_NAME:-}"
-DB_USER="${DB_USER:-}"
-DB_PASSWORD="${DB_PASSWORD:-}"
-DB_PORT="${DB_PORT:-5432}"
-PROXY_PORT="${PROXY_PORT:-3000}"
-JWT_SECRET="${JWT_SECRET:-}"
-JWT_ISSUER="${JWT_ISSUER:-myapp}"
+BRANCH="${BRANCH:-unknown}"
+PROJECT_NAME="${PROJECT_NAME:-}"
 
-# Source backend .env overrides if mounted via .fleet-shared.
-# .env is allowed to override application-level config (LDAP, JWT, business config),
-# but DB_HOST and DB_PORT must always point at container-internal postgres — otherwise
-# the host's dev-oriented values (e.g. localhost:5433) clobber the truth (127.0.0.1:5432)
-# and the backend never connects.
-if [ -n "${BACKEND_DIR}" ] && [ -f "/app/${BACKEND_DIR}/.env" ]; then
-  echo "[fleet] Loading backend .env overrides from /app/${BACKEND_DIR}/.env..."
-  _fleet_orig_db_host="${DB_HOST:-}"
-  _fleet_orig_db_port="${DB_PORT:-}"
-  set -a
-  # shellcheck source=/dev/null
-  source "/app/${BACKEND_DIR}/.env"
-  set +a
-  if [ "${DB_HOST:-}" != "127.0.0.1" ] || [ "${DB_PORT:-}" != "5432" ]; then
-    echo "[fleet] .env tried to set DB_HOST=${DB_HOST:-unset} DB_PORT=${DB_PORT:-unset} — forcing container-internal 127.0.0.1:5432"
-  fi
-  DB_HOST=127.0.0.1
-  DB_PORT=5432
-  export DB_HOST DB_PORT
-  unset _fleet_orig_db_host _fleet_orig_db_port
-fi
+# JSON arrays injected by docker-compose
+FLEET_SERVICES_JSON="${FLEET_SERVICES_JSON:-[]}"
+FLEET_PEERS_JSON="${FLEET_PEERS_JSON:-[]}"
+
+# DB credentials (used only when a spring/gradle service is present)
+DB_NAME="${DB_NAME:-${PROJECT_NAME:-fleet}}"
+DB_USER="${DB_USER:-${PROJECT_NAME:-fleet}}"
+DB_PASSWORD="${DB_PASSWORD:-fleet}"
+
+# ─── Python helper ────────────────────────────────────────────────────────────
+PYBIN=python3
+
+echo "[fleet] ================================================================"
+echo "[fleet] Feature:  ${APP_NAME}  |  Branch: ${BRANCH}"
+echo "[fleet] ================================================================"
+
+# ─── Determine if postgres is required ───────────────────────────────────────
+NEEDS_DB=$("${PYBIN}" -c "
+import sys, json
+svcs = json.loads(sys.argv[1])
+needs = any(s.get('stack','') in ('spring','gradle') for s in svcs)
+print('true' if needs else 'false')
+" "${FLEET_SERVICES_JSON}")
 
 PG_DATA="/var/lib/postgresql/16/main"
-SENTINEL="/tmp/.fleet-built"
 
-echo "[fleet] ============================================================"
-echo "[fleet] Feature:  ${APP_NAME}  |  Branch: ${BRANCH}"
-echo "[fleet] Frontend: ${FRONTEND_DIR} (out: ${FRONTEND_OUT_DIR})"
-echo "[fleet] Backend:  ${BACKEND_DIR:-none}"
-echo "[fleet] Database: ${DB_NAME:-disabled}"
-echo "[fleet] ============================================================"
-
-if [ ! -f "${SENTINEL}" ]; then
-  # ── 1. Seed node_modules from host copy ──────────────────────────────────────
-  if [ ! -d "/app/${FRONTEND_DIR}/node_modules/.bin" ]; then
-    echo "[fleet] Seeding node_modules from host copy..."
-    cp -a /app-nm-seed/. "/app/${FRONTEND_DIR}/node_modules/"
-  fi
-
-  # ── 2. Patch macOS arm64 binaries → Linux arm64 ──────────────────────────────
-  # Only relevant for Next.js / Vite projects whose node_modules were installed on macOS.
-  # fetch_pkg is a no-op when the darwin source package is absent, so it is safe to run
-  # for any npm-based project.
-  echo "[fleet] Patching platform-specific npm binaries for Linux arm64..."
-  cd "/app/${FRONTEND_DIR}"
-  NPM_REGISTRY="https://registry.npmjs.org"
-  pkg_ver() {
-    python3 -c "import json; print(json.load(open('node_modules/${1}/package.json'))['version'])" 2>/dev/null || true
-  }
-  fetch_pkg() {
-    local pkg="$1" ver="$2"
-    [ -z "$ver" ] && return 0          # darwin package absent — nothing to mirror
-    local dir="node_modules/${pkg}"
-    [ -d "$dir" ] && return 0          # already present
-    local bare="${pkg##*/}"
-    echo "[fleet] Fetching ${pkg}@${ver}..."
-    mkdir -p "$dir"
-    curl -fsSL "${NPM_REGISTRY}/${pkg}/-/${bare}-${ver}.tgz" \
-      | tar -xz -C "$dir" --strip-components=1 \
-      || { echo "[fleet] WARN: failed to fetch ${pkg}@${ver}"; rm -rf "$dir"; }
-  }
-  fetch_pkg "@next/swc-linux-arm64-gnu"              "$(pkg_ver '@next/swc-darwin-arm64')"
-  fetch_pkg "lightningcss-linux-arm64-gnu"            "$(pkg_ver 'lightningcss-darwin-arm64')"
-  fetch_pkg "@tailwindcss/oxide-linux-arm64-gnu"      "$(pkg_ver '@tailwindcss/oxide-darwin-arm64')"
-  fetch_pkg "@esbuild/linux-arm64"                    "$(pkg_ver '@esbuild/darwin-arm64')"
-  fetch_pkg "@rollup/rollup-linux-arm64-gnu"          "$(pkg_ver '@rollup/rollup-darwin-arm64')"
-  fetch_pkg "@oxc-resolver/binding-linux-arm64-gnu"   "$(pkg_ver '@oxc-resolver/binding-darwin-arm64')"
-  fetch_pkg "@unrs/resolver-binding-linux-arm64-gnu"  "$(pkg_ver '@unrs/resolver-binding-darwin-arm64')"
-
-  # ── 3. Build frontend ─────────────────────────────────────────────────────────
-  echo "[fleet] Building frontend (npm run build)..."
-  cd "/app/${FRONTEND_DIR}"
-  NEXT_TELEMETRY_DISABLED=1 \
-  NEXT_PUBLIC_URL_BACK="__FLEET_BACKEND_URL__" \
-  NEXT_PUBLIC_APP_URL="__FLEET_APP_URL__" \
-  NODE_OPTIONS="--max-old-space-size=4096" \
-    npm run build
-  cp -a "${FRONTEND_OUT_DIR}/." /var/www/html/
-
-  # ── 4. Patch frontend bundle URLs ────────────────────────────────────────────
-  # Replaces placeholder strings injected at build time with runtime values.
-  # Projects that don't use these placeholders are unaffected (sed finds no matches).
-  echo "[fleet] Patching frontend bundle URLs..."
-  find /var/www/html -name "*.js" -exec sed -i \
-    -e "s|__FLEET_BACKEND_URL__|/backend|g" \
-    -e "s|__FLEET_APP_URL__|http://localhost:${PROXY_PORT}|g" \
-    {} \;
-
-  # ── 5. Build backend (if configured) ─────────────────────────────────────────
-  if [ -n "${BACKEND_DIR}" ] && [ -n "${BACKEND_BUILD_CMD}" ]; then
-    echo "[fleet] Building backend (${BACKEND_BUILD_CMD})..."
-    cd "/app/${BACKEND_DIR}"
-    eval "${BACKEND_BUILD_CMD}"
-    # Copy JAR to a stable path if the build produced one (Spring Boot convention).
-    if ls target/*.jar >/dev/null 2>&1; then
-      cp target/*.jar "${BACKEND_ARTIFACT_PATH}"
-    fi
-  fi
-
-  touch "${SENTINEL}"
-  echo "[fleet] Build complete."
-else
-  echo "[fleet] Sentinel found — skipping build (container restart)."
-fi
-
-# ── 6. Initialise PostgreSQL (if DB_NAME is configured) ──────────────────────
-if [ -n "${DB_NAME}" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
-  echo "[fleet] First start — initialising PostgreSQL..."
+# ─── 1. Initialise PostgreSQL cluster (first boot only) ──────────────────────
+if [ "${NEEDS_DB}" = "true" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
+  echo "[fleet] First start — initialising PostgreSQL cluster..."
 
   su -s /bin/bash postgres -c \
     "/usr/lib/postgresql/16/bin/initdb -D ${PG_DATA} -E UTF8 --locale=C --auth=trust"
 
-  # Allow local TCP connections (needed by the backend and wait-for-pg.sh)
+  # Allow local TCP connections
   echo "host all all 127.0.0.1/32 trust" >> "${PG_DATA}/pg_hba.conf"
 
   # Start temporarily to provision the database
@@ -142,17 +61,19 @@ if [ -n "${DB_NAME}" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   su -s /bin/bash postgres -c "psql -h /tmp -c \"CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';\""
   su -s /bin/bash postgres -c "psql -h /tmp -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};\""
   su -s /bin/bash postgres -c "psql -h /tmp -c \"ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};\""
-  su -s /bin/bash postgres -c "psql -h /tmp -d ${DB_NAME} -c \"GRANT ALL ON SCHEMA public TO ${DB_USER};\""
+  su -s /bin/bash postgres -c \
+    "psql -h /tmp -d ${DB_NAME} -c \"GRANT ALL ON SCHEMA public TO ${DB_USER};\""
 
   su -s /bin/bash postgres -c \
     "/usr/lib/postgresql/16/bin/pg_ctl stop -D ${PG_DATA} -w"
 
-  echo "[fleet] PostgreSQL initialised."
+  echo "[fleet] PostgreSQL initialised (db=${DB_NAME}, user=${DB_USER})."
+elif [ "${NEEDS_DB}" = "true" ]; then
+  echo "[fleet] PostgreSQL cluster already initialised — skipping initdb."
 fi
 
-# ── 7. Generate supervisord.conf and start all services ───────────────────────
+# ─── 2. Generate supervisord config ──────────────────────────────────────────
 echo "[fleet] Generating supervisord config..."
-
 SUPERVISORD_CONF="/etc/supervisor/conf.d/fleet.conf"
 
 cat > "${SUPERVISORD_CONF}" <<SUPEREOF
@@ -163,8 +84,8 @@ logfile_maxbytes=10MB
 loglevel=info
 SUPEREOF
 
-# PostgreSQL — only when a database is configured
-if [ -n "${DB_NAME}" ]; then
+# PostgreSQL program block
+if [ "${NEEDS_DB}" = "true" ]; then
   cat >> "${SUPERVISORD_CONF}" <<SUPEREOF
 
 [program:postgresql]
@@ -178,43 +99,127 @@ stderr_logfile=/var/log/supervisor/postgresql.log
 SUPEREOF
 fi
 
-# Backend — only when BACKEND_DIR is configured
-if [ -n "${BACKEND_DIR}" ]; then
-  # Generate a small wrapper so we avoid quoting issues in supervisord command=
-  BACKEND_WRAPPER="/usr/local/bin/start-backend.sh"
-  {
-    echo "#!/bin/bash"
-    echo "set -e"
-    [ -n "${DB_NAME}" ] && echo "/usr/local/bin/wait-for-pg.sh"
-    echo "exec ${BACKEND_RUN_CMD}"
-  } > "${BACKEND_WRAPPER}"
-  chmod +x "${BACKEND_WRAPPER}"
+# Service program blocks — one per [[services]] entry
+"${PYBIN}" -c "
+import sys, json, os
 
-  # Build the environment string for supervisord
-  # Values with spaces or special chars should be quoted inside the env string
-  {
-    printf '[program:backend]\n'
-    printf 'command=%s\n' "${BACKEND_WRAPPER}"
-    printf 'environment='
-    printf 'DB_HOST="127.0.0.1",'
-    printf 'DB_PORT="%s",' "${DB_PORT}"
-    printf 'DB_NAME="%s",'   "${DB_NAME}"
-    printf 'DB_USER="%s",'   "${DB_USER}"
-    printf 'DB_PASSWORD="%s",' "${DB_PASSWORD}"
-    printf 'SERVER_PORT="%s"'  "${BACKEND_PORT}"
-    [ -n "${JWT_SECRET}" ] && printf ',JWT_SECRET="%s"'  "${JWT_SECRET}"
-    [ -n "${JWT_ISSUER}" ] && printf ',JWT_ISSUER="%s"'  "${JWT_ISSUER}"
-    printf '\n'
-    printf 'autostart=true\n'
-    printf 'autorestart=true\n'
-    printf 'priority=20\n'
-    printf 'startsecs=5\n'
-    printf 'stdout_logfile=/var/log/supervisor/backend.log\n'
-    printf 'stderr_logfile=/var/log/supervisor/backend.log\n'
-  } >> "${SUPERVISORD_CONF}"
-fi
+svcs = json.loads(sys.argv[1])
+needs_db = sys.argv[2] == 'true'
 
-# nginx — always present (serves the static frontend)
+for svc in svcs:
+    name    = svc.get('name','')
+    run_cmd = svc.get('run','')
+    port    = svc.get('port','')
+    stack   = svc.get('stack','')
+    build   = svc.get('build','')
+    svc_dir = '/app/' + name
+
+    # Emit a build+run wrapper so we avoid quoting hell in supervisord command=
+    wrapper = '/usr/local/bin/start-' + name + '.sh'
+    with open(wrapper, 'w') as f:
+        f.write('#!/bin/bash\nset -e\n')
+        f.write('cd ' + svc_dir + '\n')
+
+        if stack in ('spring', 'gradle'):
+            # Restore gradlew execute bit (lost across macOS→Linux bind mounts)
+            f.write('[ -f ./gradlew ] && chmod +x ./gradlew\n')
+            if build:
+                f.write('echo \"[fleet] Building ' + name + '...\"\n')
+                f.write(build + '\n')
+                # Copy main jar to stable path
+                f.write('''
+# Locate main jar and copy to stable path
+find_jar() { local d=\"\$1\"; [ -d \"\$d\" ] || return 1; find \"\$d\" -maxdepth 1 -type f -name \"*.jar\" \\! -name \"*-plain.jar\" \\! -name \"*-sources.jar\" \\! -name \"*-javadoc.jar\" 2>/dev/null | head -n 1; }
+JAR=\"\"
+for _d in build/libs target; do JAR=\$(find_jar \"\$_d\" || true); [ -n \"\$JAR\" ] && break; done
+if [ -n \"\$JAR\" ]; then cp \"\$JAR\" /home/developer/backend.jar; fi
+''')
+            if needs_db:
+                f.write('/usr/local/bin/wait-for-pg.sh\n')
+            if port:
+                f.write('export SERVER_PORT=' + str(port) + '\n')
+
+        if run_cmd:
+            f.write('exec ' + run_cmd + '\n')
+        else:
+            f.write('echo \"[fleet] No run command for ' + name + '\" && sleep infinity\n')
+
+    os.chmod(wrapper, 0o755)
+
+    env_parts = []
+    if stack in ('spring', 'gradle'):
+        env_parts += [
+            'DB_HOST=\"127.0.0.1\"',
+            'DB_PORT=\"5432\"',
+            'DB_NAME=\"' + os.environ.get('DB_NAME','') + '\"',
+            'DB_USER=\"' + os.environ.get('DB_USER','') + '\"',
+            'DB_PASSWORD=\"' + os.environ.get('DB_PASSWORD','') + '\"',
+        ]
+        if port:
+            env_parts.append('SERVER_PORT=\"' + str(port) + '\"')
+        jwt_secret = os.environ.get('JWT_SECRET','')
+        jwt_issuer = os.environ.get('JWT_ISSUER','')
+        if jwt_secret:
+            env_parts.append('JWT_SECRET=\"' + jwt_secret + '\"')
+        if jwt_issuer:
+            env_parts.append('JWT_ISSUER=\"' + jwt_issuer + '\"')
+    env_line = 'environment=' + ','.join(env_parts) if env_parts else ''
+
+    block = '\n[program:' + name + ']\n'
+    block += 'command=' + wrapper + '\n'
+    block += 'directory=' + svc_dir + '\n'
+    if env_line:
+        block += env_line + '\n'
+    block += 'autostart=true\nautorestart=true\n'
+    block += 'priority=20\n'
+    block += 'startsecs=5\n'
+    block += 'stdout_logfile=/var/log/supervisor/' + name + '.log\n'
+    block += 'stderr_logfile=/var/log/supervisor/' + name + '.log\n'
+
+    with open('/etc/supervisor/conf.d/fleet.conf', 'a') as f:
+        f.write(block)
+
+print('[fleet] Wrote ' + str(len(svcs)) + ' service program(s) to supervisord config.')
+" "${FLEET_SERVICES_JSON}" "${NEEDS_DB}"
+
+# Peer program blocks — one per [[peers]] entry
+"${PYBIN}" -c "
+import sys, json
+
+peers = json.loads(sys.argv[1])
+
+for peer in peers:
+    name      = peer.get('name','')
+    ptype     = peer.get('type','')
+    port      = str(peer.get('port','8080'))
+    peer_cmd  = peer.get('cmd','')
+    peer_dir  = '/app/' + name
+
+    if ptype == 'wiremock':
+        cmd = 'java -jar /opt/wiremock/wiremock.jar --root-dir ' + peer_dir + ' --port ' + port + ' --disable-banner'
+    elif ptype == 'static-http':
+        cmd = 'python3 -m http.server --directory ' + peer_dir + ' ' + port
+    elif ptype == 'shell':
+        cmd = peer_cmd if peer_cmd else 'echo \"[fleet] peer ' + name + ' has no cmd\" && sleep infinity'
+    else:
+        # Whitelist enforced by load_fleet_toml; this is a safety fallback
+        cmd = 'echo \"[fleet] unknown peer type ' + ptype + '\" && sleep infinity'
+
+    block = '\n[program:' + name + ']\n'
+    block += 'command=' + cmd + '\n'
+    block += 'directory=' + peer_dir + '\n'
+    block += 'autostart=true\nautorestart=true\n'
+    block += 'priority=15\n'
+    block += 'stdout_logfile=/var/log/supervisor/' + name + '.log\n'
+    block += 'stderr_logfile=/var/log/supervisor/' + name + '.log\n'
+
+    with open('/etc/supervisor/conf.d/fleet.conf', 'a') as f:
+        f.write(block)
+
+print('[fleet] Wrote ' + str(len(peers)) + ' peer program(s) to supervisord config.')
+" "${FLEET_PEERS_JSON}"
+
+# nginx program block — always last
 cat >> "${SUPERVISORD_CONF}" <<SUPEREOF
 
 [program:nginx]
@@ -226,5 +231,44 @@ stdout_logfile=/var/log/supervisor/nginx.log
 stderr_logfile=/var/log/supervisor/nginx.log
 SUPEREOF
 
-echo "[fleet] Starting supervisord (services: postgresql=${DB_NAME:-off}, backend=${BACKEND_DIR:-off}, nginx=on)..."
+# ─── 3. Generate nginx feature.conf ──────────────────────────────────────────
+echo "[fleet] Generating nginx config..."
+NGINX_CONF="/etc/nginx/conf.d/feature.conf"
+
+"${PYBIN}" -c "
+import sys, json
+
+svcs = json.loads(sys.argv[1])
+
+lines = ['server {']
+lines.append('    listen 80;')
+lines.append('    access_log /dev/stdout;')
+lines.append('    error_log /dev/stderr warn;')
+lines.append('')
+
+for svc in svcs:
+    name = svc.get('name','')
+    port = str(svc.get('port',''))
+    if not name or not port:
+        continue
+    lines.append('    # ' + name)
+    lines.append('    location /' + name + '/ {')
+    lines.append('        proxy_pass http://127.0.0.1:' + port + '/;')
+    lines.append('        proxy_set_header Host \$host;')
+    lines.append('        proxy_set_header X-Real-IP \$remote_addr;')
+    lines.append('        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;')
+    lines.append('        proxy_read_timeout 120s;')
+    lines.append('        proxy_connect_timeout 10s;')
+    lines.append('    }')
+    lines.append('')
+
+lines.append('}')
+print('\n'.join(lines))
+" "${FLEET_SERVICES_JSON}" > "${NGINX_CONF}"
+
+# Remove the legacy qa template symlink (nginx would fail with two server blocks
+# on port 80). The feature.conf from conf.d is sufficient.
+rm -f /etc/nginx/sites-enabled/qa 2>/dev/null || true
+
+echo "[fleet] Starting supervisord..."
 exec /usr/bin/supervisord -n -c "${SUPERVISORD_CONF}"
