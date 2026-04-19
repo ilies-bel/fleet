@@ -280,25 +280,32 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
   echo "      - feature.env"
   echo "    volumes:"
   # Each service source tree → /app/<svc_name>
-  # Followed by any stack shared_paths (e.g. node_modules) from the PRIMARY checkout (RO).
+  # For shared_paths: node_modules gets a per-(project,service,arch) named docker
+  # volume (arch-correct native binaries, shared across features, survives rm/add).
+  # Other shared_paths keep the legacy host bind-mount.
+  CONTAINER_ARCH=$(docker version -f '{{.Server.Arch}}' 2>/dev/null || echo unknown)
+  declare -a NODEMOD_VOLS=()   # named volumes we need to declare at the bottom
   for i in "${!SVC_NAMES[@]}"; do
     echo "      - ${SVC_ABS_PATHS[$i]}:/app/${SVC_NAMES[$i]}:cached"
     svc_stack_type="${SVC_STACKS[$i]}"
     svc_dir_rel="${SVC_ABS_PATHS[$i]#${WORKTREE_PATH}/}"  # strip worktree prefix → relative dir
     while IFS= read -r shared_path; do
       [ -z "${shared_path}" ] && continue
-      SOURCE="${FLEET_PROJECT_ROOT}/${svc_dir_rel}/${shared_path}"
       TARGET="/app/${SVC_NAMES[$i]}/${shared_path}"
-      if [ ! -d "${SOURCE}" ]; then
-        if [ -f "${FLEET_PROJECT_ROOT}/${svc_dir_rel}/package.json" ]; then
-          info "Installing shared deps: npm install in ${FLEET_PROJECT_ROOT}/${svc_dir_rel}..."
-          ( cd "${FLEET_PROJECT_ROOT}/${svc_dir_rel}" && npm install --no-audit --no-fund ) \
-            || error "npm install failed in ${FLEET_PROJECT_ROOT}/${svc_dir_rel}. Fix the error above and retry."
-        else
-          error "Shared path source missing: ${SOURCE}. Populate it first (e.g. install deps in ${FLEET_PROJECT_ROOT}/${svc_dir_rel})."
-        fi
+      if [ "${shared_path}" = "node_modules" ]; then
+        # Named volume: fleet-nodemod-<project>-<service>-<arch>
+        vol_name="fleet-nodemod-${FLEET_PROJECT_NAME}-${SVC_NAMES[$i]}-${CONTAINER_ARCH}"
+        docker volume inspect "${vol_name}" >/dev/null 2>&1 \
+          || docker volume create "${vol_name}" >/dev/null \
+          || error "Failed to create named volume '${vol_name}'."
+        echo "      - ${vol_name}:${TARGET}"
+        NODEMOD_VOLS+=("${vol_name}")
+      else
+        SOURCE="${FLEET_PROJECT_ROOT}/${svc_dir_rel}/${shared_path}"
+        [ -d "${SOURCE}" ] \
+          || error "Shared path source missing: ${SOURCE}. Populate it first."
+        echo "      - ${SOURCE}:${TARGET}:cached"
       fi
-      echo "      - ${SOURCE}:${TARGET}:cached"
     done < <(fleet_stack_shared_paths "${svc_stack_type}" 2>/dev/null || true)
   done
   # Wiremock peers: bind mappings → /app/<peer_name>/mappings
@@ -335,6 +342,15 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
   echo "networks:"
   echo "  fleet-net:"
   echo "    external: true"
+  # Declare any node_modules named volumes used above (external — pre-created).
+  if [ "${#NODEMOD_VOLS[@]}" -gt 0 ]; then
+    echo ""
+    echo "volumes:"
+    for vol in "${NODEMOD_VOLS[@]}"; do
+      echo "  ${vol}:"
+      echo "    external: true"
+    done
+  fi
 } > "${COMPOSE_FILE}"
 
 # ─── Write .fleet/<name>/info.toml ───────────────────────────────────────────

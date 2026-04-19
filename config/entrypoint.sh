@@ -139,6 +139,15 @@ if [ -n \"\$JAR\" ]; then cp \"\$JAR\" /home/developer/''' + name + '''.jar; fi
             if port:
                 f.write('export SERVER_PORT=' + str(port) + '\n')
 
+        # Node/Vite services: reconcile node_modules against package.json on every
+        # start. Fast on a warm named volume; installs arch-correct native deps
+        # the first time (or after package-lock changes).
+        if stack in ('vite', 'next', 'webpack') or (stack == '' and os.path.isfile(svc_dir + '/package.json')):
+            f.write('if [ -f package.json ]; then\n')
+            f.write('  echo \"[fleet] Reconciling ' + name + ' node_modules (arch=$(uname -m))...\"\n')
+            f.write('  npm install --no-audit --no-fund --loglevel=error\n')
+            f.write('fi\n')
+
         if run_cmd:
             f.write('exec ' + run_cmd + '\n')
         else:
