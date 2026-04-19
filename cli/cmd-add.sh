@@ -245,7 +245,7 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
           error "Shared path source missing: ${SOURCE}. Populate it first (e.g. install deps in ${FLEET_PROJECT_ROOT}/${svc_dir_rel})."
         fi
       fi
-      echo "      - ${SOURCE}:${TARGET}:ro"
+      echo "      - ${SOURCE}:${TARGET}:cached"
     done < <(fleet_stack_shared_paths "${svc_stack_type}" 2>/dev/null || true)
   done
   # Wiremock peers: bind mappings → /app/<peer_name>/mappings
