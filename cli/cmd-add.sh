@@ -235,8 +235,34 @@ _first_svc=true
     [ -n "${DB_NAME:-}" ]       && echo "      - DB_HOST=127.0.0.1"
     [ -n "${JWT_SECRET:-}" ]    && echo "      - JWT_SECRET=${JWT_SECRET}"
     [ -n "${JWT_ISSUER:-}" ]    && echo "      - JWT_ISSUER=${JWT_ISSUER}"
+    # Testcontainers host override: from inside a container on fleet-net, the
+    # host's 'localhost' is not reachable. Spawned Testcontainers (Ryuk + fixtures)
+    # bind ports on the Docker host; point clients at host.docker.internal so the
+    # build container can reach them. Docker Desktop (macOS/Windows) auto-resolves
+    # this hostname; on Linux, fleet adds an extra_hosts entry below.
+    case "${svc_stack}" in
+      spring|gradle)
+        echo "      - TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal"
+        ;;
+    esac
+    # JVM stacks often use Testcontainers for integration-test / codegen workflows
+    # (e.g. jOOQ-codegen backed by a throw-away Postgres). Mount the host Docker
+    # socket so Testcontainers can launch sibling containers, and disable SELinux
+    # labeling so the container user can actually access the socket node.
+    # Security trade-off accepted for local dev; do NOT ship this to shared infra.
+    case "${svc_stack}" in
+      spring|gradle)
+        echo "    security_opt:"
+        echo "      - label:disable"
+        ;;
+    esac
     echo "    volumes:"
     echo "      - ${svc_path}:/app:cached"
+    case "${svc_stack}" in
+      spring|gradle)
+        echo "      - /var/run/docker.sock:/var/run/docker.sock"
+        ;;
+    esac
     if [ "${#SHARED_MOUNTS[@]}" -gt 0 ]; then
       for mount in "${SHARED_MOUNTS[@]}"; do
         echo "      - ${mount}"
@@ -244,6 +270,10 @@ _first_svc=true
     fi
     echo "    networks:"
     echo "      - fleet-net"
+    # Note: Docker Desktop (macOS/Windows) auto-resolves host.docker.internal.
+    # On native Linux, users must configure --add-host=host.docker.internal:host-gateway
+    # at daemon level (via daemon.json) — fleet does not inject extra_hosts here
+    # because some Docker setups reject the host-gateway sentinel.
     echo ""
   done
 
