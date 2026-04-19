@@ -104,7 +104,7 @@ A `Map<name, FeatureRecord>` kept in process memory. Survives container restarts
 
 ```js
 FeatureRecord {
-  name: string,          // validated: ^[a-z0-9-]+$
+  name: string,          // validated: ^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$
   branch: string,
   worktreePath: string|null,
   addedAt: Date
@@ -252,7 +252,7 @@ fleet-init.sh <app-root> <branch>
 fleet-add.sh <name> <branch> [--direct]
 ```
 
-1. Validate name (`^[a-z0-9-]+$`) and branch existence
+1. Validate name (`^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$`) and branch existence
 2. Create git worktrees for frontend and backend at `APP_ROOT/.fleet-worktrees/<name>/`
 3. Parse `.fleet-shared` for extra read-only volume mounts (non-tracked files like `.env.local`)
 4. Generate `docker-compose.yml` in `.fleet/<name>/`

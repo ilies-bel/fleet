@@ -309,7 +309,7 @@ Port 3000 returns 503 when no feature is active. Open the dashboard at http://lo
 
 **Name validation error**
 
-Feature names must match `^[a-z0-9-]+$`.
+Feature names must match `^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$`.
 Valid: `my-feature`, `auth-fix-v2`
 Invalid: `MyFeature`, `auth fix`, `auth_fix`
 

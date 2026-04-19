@@ -183,7 +183,7 @@ gateway/
 - Zero npm dependencies for Docker socket client — use Node built-in `http`
 - Keep Express servers on port 3000 (proxy only) and port 4000 (admin/API) strictly separated
 - Response envelope: `{ ok: true, ...data }` on success, `{ error: "message" }` with appropriate HTTP status on error
-- Validate feature names against `^[a-z0-9-]+$`
+- Validate feature names against `^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$`
 - Non-root user `developer` (uid 1001) — never assume root inside container
 - Response times p95 < 100ms for API endpoints
 - 80% test coverage minimum on new code

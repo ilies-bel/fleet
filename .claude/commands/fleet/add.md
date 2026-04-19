@@ -29,7 +29,7 @@ DIRECT = true if "--direct" appears anywhere in $ARGUMENTS, otherwise false
 **Validation:**
 - If `NAME` is empty → print `Error: name is required. Usage: /fleet:add <name> <branch> [--direct]` and stop.
 - If `BRANCH` is empty → print `Error: branch is required. Usage: /fleet:add <name> <branch> [--direct]` and stop.
-- If `NAME` does not match `^[a-z0-9-]+$` → print `Error: name must match ^[a-z0-9-]+$ (lowercase letters, digits, hyphens only).` and stop.
+- If `NAME` does not match `^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$` → print `Error: name must match ^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$ (lowercase alphanumerics, dots, and hyphens only; no leading, trailing, or consecutive dots).` and stop.
 
 ---
 

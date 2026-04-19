@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { addFeature } from '../api.js';
 
-const NAME_RE = /^[a-z0-9-]+$/;
+const NAME_RE = /^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$/;
 
 export default function AddFeatureModal({ onClose, onAdded }) {
   const [name, setName] = useState('');
@@ -23,7 +23,7 @@ export default function AddFeatureModal({ onClose, onAdded }) {
     const val = e.target.value;
     setName(val);
     if (val && !NAME_RE.test(val)) {
-      setNameError('Only lowercase letters, numbers, and hyphens');
+      setNameError('Lowercase alphanumerics, dots, and hyphens; no leading, trailing, or consecutive dots');
     } else {
       setNameError('');
     }

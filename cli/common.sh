@@ -269,11 +269,11 @@ is_multirepo() {
 }
 
 # ─── Validation ───────────────────────────────────────────────────────────────
-# validate_feature_name — errors if name doesn't match ^[a-z0-9-]+$
+# validate_feature_name — errors if name doesn't match ^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$
 validate_feature_name() {
   local name="${1:-}"
-  if ! echo "${name}" | grep -qE '^[a-z0-9-]+$'; then
-    error "Feature name '${name}' is invalid — only lowercase letters, numbers, hyphens."
+  if ! echo "${name}" | grep -qE '^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$'; then
+    error "Feature name '${name}' is invalid — lowercase alphanumerics, dots, hyphens only; no leading, trailing, or consecutive dots."
   fi
 }
 
@@ -323,6 +323,7 @@ show_help() {
   echo -e "  ${BLUE}restart${RESET} <name>                       Restart a feature container"
   echo -e "  ${BLUE}push${RESET}    <name>                       Push service branches to remote"
   echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] Pull latest code and rebuild"
+  echo -e "  ${BLUE}install-claude${RESET} [--local|--global] [--force]  Install Claude Code assets (agents, skills, commands)"
   echo -e "  ${BLUE}help${RESET}                                 Show this help"
   echo ""
   echo "Environment:"

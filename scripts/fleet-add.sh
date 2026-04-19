@@ -14,7 +14,7 @@ error() { echo -e "${RED}[fleet-add] ERROR:${RESET} $*" >&2; exit 1; }
 # ─── Args ────────────────────────────────────────────────────────────────────
 if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
   echo "Usage: $0 <name> <branch>"
-  echo "  name   — lowercase letters, numbers, hyphens only"
+  echo "  name   — lowercase alphanumerics, dots, hyphens only; no leading, trailing, or consecutive dots"
   echo "  branch — git branch name"
   exit 1
 fi
@@ -27,7 +27,7 @@ for arg in "${@:3}"; do
   [ "$arg" = "--direct" ] && DIRECT=true
 done
 
-if ! echo "$NAME" | grep -qE '^[a-z0-9-]+$'; then
+if ! echo "$NAME" | grep -qE '^[a-z0-9]([a-z0-9-]*(\.[a-z0-9-]+)*)?$'; then
   error "Feature name '$NAME' is invalid — only lowercase letters, numbers, hyphens."
 fi
 
