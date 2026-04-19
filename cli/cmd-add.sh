@@ -13,20 +13,25 @@ source "${SCRIPT_DIR}/common.sh"
 
 # ─── Usage ───────────────────────────────────────────────────────────────────
 usage() {
-  echo "Usage: fleet add <name> [--title <title>]"
+  echo "Usage: fleet add <name> [--title <title>] [--direct]"
   echo ""
   echo "  name     Feature name (lowercase letters, numbers, hyphens, dots)"
   echo "  --title  Human-readable title shown in the dashboard (optional)"
+  echo "  --direct Bind-mount the primary project checkout instead of a worktree."
+  echo "           Live-tracks the working copy (including uncommitted changes)."
+  echo "           The container's branch label reflects the primary checkout's HEAD."
   echo ""
   echo "  Starts a single container fleet-<name> that runs every [[services]]"
   echo "  and [[peers]] entry from .fleet/fleet.toml under supervisord."
   echo ""
-  echo "  Requires a git worktree at the path resolved by [project].worktree_template."
-  echo "  Create one first: git worktree add .worktrees/<name> <branch>"
+  echo "  By default, requires a git worktree at the path resolved by"
+  echo "  [project].worktree_template. Create one first:"
+  echo "    git worktree add .worktrees/<name> <branch>"
   echo ""
   echo "Examples:"
   echo "  fleet add my-feature"
   echo "  fleet add my-feature --title 'My feature title'"
+  echo "  fleet add qa-main --direct"
   exit 1
 }
 
@@ -40,14 +45,19 @@ shift
 
 validate_feature_name "${NAME}"
 
-# Parse remaining args: accept only --title
+# Parse remaining args: --title, --direct
 FEATURE_TITLE=""
+DIRECT=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --title)
       [ -n "${2:-}" ] || error "fleet add: --title requires a value"
       FEATURE_TITLE="$2"
       shift 2
+      ;;
+    --direct)
+      DIRECT=true
+      shift
       ;;
     *)
       error "fleet add: unknown argument '$1'. See: fleet add --help"
@@ -61,23 +71,30 @@ load_fleet_toml
 _PYBIN=$(_find_python_with_tomllib) \
   || error "No python3 with tomllib/tomli found. Install python >=3.11 or: pip3 install tomli"
 
-# ─── Resolve worktree path (hard-required) ───────────────────────────────────
-# worktree_template must be set in fleet.toml [project] section.
-if [ -z "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
-  error "fleet add: [project].worktree_template is not set in .fleet/fleet.toml.
+# ─── Resolve source path (worktree by default, project root in --direct mode) ─
+# In --direct mode, skip worktree and bind-mount the primary checkout live.
+if [ "${DIRECT}" = true ]; then
+  WORKTREE_PATH="${FLEET_PROJECT_ROOT}"
+  info "Direct mode — mounting primary checkout at ${WORKTREE_PATH}"
+else
+  # worktree_template must be set in fleet.toml [project] section.
+  if [ -z "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
+    error "fleet add: [project].worktree_template is not set in .fleet/fleet.toml.
   Add it under [project]:
     worktree_template = \".worktrees/{name}\"
-  Then run: fleet init (to regenerate) or edit .fleet/fleet.toml manually."
-fi
+  Then run: fleet init (to regenerate) or edit .fleet/fleet.toml manually.
+  (Or pass --direct to bind-mount the primary checkout without a worktree.)"
+  fi
 
-WORKTREE_PATH=$(fleet_resolve_worktree "${NAME}")
+  WORKTREE_PATH=$(fleet_resolve_worktree "${NAME}")
 
-# Verify the resolved path is an active git worktree (not just any directory)
-if ! git -C "${WORKTREE_PATH}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  error "fleet add: worktree '${WORKTREE_PATH}' does not exist.
+  # Verify the resolved path is an active git worktree (not just any directory)
+  if ! git -C "${WORKTREE_PATH}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    error "fleet add: worktree '${WORKTREE_PATH}' does not exist.
   Create it first:
     git worktree add ${WORKTREE_PATH} <branch>
-  Or check worktree_template in .fleet/fleet.toml."
+  Or pass --direct to bind-mount the primary checkout without a worktree."
+  fi
 fi
 
 # ─── Resolve the feature title ────────────────────────────────────────────────
@@ -329,6 +346,7 @@ info "Writing .fleet/${NAME}/info.toml..."
   echo "title   = \"${FEATURE_TITLE}\""
   echo "project = \"${FLEET_PROJECT_NAME}\""
   echo "worktree = \"${WORKTREE_PATH}\""
+  echo "direct  = ${DIRECT}"
   echo ""
   for i in "${!SVC_NAMES[@]}"; do
     echo "[[services]]"
