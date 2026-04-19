@@ -240,6 +240,12 @@ import sys, json
 
 svcs = json.loads(sys.argv[1])
 
+# Pick a default service for catch-all 'location /'.
+# Prefer one named 'frontend', else the first service with a frontend-ish stack.
+FRONTEND_STACKS = {'vite', 'next', 'webpack', 'react', 'vue'}
+default_svc = next((s for s in svcs if s.get('name') == 'frontend' and s.get('port')), None) \
+    or next((s for s in svcs if s.get('stack') in FRONTEND_STACKS and s.get('port')), None)
+
 lines = ['server {']
 lines.append('    listen 80;')
 lines.append('    access_log /dev/stdout;')
@@ -254,6 +260,25 @@ for svc in svcs:
     lines.append('    # ' + name)
     lines.append('    location /' + name + '/ {')
     lines.append('        proxy_pass http://127.0.0.1:' + port + '/;')
+    lines.append('        proxy_set_header Host \$host;')
+    lines.append('        proxy_set_header X-Real-IP \$remote_addr;')
+    lines.append('        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;')
+    lines.append('        proxy_read_timeout 120s;')
+    lines.append('        proxy_connect_timeout 10s;')
+    lines.append('    }')
+    lines.append('')
+
+# Catch-all: unmatched paths (including /) go to the default frontend service.
+# Vite and SPAs emit absolute asset paths (/@vite/client, /favicon.svg) that
+# otherwise fall through to nginx's default Debian welcome page.
+if default_svc:
+    port = str(default_svc['port'])
+    lines.append('    # default: ' + default_svc['name'] + ' (catch-all for SPA assets)')
+    lines.append('    location / {')
+    lines.append('        proxy_pass http://127.0.0.1:' + port + ';')
+    lines.append('        proxy_http_version 1.1;')
+    lines.append('        proxy_set_header Upgrade \$http_upgrade;')
+    lines.append('        proxy_set_header Connection \"upgrade\";')
     lines.append('        proxy_set_header Host \$host;')
     lines.append('        proxy_set_header X-Real-IP \$remote_addr;')
     lines.append('        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;')
