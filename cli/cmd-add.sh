@@ -214,6 +214,42 @@ ENV_FILE="${FEATURE_DIR}/feature.env"
   [ -n "${JWT_ISSUER:-}" ] && printf 'JWT_ISSUER=%s\n'  "${JWT_ISSUER}"
 } > "${ENV_FILE}"
 
+# ─── Per-service env vars (from fleet.toml services[].env) ───────────────────
+# Collect all env entries across services, warn on key collision, last-write-wins.
+"${_PYBIN}" - "${FLEET_SERVICES_JSON}" "${ENV_FILE}" <<'PYEOF'
+import sys, json
+
+services_json = sys.argv[1]
+env_file      = sys.argv[2]
+
+services = json.loads(services_json)
+
+seen = {}   # key -> service name that first declared it
+lines = []  # (key, value) pairs in emit order
+
+for svc in services:
+    svc_name = svc.get("name", "")
+    env      = svc.get("env", {})
+    if not isinstance(env, dict):
+        continue
+    for k, v in env.items():
+        if k in seen:
+            print(
+                f"[fleet] WARN: env key '{k}' declared in service '{seen[k]}'"
+                f" overridden by service '{svc_name}'",
+                file=sys.stderr,
+            )
+            # Replace the earlier entry (last-write-wins)
+            lines = [(lk, lv) for lk, lv in lines if lk != k]
+        seen[k] = svc_name
+        lines.append((k, str(v)))
+
+if lines:
+    with open(env_file, "a") as fh:
+        for k, v in lines:
+            fh.write(f"{k}={v}\n")
+PYEOF
+
 # ─── Generate docker-compose.yml (ONE service per feature) ───────────────────
 info "Generating .fleet/${NAME}/docker-compose.yml..."
 COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"

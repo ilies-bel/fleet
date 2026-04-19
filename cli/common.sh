@@ -68,7 +68,7 @@ _find_python_with_tomllib() {
 #   FLEET_PORT_ADMIN        — ports.admin
 #   FLEET_PORT_DB           — ports.db
 #   FLEET_STACKS_JSON       — [[stacks]] as a JSON array of {type,dockerfile,shared_paths}
-#   FLEET_SERVICES_JSON     — [[services]] as a JSON array of {name,dir,stack,port,build,run}
+#   FLEET_SERVICES_JSON     — [[services]] as a JSON array of {name,dir,stack,port,build,run,env}
 #   FLEET_PEERS_JSON        — [[peers]] as a JSON array of {name,type,port,mappings,files}
 #
 # Peer type whitelist: wiremock, static-http, shell.
@@ -151,6 +151,7 @@ out = {
             "port":  str(sv.get("port","")),
             "build": sv.get("build",""),
             "run":   sv.get("run",""),
+            "env":   sv.get("env", {}),
         }
         for sv in services
     ]),

@@ -58,6 +58,8 @@ stack = "next"
 port  = 3000
 build = "npm run build"
 run   = "npm run dev"
+# Optional per-service env vars; written as KEY=VALUE lines in feature.env.
+# env = { JIRA_BASE_URL = "http://127.0.0.1:8089" }
 
 # ─── Peers ────────────────────────────────────────────────────────────────────
 # Optional stub services co-located in the feature container (127.0.0.1).
