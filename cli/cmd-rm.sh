@@ -1,0 +1,143 @@
+#!/bin/bash
+set -euo pipefail
+
+# ─── Resolve paths ───────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FLEET_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+export FLEET_ROOT
+
+# Source shared library
+# shellcheck source=./common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+# ─── _read_info_toml_services <name> ─────────────────────────────────────────
+# Prints newline-separated list of service names from .fleet/<name>/info.toml.
+# Prints nothing (empty) if the file is absent or has no services.
+_read_info_toml_services() {
+  local feature_name="$1"
+  local info_toml="${FLEET_ROOT}/.fleet/${feature_name}/info.toml"
+
+  [ -f "${info_toml}" ] || { echo ""; return 0; }
+
+  local pybin
+  pybin=$(_find_python_with_tomllib) || {
+    warn "No python3 with tomllib/tomli found — cannot parse info.toml"
+    echo ""
+    return 0
+  }
+
+  "$pybin" - "${info_toml}" <<'PYEOF'
+import sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+with open(sys.argv[1], "rb") as fh:
+    data = tomllib.load(fh)
+
+for svc in data.get("services", []):
+    name = svc.get("name", "")
+    if name:
+        print(name)
+PYEOF
+}
+
+# ─── remove_feature <name> ────────────────────────────────────────────────────
+remove_feature() {
+  local name="$1"
+  local feature_dir="${FLEET_ROOT}/.fleet/${name}"
+  local compose_file="${feature_dir}/docker-compose.yml"
+  local info_toml="${feature_dir}/info.toml"
+
+  info "Removing feature: ${name}"
+
+  # Deregister from gateway (best-effort)
+  curl -sf -X DELETE "http://localhost:4000/register-feature/${name}" >/dev/null 2>&1 \
+    || warn "Could not notify gateway (is it running?)"
+
+  # Stop the single feature container (mono-container architecture)
+  docker rm -f "fleet-${name}" 2>/dev/null \
+    || warn "Container 'fleet-${name}' not found (already removed?)"
+
+  # Bring down compose stack (removes any lingering compose-managed resources)
+  if [ -f "${compose_file}" ]; then
+    docker compose -f "${compose_file}" down -v 2>/dev/null || true
+  fi
+
+  # Remove .fleet/<name>/ directory
+  rm -rf "${feature_dir}"
+
+  info "Removed '${name}'"
+}
+
+# ─── Main ────────────────────────────────────────────────────────────────────
+MODE="${1:-}"
+
+if [ -z "$MODE" ]; then
+  echo "Usage:"
+  echo "  fleet rm <name>      — remove one feature (containers + volumes)"
+  echo "  fleet rm --all       — remove all features, keep gateway running"
+  echo "  fleet rm --nuke      — remove everything including gateway and network"
+  exit 1
+fi
+
+case "$MODE" in
+  --all)
+    info "Removing all feature containers..."
+    shopt -s nullglob
+    for info_toml in "${FLEET_ROOT}/.fleet/"*/info.toml; do
+      local_name=$(basename "$(dirname "${info_toml}")")
+      remove_feature "${local_name}"
+    done
+    shopt -u nullglob
+    info "All features removed. Gateway still running."
+    ;;
+
+  --nuke)
+    info "Nuking everything..."
+
+    shopt -s nullglob
+    for info_toml in "${FLEET_ROOT}/.fleet/"*/info.toml; do
+      local_name=$(basename "$(dirname "${info_toml}")")
+      remove_feature "${local_name}" 2>/dev/null || true
+    done
+    shopt -u nullglob
+
+    docker rm -f fleet-gateway 2>/dev/null && info "Gateway removed" \
+      || warn "Gateway not found"
+    docker rmi fleet-gateway 2>/dev/null || true
+
+    # Remove the unified fleet-feature-base image
+    docker rmi fleet-feature-base 2>/dev/null \
+      && info "Image 'fleet-feature-base' removed" \
+      || warn "Image 'fleet-feature-base' not found or in use"
+
+    docker network rm fleet-net 2>/dev/null && info "Network 'fleet-net' removed" \
+      || warn "Network not found"
+
+    # Stop host-runner if PID file exists at .fleet/host-runner.pid
+    RUNNER_PID_FILE="${FLEET_ROOT}/.fleet/host-runner.pid"
+    if [ -f "${RUNNER_PID_FILE}" ]; then
+      RUNNER_PID=$(cat "${RUNNER_PID_FILE}")
+      kill "${RUNNER_PID}" 2>/dev/null \
+        && info "Host runner stopped (PID ${RUNNER_PID})" \
+        || warn "Host runner not running"
+      rm -f "${RUNNER_PID_FILE}"
+    fi
+
+    info "Nuke complete."
+    ;;
+
+  *)
+    NAME="$MODE"
+    validate_feature_name "${NAME}"
+    INFO_TOML="${FLEET_ROOT}/.fleet/${NAME}/info.toml"
+
+    if [ ! -f "${INFO_TOML}" ] && ! docker inspect "fleet-${NAME}" >/dev/null 2>&1; then
+      error "Feature '${NAME}' not found. Run: fleet ls"
+    fi
+
+    remove_feature "${NAME}"
+    ;;
+esac

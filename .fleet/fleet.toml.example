@@ -1,0 +1,98 @@
+# fleet.toml — Fleet project configuration
+#
+# This file is the single source of truth for a Fleet-managed project.
+# Copy this file to .fleet/fleet.toml and adjust to your project.
+#
+# fleet init will generate this file interactively if it is absent.
+
+# ─── Project ──────────────────────────────────────────────────────────────────
+[project]
+name = "d2r2"
+root = "/Users/x/projects/d2r2"   # absolute path to the project root on this host
+worktree_template = ".worktrees/{name}"  # path template for git worktrees; {name} expands to the feature name
+
+# ─── Ports ────────────────────────────────────────────────────────────────────
+[ports]
+proxy = 3000    # nginx reverse proxy (public-facing)
+admin = 4000    # fleet gateway admin API
+db    = 5432    # host-mapped database port (optional; 0 = disabled)
+
+# ─── Stacks ───────────────────────────────────────────────────────────────────
+# Optional. Define custom build stacks used by [[services]].
+# `type`         — identifier referenced by services[].stack
+# `dockerfile`   — path to the Dockerfile template, relative to project.root
+# `shared_paths` — (optional) list of paths, relative to each service's dir,
+#                  to bind-mount READ-ONLY from the PRIMARY checkout into every
+#                  feature container. Use this to share gitignored build output
+#                  (e.g. node_modules) without reinstalling per worktree.
+#                  fleet add auto-runs `npm install` in the primary checkout if
+#                  node_modules is missing; for other stacks it errors and asks
+#                  you to populate the directory manually.
+#
+# [[stacks]]
+# type         = "vite"
+# dockerfile   = ".fleet/Dockerfile.feature-base.vite"
+# shared_paths = ["node_modules"]   # RO-mounted from primary checkout; worktrees share it
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+# One [[services]] entry per deployable unit.
+# `name`  — logical identifier used in fleet commands (e.g. fleet add <name>)
+# `dir`   — path of the service source tree, relative to project.root
+# `stack` — must match one of the [[stacks]] type values above
+# `port`  — container-internal port the service listens on
+# `build` — command that produces the deployable artefact (run inside the container)
+# `run`   — command that starts the service (run inside the container)
+#
+# JAR NAMING CONVENTION (gradle/spring stacks):
+# Each gradle/spring service's built jar is copied to /home/developer/<service-name>.jar.
+# Your `run` command must reference that path — i.e. use the service `name` field, not
+# a hardcoded "backend". Example: a service named "jira-proxy" uses /home/developer/jira-proxy.jar.
+
+[[services]]
+name  = "backend"
+dir   = "d2r2-backend"
+stack = "spring"
+port  = 8081
+build = "mvn package -DskipTests -q"
+# uses /home/developer/<service-name>.jar — fleet copies the built jar there per-service.
+run   = "java -jar /home/developer/backend.jar"
+
+[[services]]
+name  = "frontend"
+dir   = "d2r2-frontend"
+stack = "next"
+port  = 3000
+build = "npm run build"
+run   = "npm run dev"
+# Optional per-service env vars; written as KEY=VALUE lines in feature.env.
+# env = { JIRA_BASE_URL = "http://127.0.0.1:8089" }
+
+# ─── Peers ────────────────────────────────────────────────────────────────────
+# Optional stub services co-located in the feature container (127.0.0.1).
+# Peers are started by supervisord alongside the main services; they are NOT
+# exposed externally — internal traffic only.
+#
+# `name`     — unique identifier for this peer (used in supervisord program name)
+# `type`     — one of: wiremock | static-http | shell
+# `port`     — container-internal port the peer listens on
+# `mappings` — (wiremock only) path to WireMock mappings dir, relative to project.root
+# `files`    — (wiremock only) path to WireMock __files dir, relative to project.root
+# `cmd`      — (shell only) command to run as the peer process
+#
+# [[peers]]
+# name     = "wiremock-edf"
+# type     = "wiremock"
+# port     = 8080
+# mappings = "wiremock-edf/mappings"
+# files    = "wiremock-edf/__files"
+#
+# [[peers]]
+# name = "mock-api"
+# type = "static-http"
+# port = 9090
+#
+# [[peers]]
+# name = "custom-stub"
+# type = "shell"
+# port = 7070
+# cmd  = "node /app/custom-stub/server.js"
