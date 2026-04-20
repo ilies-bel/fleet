@@ -273,4 +273,35 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     // not_started feature should NOT be auto-activated
     assert.equal(feature.isActive, false, 'not_started feature should not become active');
   });
+  // ── Title field: optional, persisted, exposed via GET /features ──────────────
+
+  test('persists title and exposes it through GET /_fleet/api/features', async () => {
+    const res = await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { name: 'foo', branch: 'foo', title: 'Hello' },
+    });
+
+    assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.ok, true);
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'foo');
+    assert.ok(feature, 'feature should be in registry');
+    assert.equal(feature.title, 'Hello', 'title should be persisted and returned');
+  });
+
+  test('title defaults to null when omitted (backward compat)', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { name: 'no-title', branch: 'main' },
+    });
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'no-title');
+    assert.ok(feature, 'feature should be in registry');
+    assert.equal(feature.title, null, 'title should default to null');
+  });
+
 });

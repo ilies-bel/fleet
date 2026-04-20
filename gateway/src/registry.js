@@ -1,6 +1,6 @@
 /**
  * @typedef {{ name: string, port: number }} ServiceEntry
- * @typedef {{ branch: string, worktreePath: string|null, project: string|null, addedAt: Date, status: string, services: ServiceEntry[] }} FeatureEntry
+ * @typedef {{ branch: string, worktreePath: string|null, project: string|null, title: string|null, addedAt: Date, status: string, services: ServiceEntry[] }} FeatureEntry
  * @type {Map<string, FeatureEntry>}
  */
 const features = new Map();
@@ -16,9 +16,10 @@ let activeFeature = null;
  * @param {string|null} project - project name shown in the dashboard
  * @param {string} status - lifecycle status: 'running' | 'not_started' | 'stopped'
  * @param {ServiceEntry[]} services - per-service {name, port} entries for path-prefix routing
+ * @param {string|null} title - human-readable display title for the dashboard card
  */
-export function register(name, branch, worktreePath = null, project = null, status = 'running', services = []) {
-  features.set(name, { branch, worktreePath, project, addedAt: new Date(), status, services });
+export function register(name, branch, worktreePath = null, project = null, status = 'running', services = [], title = null) {
+  features.set(name, { branch, worktreePath, project, title, addedAt: new Date(), status, services });
   // Only auto-activate if the feature is actually running
   if (activeFeature === null && status === 'running') activeFeature = name;
 }
