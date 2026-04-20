@@ -9,7 +9,7 @@ const router = Router();
  * Body: { name, branch }
  */
 router.post('/register-feature', (req, res) => {
-  const { name, branch, worktreePath = null, project = null, status = 'running', services = [] } = req.body;
+  const { name, branch, worktreePath = null, project = null, status = 'running', services = [], title = null } = req.body;
 
   if (!name || !branch) {
     return res.status(400).json({ error: 'name and branch are required' });
@@ -24,7 +24,7 @@ router.post('/register-feature', (req, res) => {
         .map(s => ({ name: s.name, port: Number(s.port) }))
     : [];
 
-  register(name, branch, worktreePath, project, status, normalizedServices);
+  register(name, branch, worktreePath, project, status, normalizedServices, title);
 
   res.json({ ok: true, name, branch, services: normalizedServices });
 });
