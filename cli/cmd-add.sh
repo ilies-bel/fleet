@@ -396,9 +396,11 @@ out = [{'name': s['name'], 'port': int(s['port'])} for s in svcs if s.get('port'
 print(json.dumps(out))
 " "${FLEET_SERVICES_JSON}")
 
+title_json=$("${_PYBIN}" -c "import sys, json; print(json.dumps(sys.argv[1]))" "${FEATURE_TITLE}")
+
 info "Registering '${NAME}' with gateway..."
 HTTP_STATUS=$(gateway_post "register-feature" \
-  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"services\":${services_json}}")
+  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"title\":${title_json},\"services\":${services_json}}")
 
 if [ "${HTTP_STATUS}" != "200" ]; then
   warn "Gateway registration returned HTTP ${HTTP_STATUS} (is the gateway running?)"
