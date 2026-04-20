@@ -378,8 +378,15 @@ if [ -f "${FLEET_TOML}" ]; then
   PROXY_PORT="${FLEET_PORT_PROXY:-3000}"
   ADMIN_PORT="${FLEET_PORT_ADMIN:-4000}"
   DB_PORT="${FLEET_PORT_DB:-5432}"
-  # Preserve existing worktree_template if set; otherwise keep the default
-  WORKTREE_TEMPLATE="${FLEET_WORKTREE_TEMPLATE:-.worktrees/{name}}"
+  # Preserve existing worktree_template if set; otherwise keep the default.
+  # NB: can't use ${VAR:-.worktrees/{name}} — bash parameter-expansion braces
+  # don't nest, so the first `}` closes the expansion and the second `}` is
+  # appended literally, corrupting the template on every re-run.
+  if [ -n "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
+    WORKTREE_TEMPLATE="${FLEET_WORKTREE_TEMPLATE}"
+  else
+    WORKTREE_TEMPLATE=".worktrees/{name}"
+  fi
   export PROXY_PORT ADMIN_PORT DB_PORT
 
   # Rebuild SVC_* arrays from loaded TOML using python
