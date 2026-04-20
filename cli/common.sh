@@ -380,6 +380,21 @@ gateway_post() {
     -H "Content-Type: application/json" -d "$2"
 }
 
+# gateway_post_full PATH JSON_BODY — returns "HTTP_CODE|BODY_FILE_PATH" on stdout.
+# The response body is written to a mktemp file. The caller must remove it after use:
+#   result=$(gateway_post_full "path" "$body")
+#   http_code="${result%|*}"; body_file="${result#*|}"
+#   ... use body_file ...
+#   rm -f "$body_file"
+gateway_post_full() {
+  local body_file
+  body_file=$(mktemp)
+  local http_code
+  http_code=$(curl -s -o "${body_file}" -w "%{http_code}" -X POST "${GATEWAY_URL}/$1" \
+    -H "Content-Type: application/json" -d "$2")
+  printf '%s|%s\n' "${http_code}" "${body_file}"
+}
+
 # gateway_delete PATH — returns HTTP status code
 gateway_delete() {
   curl -s -o /dev/null -w "%{http_code}" -X DELETE "${GATEWAY_URL}/$1"

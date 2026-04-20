@@ -399,11 +399,25 @@ print(json.dumps(out))
 title_json=$("${_PYBIN}" -c "import sys, json; print(json.dumps(sys.argv[1]))" "${FEATURE_TITLE}")
 
 info "Registering '${NAME}' with gateway..."
-HTTP_STATUS=$(gateway_post "register-feature" \
+_GW_RESULT=$(gateway_post_full "register-feature" \
   "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"title\":${title_json},\"services\":${services_json}}")
+HTTP_STATUS="${_GW_RESULT%|*}"
+_GW_BODY_FILE="${_GW_RESULT#*|}"
+_GW_BODY=$(cat "${_GW_BODY_FILE}" 2>/dev/null || true)
+rm -f "${_GW_BODY_FILE}"
 
 if [ "${HTTP_STATUS}" != "200" ]; then
-  warn "Gateway registration returned HTTP ${HTTP_STATUS} (is the gateway running?)"
+  _GW_BODY_HINT=""
+  [ -n "${_GW_BODY}" ] && _GW_BODY_HINT="\n  response  : ${_GW_BODY}"
+  error "Gateway registration failed.
+  HTTP status: ${HTTP_STATUS}
+  endpoint   : ${GATEWAY_URL}/register-feature
+  feature    : ${NAME}${_GW_BODY_HINT}
+
+  Remediation:
+    Inspect   → curl -sS ${GATEWAY_URL}/_fleet/api/features
+    Abandon   → docker stop fleet-${NAME}
+    Retry     → re-run: fleet add ${NAME} --title '${FEATURE_TITLE}'"
 fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
