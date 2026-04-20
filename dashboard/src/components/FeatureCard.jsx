@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { getHealth, removeFeature, openTerminal, stopFeature, startFeature, syncFeature } from '../api.js';
 
 export default function FeatureCard({ feature, isActive, isPreview, isStarting, onActivate, onRemoved, onLogs }) {
-  const { name, branch } = feature;
+  const { name, branch, title } = feature;
   const [health, setHealth] = useState('checking');
   const [confirming, setConfirming] = useState(false);
   const [activating, setActivating] = useState(false);
@@ -136,7 +136,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
         overflow: 'hidden',
         textOverflow: 'ellipsis',
       }}>
-        {name}
+        {title || name}
       </div>
       <div style={{
         color: 'var(--color-muted)',
