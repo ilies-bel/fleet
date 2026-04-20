@@ -1,3 +1,5 @@
+import { inspectContainer } from './docker.js';
+
 /**
  * @typedef {{ name: string, port: number }} ServiceEntry
  * @typedef {{ branch: string, worktreePath: string|null, project: string|null, title: string|null, addedAt: Date, status: string, services: ServiceEntry[] }} FeatureEntry
@@ -100,4 +102,25 @@ export function getActiveFeature() {
 export function setActiveFeature(name) {
   if (!features.has(name)) throw new Error(`Feature '${name}' is not registered`);
   activeFeature = name;
+}
+
+/**
+ * Live-check whether a feature's Docker container is currently running.
+ * Queries the Docker daemon via inspectContainer and returns a normalised status.
+ *
+ * This is intentionally a lazy check — called only when a request arrives — so
+ * the registry does not require a background poller.
+ *
+ * @param {string} name  feature name (without the 'fleet-' prefix)
+ * @returns {Promise<'running' | 'stopped' | 'missing'>}
+ */
+export async function getContainerStatus(name) {
+  try {
+    const info = await inspectContainer(`fleet-${name}`);
+    if (!info) return 'missing';
+    return info.State?.Running === true ? 'running' : 'stopped';
+  } catch {
+    // Treat any docker error conservatively — container unreachable → stopped
+    return 'stopped';
+  }
 }
