@@ -28,7 +28,7 @@ router.get('/features/:name/health', async (req, res) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
 
-    const response = await fetch(`http://fleet-${name}:${process.env.PROXY_PORT || 3000}/`, {
+    const response = await fetch(`http://fleet-${name}:80/`, {
       method: 'HEAD',
       signal: controller.signal,
     });
