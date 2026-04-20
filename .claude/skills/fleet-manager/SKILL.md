@@ -1,174 +1,178 @@
 ---
 name: fleet-manager
-description: Set up and debug qa-fleet Docker containers. Reads gateway + supervisord logs, diagnoses init/build/runtime/proxy failures, and auto-fixes known error signatures (restart, rebuild base image, re-register with gateway, reseed node_modules). Use when a fleet container fails to start, a feature returns 502/503, `fleet init` or `fleet add` errors out, or the user asks to inspect/recover a feature environment.
+description: Diagnose and recover fleet feature containers. Reads gateway + supervisord logs, matches known error signatures (init failures, build crashes, runtime restarts, proxy 502/503), and routes fixes by invoking /fleet:add or /fleet:init, or running targeted surgical docker/supervisorctl commands. Use when a feature container fails to start, returns 502/503, or `fleet init`/`fleet add` errors out. Current architecture: mono-container per feature (fleet-<NAME>), supervisord-managed per-service processes inside, fleet-gateway on fleet-net, admin API at /_fleet/api/....
 ---
 
 # fleet-manager
 
-Operational runbook for bringing qa-fleet containers up and keeping them healthy. Apply auto-fixes for known signatures; ask before destructive actions (`fleet rm --nuke`, `docker volume prune`, rebuilding base image when other features are running).
+Operational runbook for diagnosing and recovering fleet feature containers. For topology details and setup flow, defer to `/fleet:init` and `/fleet:add` — this skill's job is diagnosis, error-signature matching, and routing to the correct recovery action.
 
-## Fleet topology (ground truth)
+**Key identifiers (current):**
 
-- **Gateway:** `qa-gateway-container` on network `qa-net`. Admin API on `:4000` (`/_qa/api/...`), transparent proxy on `:3000`. Source: `gateway/src/index.js:15-49`.
-- **Feature containers:** `qa-<NAME>` (NAME is lowercase alphanumeric + hyphens, validated at `cli/common.sh:104-108`). Joined to `qa-net`. Built from `qa-feature-base` image.
-- **Base image:** `qa-feature-base` — Ubuntu 24.04 + nginx + supervisord + PostgreSQL 16 + Java 21 + Node 20. Non-root user `developer` (uid 1001). Defined in `Dockerfile.feature-base`.
-- **Per-feature processes (supervisord):** backend, nginx, postgresql. Logs at `/var/log/supervisor/{backend,nginx,postgresql,supervisord}.log`.
-- **State:** feature metadata in `$APP_ROOT/.qa/<NAME>/`; worktrees in `$APP_ROOT/.qa-worktrees/<NAME>/{frontend,backend}`; global `.qa-config` stores APP_ROOT; `qa-fleet.conf` holds build/run commands and ports.
+| Thing | Value |
+|---|---|
+| Base image | `fleet-feature-base` |
+| Feature container | `fleet-<NAME>` |
+| Gateway container | `fleet-gateway` |
+| Docker network | `fleet-net` |
+| Config file | `.fleet/fleet.toml` |
+| Feature state dir | `.fleet/<NAME>/info.toml` |
+| Worktrees | `.worktrees/<NAME>/` |
+| Admin API prefix | `/_fleet/api/...` |
+| Proxy port (default) | `3000` |
+| Admin port (default) | `4000` |
+| Named volumes | `fleet-<NAME>-nm` (node_modules), `fleet-<NAME>-target` (build artifacts) |
+| Supervisord logs | `/var/log/supervisor/*.log` inside container |
+
+---
 
 ## Diagnosis flow
 
 Always run the cheapest check first. Do not restart before you know why.
 
-1. **Is the gateway up?**
-   `docker ps --filter name=qa-gateway-container --format '{{.Status}}'`
-   - Empty → gateway is not running. Go to `fleet init` recovery.
-   - `Restarting` loop → `docker logs qa-gateway-container | tail -80`.
+**1. Is the gateway up?**
+```bash
+docker ps --filter name=fleet-gateway --format '{{.Status}}'
+```
+- Empty → gateway not running. Invoke `/fleet:init` recovery.
+- `Restarting` loop → `docker logs fleet-gateway | tail -80`.
 
-2. **Is the feature registered?**
-   `curl -sf http://localhost:4000/_qa/api/features | jq '.[] | select(.name=="<NAME>")'`
-   - Missing → registration dropped. Re-register via `fleet add` or POST `/register-feature`.
+**2. Is the feature registered?**
+```bash
+curl -sf http://localhost:4000/_fleet/api/features | jq '.[] | select(.name=="<NAME>")'
+```
+- Missing → invoke `/fleet:add <NAME>` to re-register.
 
-3. **Is the feature container running?**
-   `docker ps -a --filter name=qa-<NAME> --format '{{.Status}}'`
-   - Not listed → never created; run `fleet add <NAME> <BRANCH>`.
-   - `Exited` → read exit reason, then supervisord log.
+**3. Is the feature container running?**
+```bash
+docker ps -a --filter name=fleet-<NAME> --format '{{.Status}}'
+```
+- Not listed → never created; invoke `/fleet:add <NAME>`.
+- `Exited` → read exit reason, then check supervisord log.
 
-4. **Inspect logs via gateway API (preferred — gives structured source):**
-   ```bash
-   curl -s "http://localhost:4000/_qa/api/features/<NAME>/logs?source=backend&tail=300"
-   curl -s "http://localhost:4000/_qa/api/features/<NAME>/logs?source=nginx&tail=100"
-   curl -s "http://localhost:4000/_qa/api/features/<NAME>/logs?source=all&tail=200"
-   ```
-   Allowed sources: `backend`, `nginx`, `postgresql`, `supervisord`, `all`. Source: `gateway/src/api.js:140-178`.
+**4. Inspect logs via gateway API (preferred when gateway is healthy):**
+```bash
+curl -s "http://localhost:4000/_fleet/api/features/<NAME>/logs?source=backend&tail=300"
+curl -s "http://localhost:4000/_fleet/api/features/<NAME>/logs?source=nginx&tail=100"
+curl -s "http://localhost:4000/_fleet/api/features/<NAME>/logs?source=all&tail=200"
+```
+Allowed sources: `backend`, `nginx`, `postgresql`, `supervisord`, `all`.
 
-5. **Direct docker fallback (use when gateway is down):**
-   ```bash
-   docker logs qa-<NAME> --tail 200
-   docker exec qa-<NAME> tail -200 /var/log/supervisor/backend.log
-   docker exec qa-<NAME> supervisorctl status
-   docker stats --no-stream qa-<NAME>
-   docker inspect qa-<NAME> --format '{{.State.Status}} {{.State.Error}} exit={{.State.ExitCode}}'
-   ```
+**5. Direct docker fallback (use when gateway is down):**
+```bash
+docker logs fleet-<NAME> --tail 200
+docker exec fleet-<NAME> tail -200 /var/log/supervisor/backend.log
+docker exec fleet-<NAME> supervisorctl status
+docker stats --no-stream fleet-<NAME>
+docker inspect fleet-<NAME> --format '{{.State.Status}} {{.State.Error}} exit={{.State.ExitCode}}'
+```
+
+---
 
 ## Error signature → action matrix
 
 Match stderr / log output to one of these signatures. If multiple match, handle top-down.
 
-### A. Init failures (`fleet init`)
+### A. Init failures — invoke `/fleet:init` to recover
 
-| Signature (where to find it) | Auto-fix |
+| Signature | Recovery |
 |---|---|
-| `docker is not installed` (`cli/cmd-init.sh:538`) | Stop. Tell user to install Docker — no auto-fix. |
-| `FRONTEND_DIR … not found` (`cmd-init.sh:281`) | Read `qa-fleet.conf`, verify path under APP_ROOT, fix the path in config. |
-| Gateway build timeout after 30s (`cmd-init.sh:789`) | Check `docker logs qa-gateway-container`, `docker network inspect qa-net`. Usually Docker socket permission; ask user to `chmod` or add to `docker` group. |
-| `qa-fleet.conf missing + no tty` (`cmd-init.sh:266`) | Tell user to run `fleet init` in a real terminal (needs `/dev/tty` for wizard). |
+| `docker is not installed` | Stop. Tell user to install Docker — no auto-fix. |
+| Base image `fleet-feature-base` not found | Run `/fleet:init` to build the base image. |
+| `FRONTEND_DIR … not found` | Read `.fleet/fleet.toml`, verify service dir under project root, fix path in `[[services]]`. |
+| Gateway build timeout | Check `docker logs fleet-gateway`, `docker network inspect fleet-net`. Likely Docker socket permission; ask user to add to `docker` group. |
+| `.fleet/fleet.toml` missing and no tty | Tell user to run `fleet init` in a real terminal (wizard needs `/dev/tty`). |
 
-### B. Build failures (container boots, frontend build dies)
+### B. Build failures — container boots, service build crashes
 
-Build runs in `config/entrypoint.sh:54-99`. Symptoms: container restarts, `backend.log` shows npm build crash.
+Symptoms: container restarts, service log shows build crash. Logs at `/var/log/supervisor/<service>.log` inside the container.
 
-| Signature | Auto-fix |
+| Signature | Recovery |
 |---|---|
-| `JavaScript heap out of memory` | Raise `NODE_OPTIONS=--max-old-space-size=8192` in `qa-fleet.conf` (default 4096 at entrypoint.sh:97). Restart: `docker restart qa-<NAME>`. |
-| `Cannot find module '@next/swc-*'` or `esbuild`, `lightningcss`, `rollup`, `@oxc-resolver`, `@unrs/resolver` | Platform binary mismatch (macOS host → Linux container). Reseed node_modules: `docker volume rm qa-<NAME>-nm && docker restart qa-<NAME>`. Entrypoint re-seeds from `/app-nm-seed` on start. |
+| `JavaScript heap out of memory` | Raise `NODE_OPTIONS=--max-old-space-size=8192` in the `[[services]]` env block of `.fleet/fleet.toml`. Restart: `docker restart fleet-<NAME>`. |
+| `Cannot find module '@next/swc-*'` or `esbuild`, `lightningcss`, `rollup`, `@oxc-resolver`, `@unrs/resolver` | Platform binary mismatch (macOS host → Linux container). Remove stale node_modules volume: `docker volume rm fleet-<NAME>-nm && docker restart fleet-<NAME>`. Entrypoint reconciles node_modules on every start. |
 | `ENOSPC` | Disk full. `docker system df`; ask before `docker system prune -f`. |
-| `npm ERR! code EACCES` inside `/app/node_modules` | Ownership drift on host seed. Ask user to `rm -rf node_modules && npm ci` on host, then restart container. |
+| `npm ERR! code EACCES` inside `/app/node_modules` | Ownership drift. Ask user to `rm -rf node_modules && npm ci` on host, then restart container. |
 
-### C. Runtime failures (backend won't stay up)
+### C. Runtime failures — service won't stay up
 
-| Signature | Auto-fix |
+| Signature | Recovery |
 |---|---|
-| Spring Boot `Port 8080 already in use` / `BACKEND_PORT` conflict | Read `BACKEND_PORT` from `qa-fleet.conf`; confirm supervisord backend program uses it. Inside container: `docker exec qa-<NAME> supervisorctl restart backend`. |
-| PostgreSQL `could not bind IPv4 address`, `database … does not exist` | `docker exec qa-<NAME> supervisorctl restart postgresql`; if first-boot init failed, tear down volumes and recreate: `fleet rm <NAME> && fleet add <NAME> <BRANCH>`. |
-| Backend `Connection refused` to DB | DB env mismatch. Verify `DB_HOST=127.0.0.1 DB_PORT=5432` (cmd-add.sh:129-146) — both processes share the container's network namespace. Restart backend only. |
-| Container status `Exited (137)` | OOM-killed. Raise Docker Desktop memory, then `fleet restart <NAME>`. |
-| Container status `Exited (139)` (segfault) | Usually corrupt node_modules volume. Remove `qa-<NAME>-nm` volume and restart. |
+| Spring Boot `Port … already in use` | Confirm `port` in `[[services]]` entry of `.fleet/fleet.toml`. Inside container: `docker exec fleet-<NAME> supervisorctl restart <service>`. |
+| PostgreSQL `could not bind IPv4 address` or DB init failure | `docker exec fleet-<NAME> supervisorctl restart postgresql`. If first-boot init failed, tear down and recreate: `fleet rm <NAME> && fleet add <NAME>`. |
+| Backend `Connection refused` to DB | DB env mismatch. Both service and postgres share the container's network namespace; DB is at `127.0.0.1:5432`. Restart backend only. |
+| Container status `Exited (137)` | OOM-killed. Raise Docker Desktop memory limit, then `fleet restart <NAME>`. |
+| Container status `Exited (139)` (segfault) | Usually corrupt node_modules volume. Remove `fleet-<NAME>-nm` volume and restart. |
 
-### D. Proxy / routing failures (gateway returns 502/503)
+### D. Proxy / routing failures — gateway returns 502/503
 
-Source: `gateway/src/proxy.js:10-46`.
-
-| Signature | Auto-fix |
+| Signature | Recovery |
 |---|---|
-| 503 + "No active feature" page | `curl -X POST http://localhost:4000/_qa/api/features/<NAME>/activate` (or use dashboard). |
-| 502 from proxy, container is running | Backend not listening on `BACKEND_PORT` yet. `curl http://localhost:4000/_qa/api/features/<NAME>/health`; wait 5–10s; re-check supervisord status. |
-| 502, `docker inspect` shows container not on `qa-net` | `docker network connect qa-net qa-<NAME>`. |
-| Feature missing from registry after gateway restart | `fleet rm <NAME> && fleet add <NAME> <BRANCH>` — or manually POST `/register-feature`. Reconcile logic at `gateway/src/reconcile.js:11-73` should handle this; if it doesn't, the container is in a weird state. |
+| 503 + "No active feature" page | `curl -X POST http://localhost:4000/_fleet/api/features/<NAME>/activate` (or use dashboard). |
+| 502, container is running | Service not listening on its port yet. Check `http://localhost:4000/_fleet/api/features/<NAME>/health`; wait 5–10 s; re-check supervisorctl status. |
+| 502, container not on `fleet-net` | `docker network connect fleet-net fleet-<NAME>`. |
+| Feature missing from registry after gateway restart | Invoke `/fleet:add <NAME>` to re-register, or manually POST to `/_fleet/api/register-feature`. |
 
 ### E. Gateway-side failures
 
-| Signature | Auto-fix |
+| Signature | Recovery |
 |---|---|
-| `DockerSocketError` (`gateway/src/docker.js:36`) | Docker daemon down or socket not mounted. Restart Docker Desktop. |
-| `DockerContainerError 404` | Stale registry entry. `curl -X DELETE http://localhost:4000/register-feature/<NAME>`. |
+| `DockerSocketError` | Docker daemon down or socket not mounted. Restart Docker Desktop. |
+| `DockerContainerError 404` | Stale registry entry. `curl -X DELETE http://localhost:4000/_fleet/api/register-feature/<NAME>`. |
 | `DockerContainerError 409` on logs/exec | Container not running — expected during build. Wait and retry. |
+
+---
 
 ## Recovery recipes
 
-Pick the least destructive one that solves the signature.
+Pick the least destructive recipe that matches the signature.
 
 **Tier 1 — soft restart (no data loss):**
 ```bash
-fleet restart <NAME>                          # docker restart + health poll
-docker exec qa-<NAME> supervisorctl restart backend
+fleet restart <NAME>
+docker exec fleet-<NAME> supervisorctl restart <service>
 ```
 
 **Tier 2 — drop node_modules volume (keeps DB data):**
 ```bash
-docker stop qa-<NAME>
-docker volume rm qa-<NAME>-nm
-docker start qa-<NAME>
+docker stop fleet-<NAME>
+docker volume rm fleet-<NAME>-nm
+docker start fleet-<NAME>
 ```
 
 **Tier 3 — rebuild feature container (keeps worktree + branch):**
+Invoke `/fleet:add <NAME>` after `fleet rm <NAME>`.
 ```bash
 fleet rm <NAME>
-fleet add <NAME> <BRANCH>
+# then: /fleet:add <NAME>
 ```
 
 **Tier 4 — rebuild base image (affects ALL features — ASK FIRST):**
-```bash
-docker rmi qa-feature-base
-fleet init <APP_ROOT> main   # rebuilds base, leaves existing features requiring fleet rm/add
-```
+Invoke `/fleet:init` to rebuild the base image. Existing features need `fleet rm / fleet add` after.
 
 **Tier 5 — nuke (DESTRUCTIVE — ASK FIRST):**
 ```bash
-fleet rm --nuke              # removes all features + gateway + network + images
-fleet init <APP_ROOT> main
+fleet rm --nuke
+# then: /fleet:init
 ```
 
-## Setup from scratch
+---
 
-When the user wants a fresh environment:
+## Fresh environment setup
+
+When the user wants a fresh environment, invoke `/fleet:init [feature-name]`:
 
 1. Confirm `docker info` works.
-2. Confirm `qa-fleet.conf` exists in the target app root (or guide through the wizard — requires real tty).
-3. Run `fleet init <APP_ROOT> <BASE_BRANCH>` in the user's terminal (needs `/dev/tty`).
-4. Verify:
-   ```bash
-   docker ps --filter name=qa-gateway-container
-   curl -sf http://localhost:4000/_qa/api/status
-   ```
-5. Add the first feature: `fleet add <NAME> <BRANCH>`.
-6. Health check: `curl http://localhost:4000/_qa/api/features/<NAME>/health`.
+2. Confirm `.fleet/fleet.toml` exists in the project root (or guide through the wizard — needs real tty).
+3. Invoke `/fleet:init` — it writes the TOML, runs `fleet init`, and waits for the gateway.
+4. To spin up a feature container, invoke `/fleet:add <NAME>`.
+
+---
 
 ## Guardrails
 
-- **Never run `fleet rm --nuke`, `docker volume prune`, `docker system prune`, or `docker rmi qa-feature-base` without explicit user approval** — they wipe other features' data and force rebuilds.
+- **Never run `fleet rm --nuke`, `docker volume prune`, `docker system prune`, or rebuild the base image without explicit user approval** — they wipe other features' data and force rebuilds.
 - **Never touch `test/reference/`** (pristine fixture). Use `test/project/` for experiments; re-copy with `cp -rp test/reference test/project` if corrupted.
-- **Never edit `qa-fleet.conf` silently.** Propose the diff, then apply.
-- **Prefer gateway API over raw `docker exec`** when the gateway is healthy — it gives structured responses and logs intent.
-- **If three restart attempts fail, stop and escalate.** Don't loop restarts blindly — read the log.
-
-## Quick reference — endpoints & paths
-
-| Thing | Location |
-|---|---|
-| Admin API | `http://localhost:4000/_qa/api/` |
-| Proxy | `http://localhost:3000` |
-| Feature state dir | `$APP_ROOT/.qa/<NAME>/` |
-| Worktree | `$APP_ROOT/.qa-worktrees/<NAME>/` |
-| Supervisord logs | `/var/log/supervisor/*.log` inside container |
-| Named volumes | `qa-<NAME>-nm` (node_modules), `qa-<NAME>-target` (build artifacts) |
-| Global config | `$APP_ROOT/.qa-config`, `$APP_ROOT/qa-fleet.conf` |
+- **Never edit `.fleet/fleet.toml` silently.** Propose the diff, then apply.
+- **Prefer the gateway API over raw `docker exec`** when the gateway is healthy — it gives structured responses.
+- **If three restart attempts fail, stop and escalate.** Read the log; do not loop restarts blindly.
