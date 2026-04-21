@@ -1,4 +1,4 @@
-import { createProxyMiddleware } from 'http-proxy-middleware';
+import { createProxyMiddleware, debugProxyErrorsPlugin, proxyEventsPlugin } from 'http-proxy-middleware';
 import { getActiveFeature, getContainerStatus, updateStatus } from './registry.js';
 
 /**
@@ -12,6 +12,11 @@ import { getActiveFeature, getContainerStatus, updateStatus } from './registry.j
  * running (lazy liveness check on every request). Returns 502 on upstream
  * connection errors for a container that is running but refusing connections.
  *
+ * ejectPlugins: true — skips http-proxy-middleware's default loggerPlugin which
+ * crashes with TypeError: ERR_INVALID_URL when options.target is undefined (router:
+ * only config). We re-add debugProxyErrorsPlugin and proxyEventsPlugin explicitly
+ * to retain error propagation and proxy event wiring. See issue #1035.
+ *
  * @returns {import('express').RequestHandler}
  */
 export function createFeatureProxy() {
@@ -22,6 +27,8 @@ export function createFeatureProxy() {
       return `http://fleet-${req._fleetFeature}:80`;
     },
     changeOrigin: true,
+    ejectPlugins: true,
+    plugins: [debugProxyErrorsPlugin, proxyEventsPlugin],
     on: {
       proxyReq: (proxyReq, req) => {
         if (req._fleetFeature) proxyReq.setHeader('X-Fleet-Feature', req._fleetFeature);
