@@ -65,5 +65,13 @@ fi
 # gateway reaches us over fleet-net using the per-service port from fleet.toml.
 export SERVER_PORT="${BACKEND_PORT}"
 
+# Source shared env files
+if [ -n "${FLEET_SHARED_ENV_FILES:-}" ]; then
+  IFS=':' read -ra _files <<< "${FLEET_SHARED_ENV_FILES}"
+  for f in "${_files[@]}"; do
+    [ -r "$f" ] && set -a && . "$f" && set +a
+  done
+fi
+
 echo "[fleet-spring] Exec: ${BACKEND_RUN_CMD}"
 exec bash -c "${BACKEND_RUN_CMD}"

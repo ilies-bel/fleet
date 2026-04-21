@@ -121,6 +121,7 @@ ports    = data.get("ports", {})
 stacks   = data.get("stacks", [])
 services = data.get("services", [])
 peers    = data.get("peers", [])
+shared   = data.get("shared", [])
 
 # Validate peer types before emitting any output
 for p in peers:
@@ -166,6 +167,14 @@ out = {
         }
         for p in peers
     ]),
+    "shared_json":    json.dumps([
+        {
+            "path":   s.get("path",""),
+            "target": s.get("target",""),
+        }
+        for s in shared
+        if s.get("path")
+    ]),
 }
 print(json.dumps(out))
 PYEOF
@@ -184,10 +193,11 @@ PYEOF
   FLEET_STACKS_JSON=$(_get stacks_json)
   FLEET_SERVICES_JSON=$(_get services_json)
   FLEET_PEERS_JSON=$(_get peers_json)
+  FLEET_SHARED_JSON=$(_get shared_json)
 
   export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT FLEET_WORKTREE_TEMPLATE \
          FLEET_PORT_PROXY FLEET_PORT_ADMIN FLEET_PORT_DB \
-         FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON
+         FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON FLEET_SHARED_JSON
 }
 
 # fleet_services_json — print FLEET_SERVICES_JSON
