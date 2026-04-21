@@ -304,4 +304,177 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     assert.equal(feature.title, null, 'title should default to null');
   });
 
+  // ── Lifecycle statuses (building / starting / failed) ────────────────────
+
+  test('accepts status=building and does NOT auto-activate', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { name: 'build-early', branch: 'main', status: 'building' },
+    });
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'build-early');
+    assert.equal(feature.status, 'building');
+    assert.equal(feature.isActive, false, 'building feature must not be auto-activated (would 502)');
+  });
+
+  test('accepts status=starting without auto-activation', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { name: 'booting', branch: 'main', status: 'starting' },
+    });
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'booting');
+    assert.equal(feature.status, 'starting');
+    assert.equal(feature.isActive, false);
+  });
+
+  test('accepts status=failed with an error message', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: {
+        name: 'broken',
+        branch: 'main',
+        status: 'failed',
+        error: 'docker build step 3: ENOENT Dockerfile.feature-base.spring',
+      },
+    });
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'broken');
+    assert.equal(feature.status, 'failed');
+    assert.equal(feature.error, 'docker build step 3: ENOENT Dockerfile.feature-base.spring');
+    assert.equal(feature.isActive, false);
+  });
+
+  test('error defaults to null when omitted', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { name: 'no-error', branch: 'main' },
+    });
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'no-error');
+    assert.equal(feature.error, null);
+  });
+
+  // ── PATCH /_fleet/api/features/:name/status contract ─────────────────────
+
+  test('PATCH status transitions building → starting → running', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { name: 'lifecycle', branch: 'main', status: 'building' },
+    });
+
+    let res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/lifecycle/status',
+      body: { status: 'starting' },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'starting');
+
+    res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/lifecycle/status',
+      body: { status: 'running' },
+    });
+    assert.equal(res.status, 200);
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'lifecycle');
+    assert.equal(feature.status, 'running');
+  });
+
+  test('PATCH status=failed accepts and persists an error field', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { name: 'crashy', branch: 'main', status: 'building' },
+    });
+
+    const res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/crashy/status',
+      body: { status: 'failed', error: 'mvn build exited 1' },
+    });
+    assert.equal(res.status, 200);
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'crashy');
+    assert.equal(feature.status, 'failed');
+    assert.equal(feature.error, 'mvn build exited 1');
+  });
+
+  test('PATCH without error field preserves existing error (no clobber)', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: {
+        name: 'preserve-err',
+        branch: 'main',
+        status: 'failed',
+        error: 'original build failure',
+      },
+    });
+
+    // Transition back to building without sending error → original must persist.
+    const res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/preserve-err/status',
+      body: { status: 'building' },
+    });
+    assert.equal(res.status, 200);
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'preserve-err');
+    assert.equal(feature.status, 'building');
+    assert.equal(feature.error, 'original build failure', 'error must persist when not explicitly cleared');
+  });
+
+  test('PATCH with error=null explicitly clears the error', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: {
+        name: 'clear-err',
+        branch: 'main',
+        status: 'failed',
+        error: 'transient glitch',
+      },
+    });
+
+    const res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/clear-err/status',
+      body: { status: 'running', error: null },
+    });
+    assert.equal(res.status, 200);
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.name === 'clear-err');
+    assert.equal(feature.error, null, 'explicit null must clear the error');
+  });
+
+  test('PATCH rejects non-string error with 400', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { name: 'bad-err-type', branch: 'main' },
+    });
+
+    const res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/bad-err-type/status',
+      body: { status: 'failed', error: 42 },
+    });
+    assert.equal(res.status, 400);
+  });
+
 });

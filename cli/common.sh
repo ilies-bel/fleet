@@ -400,6 +400,42 @@ gateway_delete() {
   curl -s -o /dev/null -w "%{http_code}" -X DELETE "${GATEWAY_URL}/$1"
 }
 
+# gateway_patch_status NAME STATUS [ERROR] — PATCH a feature's lifecycle status.
+# Non-fatal: a non-2xx response is warned about but does not exit. Status drift
+# is recoverable; forcing the whole `fleet add` to fail on a PATCH race would
+# regress the intent of yn2 (fail loudly only on the initial registration).
+gateway_patch_status() {
+  local name="${1:-}" status="${2:-}" error_msg="${3:-}"
+  [ -n "$name" ] && [ -n "$status" ] || {
+    warn "gateway_patch_status: name and status are required"
+    return 0
+  }
+
+  local body
+  if [ -n "$error_msg" ]; then
+    local pybin
+    pybin=$(_find_python_with_tomllib 2>/dev/null || command -v python3)
+    local err_json
+    err_json=$("$pybin" -c 'import sys, json; print(json.dumps(sys.argv[1]))' "$error_msg" 2>/dev/null) \
+      || err_json='""'
+    body="{\"status\":\"${status}\",\"error\":${err_json}}"
+  else
+    body="{\"status\":\"${status}\"}"
+  fi
+
+  local http_code
+  http_code=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
+    "${GATEWAY_URL}/_fleet/api/features/${name}/status" \
+    -H "Content-Type: application/json" -d "${body}" 2>/dev/null || echo "000")
+
+  case "$http_code" in
+    2??) ;;
+    *)   warn "Gateway status PATCH for '${name}' → HTTP ${http_code} (continuing)" ;;
+  esac
+  return 0
+}
+export -f gateway_patch_status
+
 # ─── Stack Dockerfile templating ─────────────────────────────────────────────
 # apply_stack_template SRC DEST
 # Copy a stack Dockerfile template, substituting whitelisted fleet.conf vars.

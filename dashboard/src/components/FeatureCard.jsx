@@ -102,16 +102,29 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   }
 
   const isNotStarted = feature.status === 'not_started';
+  const isBuilding = feature.status === 'building';
+  const isRegistryStarting = feature.status === 'starting';
+  const isFailed = feature.status === 'failed';
+  const isLifecycleBusy = isBuilding || isRegistryStarting || isFailed;
+  // When the registry reports building/starting/failed, surface those directly.
+  // The client-side health sentinel (isStarting+health) only applies to
+  // 'running' features to refine the UP/STARTING distinction on port 80.
   const effectiveHealth = isStarting && health !== 'up' ? 'starting' : health;
   const healthDot = isNotStarted
     ? { color: '#555', label: '● NOT STARTED' }
-    : effectiveHealth === 'up'
-      ? { color: 'var(--color-accent)', label: '● UP' }
-      : effectiveHealth === 'starting'
-        ? { color: 'var(--color-warning)', label: '● STARTING' }
-        : effectiveHealth === 'down'
-          ? { color: 'var(--color-danger)', label: '● DOWN' }
-          : { color: 'var(--color-warning)', label: '● ...' };
+    : isBuilding
+      ? { color: '#ffaa00', label: '● BUILDING' }
+      : isRegistryStarting
+        ? { color: '#00aaff', label: '● STARTING' }
+        : isFailed
+          ? { color: '#ff4444', label: '● FAILED' }
+          : effectiveHealth === 'up'
+            ? { color: 'var(--color-accent)', label: '● UP' }
+            : effectiveHealth === 'starting'
+              ? { color: 'var(--color-warning)', label: '● STARTING' }
+              : effectiveHealth === 'down'
+                ? { color: 'var(--color-danger)', label: '● DOWN' }
+                : { color: 'var(--color-warning)', label: '● ...' };
 
   return (
     <div
@@ -155,10 +168,28 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           color: healthDot.color,
           fontFamily: 'var(--font-mono)',
           fontSize: '0.68rem',
-          animation: !isNotStarted && (health === 'checking' || effectiveHealth === 'starting') ? 'blink 1s step-start infinite' : 'none',
+          animation: (isBuilding || isRegistryStarting) || (!isLifecycleBusy && !isNotStarted && (health === 'checking' || effectiveHealth === 'starting'))
+            ? 'blink 1s step-start infinite'
+            : 'none',
         }}>
           {healthDot.label}
         </span>
+        {isFailed && feature.error && (
+          <div
+            role="alert"
+            title={feature.error}
+            style={{
+              color: '#ff4444',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.65rem',
+              marginTop: '0.3rem',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {feature.error}
+          </div>
+        )}
       </div>
 
       {/* Action buttons */}

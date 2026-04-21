@@ -202,8 +202,68 @@ SIDECAR_DB_PASSWORD="${DB_PASSWORD:-${FLEET_PROJECT_NAME}}"
 # SVC_BRANCHES[0] already reflects the worktree's real branch (set above).
 FIRST_BRANCH="${SVC_BRANCHES[0]}"
 
+# ─── Compute gateway registration payload early ──────────────────────────────
+# We register BEFORE docker compose up so the dashboard can show a 'building'
+# chip during the slowest phase of the add flow (image build + compose up).
+# The payload needs services_json and title_json — both derive only from
+# FLEET_SERVICES_JSON and FEATURE_TITLE, which are already finalised above.
+services_json=$("${_PYBIN}" -c "
+import sys, json
+svcs = json.loads(sys.argv[1])
+out = [{'name': s['name'], 'port': int(s['port'])} for s in svcs if s.get('port')]
+print(json.dumps(out))
+" "${FLEET_SERVICES_JSON}")
+
+title_json=$("${_PYBIN}" -c "import sys, json; print(json.dumps(sys.argv[1]))" "${FEATURE_TITLE}")
+
 # ─── Create feature dir ───────────────────────────────────────────────────────
 mkdir -p "${FEATURE_DIR}"
+
+# ─── Register EARLY with status='building' ───────────────────────────────────
+# If this initial registration fails, we exit loudly (preserves yn2's intent:
+# the user needs to know when the gateway is unreachable — silently proceeding
+# with docker compose up gives a running container that nothing can route to).
+info "Registering '${NAME}' with gateway (status=building)..."
+_GW_RESULT=$(gateway_post_full "register-feature" \
+  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"title\":${title_json},\"services\":${services_json},\"status\":\"building\"}")
+HTTP_STATUS="${_GW_RESULT%|*}"
+_GW_BODY_FILE="${_GW_RESULT#*|}"
+_GW_BODY=$(cat "${_GW_BODY_FILE}" 2>/dev/null || true)
+rm -f "${_GW_BODY_FILE}"
+
+if [ "${HTTP_STATUS}" != "200" ]; then
+  _GW_BODY_HINT=""
+  [ -n "${_GW_BODY}" ] && _GW_BODY_HINT="\n  response  : ${_GW_BODY}"
+  error "Gateway registration failed.
+  HTTP status: ${HTTP_STATUS}
+  endpoint   : ${GATEWAY_URL}/register-feature
+  feature    : ${NAME}${_GW_BODY_HINT}
+
+  Remediation:
+    Inspect   → curl -sS ${GATEWAY_URL}/_fleet/api/features
+    Abandon   → docker stop fleet-${NAME}
+    Retry     → re-run: fleet add ${NAME} --title '${FEATURE_TITLE}'"
+fi
+
+# ─── Failure handler: on any fatal error past this point, PATCH 'failed' ──────
+# The ERR trap captures the last command's failure context. We best-effort
+# extract a stderr tail into the error message so the dashboard can render
+# something more actionable than 'something went wrong'. Trap exits 1 itself
+# so CLI callers (and yn2's contract) still see a non-zero exit.
+_FLEET_FAIL_LOG=$(mktemp)
+_on_failure() {
+  local rc=$?
+  local ctx="fleet add failed (exit ${rc})"
+  if [ -s "${_FLEET_FAIL_LOG}" ]; then
+    local tail_err
+    tail_err=$(tail -c 500 "${_FLEET_FAIL_LOG}" 2>/dev/null || true)
+    [ -n "${tail_err}" ] && ctx="${ctx}: ${tail_err}"
+  fi
+  gateway_patch_status "${NAME}" "failed" "${ctx}" || true
+  rm -f "${_FLEET_FAIL_LOG}"
+  exit "${rc}"
+}
+trap _on_failure ERR
 
 # ─── Write feature.env (holds JSON payloads; avoids YAML quoting hazards) ────
 # Docker Compose env_file= reads KEY=VALUE lines. JSON values are safe here
@@ -384,41 +444,45 @@ info "Writing .fleet/${NAME}/info.toml..."
 
 # ─── Bring up the single feature container ───────────────────────────────────
 info "Starting container fleet-${NAME}..."
-docker compose -f "${COMPOSE_FILE}" up -d
-
-# ─── Register with gateway ───────────────────────────────────────────────────
-# Payload: {name, branch, worktreePath, project, services:[{name,port}]}
-# Peers are internal-only — not included in the gateway registration payload.
-services_json=$("${_PYBIN}" -c "
-import sys, json
-svcs = json.loads(sys.argv[1])
-out = [{'name': s['name'], 'port': int(s['port'])} for s in svcs if s.get('port')]
-print(json.dumps(out))
-" "${FLEET_SERVICES_JSON}")
-
-title_json=$("${_PYBIN}" -c "import sys, json; print(json.dumps(sys.argv[1]))" "${FEATURE_TITLE}")
-
-info "Registering '${NAME}' with gateway..."
-_GW_RESULT=$(gateway_post_full "register-feature" \
-  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"title\":${title_json},\"services\":${services_json}}")
-HTTP_STATUS="${_GW_RESULT%|*}"
-_GW_BODY_FILE="${_GW_RESULT#*|}"
-_GW_BODY=$(cat "${_GW_BODY_FILE}" 2>/dev/null || true)
-rm -f "${_GW_BODY_FILE}"
-
-if [ "${HTTP_STATUS}" != "200" ]; then
-  _GW_BODY_HINT=""
-  [ -n "${_GW_BODY}" ] && _GW_BODY_HINT="\n  response  : ${_GW_BODY}"
-  error "Gateway registration failed.
-  HTTP status: ${HTTP_STATUS}
-  endpoint   : ${GATEWAY_URL}/register-feature
-  feature    : ${NAME}${_GW_BODY_HINT}
-
-  Remediation:
-    Inspect   → curl -sS ${GATEWAY_URL}/_fleet/api/features
-    Abandon   → docker stop fleet-${NAME}
-    Retry     → re-run: fleet add ${NAME} --title '${FEATURE_TITLE}'"
+# Capture build/compose stderr into _FLEET_FAIL_LOG so the ERR trap can forward
+# a tail to the dashboard as the 'failed' error message.
+if ! docker compose -f "${COMPOSE_FILE}" up -d 2> >(tee -a "${_FLEET_FAIL_LOG}" >&2); then
+  # docker compose already captured into fail log; ERR trap picks it up.
+  false
 fi
+
+# ─── Transition: building → starting ─────────────────────────────────────────
+gateway_patch_status "${NAME}" "starting"
+
+# ─── Wait for container health ───────────────────────────────────────────────
+# Uses the gateway's existing /features/:name/health endpoint (HEADs nginx on
+# port 80 inside the container). Times out after 60s → trap fires 'failed'.
+info "Waiting for fleet-${NAME} to become healthy..."
+_HEALTH_MAX_WAIT=60
+_HEALTH_ELAPSED=0
+_HEALTHY=false
+while [ ${_HEALTH_ELAPSED} -lt ${_HEALTH_MAX_WAIT} ]; do
+  _HEALTH_BODY=$(curl -s "${GATEWAY_URL}/_fleet/api/features/${NAME}/health" 2>/dev/null || echo '')
+  case "${_HEALTH_BODY}" in
+    *'"status":"up"'*) _HEALTHY=true; break ;;
+  esac
+  sleep 2
+  _HEALTH_ELAPSED=$((_HEALTH_ELAPSED + 2))
+done
+
+if [ "${_HEALTHY}" != true ]; then
+  echo "Health wait timed out after ${_HEALTH_MAX_WAIT}s — last health response: ${_HEALTH_BODY:-<empty>}" \
+    >> "${_FLEET_FAIL_LOG}"
+  false
+fi
+
+# ─── Transition: starting → running ──────────────────────────────────────────
+gateway_patch_status "${NAME}" "running"
+
+# Happy path reached — tear down the ERR trap so post-summary activity doesn't
+# re-trigger 'failed' if, say, the terminal close causes a SIGPIPE.
+trap - ERR
+rm -f "${_FLEET_FAIL_LOG}"
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo ""

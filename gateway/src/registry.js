@@ -2,7 +2,7 @@ import { inspectContainer } from './docker.js';
 
 /**
  * @typedef {{ name: string, port: number }} ServiceEntry
- * @typedef {{ branch: string, worktreePath: string|null, project: string|null, title: string|null, addedAt: Date, status: string, services: ServiceEntry[] }} FeatureEntry
+ * @typedef {{ branch: string, worktreePath: string|null, project: string|null, title: string|null, addedAt: Date, status: string, error: string|null, services: ServiceEntry[] }} FeatureEntry
  * @type {Map<string, FeatureEntry>}
  */
 const features = new Map();
@@ -11,18 +11,19 @@ const features = new Map();
 let activeFeature = null;
 
 /**
- * Register a new feature container. Auto-activates if no feature is currently active.
+ * Register a new feature container. Auto-activates only when status is 'running' —
+ * routing traffic to a not-yet-running container (building/starting) would 502.
  * @param {string} name
  * @param {string} branch
  * @param {string|null} worktreePath - absolute path on the host Mac
  * @param {string|null} project - project name shown in the dashboard
- * @param {string} status - lifecycle status: 'running' | 'not_started' | 'stopped'
+ * @param {string} status - lifecycle: 'building' | 'starting' | 'running' | 'stopped' | 'not_started' | 'failed'
  * @param {ServiceEntry[]} services - per-service {name, port} entries for path-prefix routing
  * @param {string|null} title - human-readable display title for the dashboard card
+ * @param {string|null} error - human-readable failure reason (populated for status='failed')
  */
-export function register(name, branch, worktreePath = null, project = null, status = 'running', services = [], title = null) {
-  features.set(name, { branch, worktreePath, project, title, addedAt: new Date(), status, services });
-  // Only auto-activate if the feature is actually running
+export function register(name, branch, worktreePath = null, project = null, status = 'running', services = [], title = null, error = null) {
+  features.set(name, { branch, worktreePath, project, title, addedAt: new Date(), status, error, services });
   if (activeFeature === null && status === 'running') activeFeature = name;
 }
 
@@ -37,14 +38,20 @@ export function getServices(name) {
 }
 
 /**
- * Update the status of a registered feature.
+ * Update the status of a registered feature. When `error` is undefined, the
+ * existing entry.error is preserved — callers that just want to transition
+ * status (e.g. building → starting) do not need to clear error state explicitly.
+ * Pass null to clear it; pass a string to set it (typically with status='failed').
  * @param {string} name
  * @param {string} status
+ * @param {string|null} [error]
  */
-export function updateStatus(name, status) {
+export function updateStatus(name, status, error) {
   const entry = features.get(name);
   if (!entry) throw new Error(`Feature '${name}' is not registered`);
-  features.set(name, { ...entry, status });
+  const next = { ...entry, status };
+  if (error !== undefined) next.error = error;
+  features.set(name, next);
 }
 
 /**
