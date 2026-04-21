@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus } from './registry.js';
 import { dockerExec, dockerLogs, stopContainer, startContainer, removeContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
+import { ensureMainRunning } from './lifecycle.js';
 
 const router = Router();
 const startedAt = Date.now();
@@ -223,6 +224,60 @@ router.get('/features/:name/logs', async (req, res) => {
         : err.message;
       return res.status(status).json({ error: msg });
     }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /_fleet/api/main/ensure
+ * Ensure fleet-main is running — idempotent; safe to call at any time.
+ * 404 if the container does not exist (fleet add main --direct first).
+ */
+router.post('/main/ensure', async (_req, res) => {
+  try {
+    const info = await inspectContainer('fleet-main');
+    if (!info) {
+      return res.status(404).json({ error: 'fleet-main container not found — run `fleet add main --direct` first' });
+    }
+    await ensureMainRunning();
+    res.json({ ok: true });
+  } catch (err) {
+    if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /_fleet/api/doctor/:name
+ * Defense-in-depth check that no internal-only supervisord peer ports
+ * (jira-proxy 8081, wiremock 8089) are accidentally published to the host.
+ *
+ * Returns { exposed: number[], ok: boolean }.
+ *   - exposed: container-internal ports that are bound to a host port AND
+ *     match the forbidden list.
+ *   - ok: exposed.length === 0.
+ */
+const FORBIDDEN_INTERNAL_PORTS = [8081, 8089];
+
+router.get('/doctor/:name', async (req, res) => {
+  const { name } = req.params;
+  try {
+    const info = await inspectContainer(`fleet-${name}`);
+    if (!info) return res.status(404).json({ error: `Container fleet-${name} not found` });
+
+    const ports = info.NetworkSettings?.Ports ?? {};
+    const exposed = [];
+    for (const [key, bindings] of Object.entries(ports)) {
+      // key is "8081/tcp" etc.
+      const portNum = parseInt(key.split('/')[0], 10);
+      if (!FORBIDDEN_INTERNAL_PORTS.includes(portNum)) continue;
+      if (Array.isArray(bindings) && bindings.length > 0) {
+        exposed.push(portNum);
+      }
+    }
+    res.json({ exposed, ok: exposed.length === 0 });
+  } catch (err) {
+    if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
     res.status(500).json({ error: err.message });
   }
 });

@@ -47,29 +47,45 @@ export function createFeatureProxy() {
   });
 
   return async (req, res, next) => {
-    const feature = getActiveFeature();
-
-    if (!feature) {
-      return res.status(503).send(
-        '<html><body style="font-family:monospace;background:#0a0a0a;color:#888;padding:2rem">' +
-        '<h2 style="color:#00ff88">// NO ACTIVE FEATURE</h2>' +
-        '<p>Open the dashboard at <a href="http://localhost:4000" style="color:#00ff88">localhost:4000</a> and activate a feature.</p>' +
-        '</body></html>'
-      );
+    const resolved = await resolveTarget();
+    if (!resolved.ok) {
+      return res.status(503).send(resolved.body);
     }
-
-    // Lazy liveness check — query Docker so a stopped container yields 503 not 502
-    const containerStatus = await getContainerStatus(feature);
-    if (containerStatus !== 'running') {
-      // Sync the registry so the dashboard reflects reality
-      updateStatus(feature, 'stopped');
-      return res.status(503).send(stoppedContainerBody(feature));
-    }
-
-    // Stamp the verified feature name on the request for the router and proxyReq handler
-    req._fleetFeature = feature;
+    req._fleetFeature = resolved.feature;
     return proxy(req, res, next);
   };
+}
+
+/**
+ * Resolve which feature should serve a request, applying main fallback.
+ *
+ * Resolution order:
+ *   1. Active feature is running → use it.
+ *   2. Active feature is stopped → update registry, try main.
+ *   3. No active feature → try main.
+ *   4. main is not running → 503.
+ *
+ * @returns {Promise<{ ok: true, feature: string } | { ok: false, body: string }>}
+ */
+export async function resolveTarget() {
+  const selected = getActiveFeature();
+
+  if (selected) {
+    const status = await getContainerStatus(selected);
+    if (status === 'running') {
+      return { ok: true, feature: selected };
+    }
+    // Sync registry so the dashboard reflects reality
+    updateStatus(selected, 'stopped');
+  }
+
+  // Fallback: try main
+  const mainStatus = await getContainerStatus('main');
+  if (mainStatus === 'running') {
+    return { ok: true, feature: 'main' };
+  }
+
+  return { ok: false, body: stoppedContainerBody('main') };
 }
 
 /**
