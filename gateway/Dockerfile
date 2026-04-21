@@ -19,4 +19,5 @@ COPY --from=builder /app/gateway/public ./public
 
 EXPOSE 3000
 EXPOSE 4000
+EXPOSE 8080
 CMD ["node", "src/index.js"]

@@ -514,8 +514,10 @@ docker run -d \
   --network fleet-net \
   -e PROXY_PORT="${PROXY_PORT}" \
   -e ADMIN_PORT="${ADMIN_PORT}" \
+  -e BACKEND_PORT="${BACKEND_PORT:-8080}" \
   -p "${PROXY_PORT}:${PROXY_PORT}" \
   -p "${ADMIN_PORT}:${ADMIN_PORT}" \
+  -p "${BACKEND_PORT:-8080}:${BACKEND_PORT:-8080}" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --security-opt label=disable \
   --restart unless-stopped \
@@ -557,6 +559,7 @@ echo -e "${GREEN}┌────────────────────
 echo -e "${GREEN}│  Fleet ready                                 │${RESET}"
 echo -e "${GREEN}│  Dashboard  → http://localhost:${ADMIN_PORT}          │${RESET}"
 echo -e "${GREEN}│  Proxy      → http://localhost:${PROXY_PORT}          │${RESET}"
+echo -e "${GREEN}│  Backend    → http://localhost:${BACKEND_PORT:-8080}          │${RESET}"
 echo -e "${GREEN}└──────────────────────────────────────────────┘${RESET}"
 echo ""
 echo -e "${GREEN}Tip:${RESET} open ${PROJECT_ROOT} in Claude Code and run ${GREEN}/configure-fleet-startup${RESET}"
