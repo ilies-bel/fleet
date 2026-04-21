@@ -275,6 +275,21 @@ ENV_FILE="${FEATURE_DIR}/feature.env"
   printf 'PROJECT_NAME=%s\n'         "${FLEET_PROJECT_NAME}"
   printf 'FLEET_SERVICES_JSON=%s\n'  "${FLEET_SERVICES_JSON}"
   printf 'FLEET_PEERS_JSON=%s\n'     "${FLEET_PEERS_JSON}"
+  printf 'FLEET_SHARED_JSON=%s\n'    "${FLEET_SHARED_JSON:-[]}"
+  # FLEET_SHARED_ENV_FILES: colon-separated container paths for entrypoints to
+  # source. Derived from [[shared]] targets (falling back to /app/<path>).
+  _SHARED_TARGETS=$("${_PYBIN}" -c "
+import sys, json
+shared = json.loads(sys.argv[1] or '[]')
+out = []
+for s in shared:
+    p = s.get('path','')
+    if not p:
+        continue
+    out.append(s.get('target') or '/app/' + p)
+print(':'.join(out))
+" "${FLEET_SHARED_JSON:-[]}")
+  [ -n "${_SHARED_TARGETS}" ] && printf 'FLEET_SHARED_ENV_FILES=%s\n' "${_SHARED_TARGETS}"
   if [ "${NEEDS_DB}" = true ]; then
     printf 'DB_NAME=%s\n'                    "${SIDECAR_DB_NAME}"
     printf 'DB_USER=%s\n'                    "${SIDECAR_DB_USER}"
@@ -383,6 +398,23 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
       [ -n "${peer_map}" ] && echo "      - ${peer_map}:/app/${peer_nm}:ro"
     fi
   done
+  # [[shared]] files from fleet.toml: bind-mount read-only into every container.
+  # Missing host files are fatal — a misconfigured shared entry should fail fast.
+  while IFS=$'\t' read -r shared_path shared_target; do
+    [ -z "${shared_path}" ] && continue
+    src="${FLEET_PROJECT_ROOT}/${shared_path}"
+    [ -f "${src}" ] \
+      || error "Shared file missing: ${src}. Create it or remove the [[shared]] entry from fleet.toml."
+    tgt="${shared_target:-/app/${shared_path}}"
+    echo "      - ${src}:${tgt}:ro"
+  done < <("${_PYBIN}" -c "
+import sys, json
+for s in json.loads(sys.argv[1] or '[]'):
+    p = s.get('path','')
+    if not p:
+        continue
+    print(p + '\t' + (s.get('target') or ''))
+" "${FLEET_SHARED_JSON:-[]}")
   # Docker socket for Testcontainers (spring/gradle stacks only)
   _needs_sock=false
   for stack in "${SVC_STACKS[@]}"; do

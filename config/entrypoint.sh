@@ -304,5 +304,13 @@ print('\n'.join(lines))
 # on port 80). The feature.conf from conf.d is sufficient.
 rm -f /etc/nginx/sites-enabled/qa 2>/dev/null || true
 
+# ─── 4. Source shared env files ──────────────────────────────────────────────
+if [ -n "${FLEET_SHARED_ENV_FILES:-}" ]; then
+  IFS=':' read -ra _files <<< "${FLEET_SHARED_ENV_FILES}"
+  for f in "${_files[@]}"; do
+    [ -r "$f" ] && set -a && . "$f" && set +a
+  done
+fi
+
 echo "[fleet] Starting supervisord..."
 exec /usr/bin/supervisord -n -c "${SUPERVISORD_CONF}"

@@ -165,11 +165,12 @@ AIRCONF
   esac
 }
 
-# ─── Discover untracked .env files → .fleet/shared.env ───────────────────────
+# ─── Discover untracked .env files → fleet.toml [[shared]] blocks ────────────
 
 discover_env_files() {
   local proj_root="$1"
-  local shared_file="${FLEET_DIR}/shared.env"
+  local toml_file="${FLEET_DIR}/fleet.toml"
+  local legacy_file="${FLEET_DIR}/shared.env"
   local marker_start="# --- auto-discovered by fleet init ---"
   local marker_end="# --- end auto-discovered ---"
 
@@ -197,40 +198,59 @@ discover_env_files() {
              \( -not -path '*/node_modules/*' -not -path '*/.git/*' \
                 -not -path '*/target/*' -not -path '*/dist/*' \) 2>/dev/null)
 
-  if [ ! -f "${shared_file}" ]; then
+  # Emit the auto-discovered block between markers in fleet.toml.
+  # Idempotency: on re-run, replace the existing block in place; never touch
+  # user-added [[shared]] entries outside the markers.
+  [ -f "${toml_file}" ] || error "discover_env_files: ${toml_file} not found (write_fleet_toml should have run first)"
+
+  local tmp; tmp="$(mktemp)"
+  local inside_block=0 block_written=0
+  while IFS= read -r line || [ -n "${line}" ]; do
+    if [ "${line}" = "${marker_start}" ]; then
+      inside_block=1
+      echo "${marker_start}" >> "${tmp}"
+      local p
+      for p in "${found[@]+"${found[@]}"}"; do
+        printf '[[shared]]\npath = "%s"\n\n' "${p}" >> "${tmp}"
+      done
+      block_written=1
+      continue
+    fi
+    if [ "${line}" = "${marker_end}" ]; then
+      inside_block=0
+      echo "${marker_end}" >> "${tmp}"
+      continue
+    fi
+    [ "${inside_block}" -eq 1 ] && continue
+    echo "${line}" >> "${tmp}"
+  done < "${toml_file}"
+
+  if [ "${block_written}" -eq 0 ]; then
     {
-      echo "# .fleet/shared.env — non-tracked files mounted read-only into fleet containers"
-      echo "# Paths are relative to project.root."
       echo ""
       echo "${marker_start}"
-      local p; for p in "${found[@]+"${found[@]}"}"; do echo "${p}"; done
+      local p
+      for p in "${found[@]+"${found[@]}"}"; do
+        printf '[[shared]]\npath = "%s"\n\n' "${p}"
+      done
       echo "${marker_end}"
-    } > "${shared_file}"
-  else
-    local tmp; tmp="$(mktemp)"
-    local inside_block=0 block_written=0
-    while IFS= read -r line || [ -n "${line}" ]; do
-      if [ "${line}" = "${marker_start}" ]; then
-        inside_block=1
-        echo "${marker_start}" >> "${tmp}"
-        local p; for p in "${found[@]+"${found[@]}"}"; do echo "${p}" >> "${tmp}"; done
-        block_written=1; continue
-      fi
-      if [ "${line}" = "${marker_end}" ]; then
-        inside_block=0; echo "${marker_end}" >> "${tmp}"; continue
-      fi
-      [ "${inside_block}" -eq 1 ] && continue
-      echo "${line}" >> "${tmp}"
-    done < "${shared_file}"
-    if [ "${block_written}" -eq 0 ]; then
-      echo "${marker_start}" >> "${tmp}"
-      local p; for p in "${found[@]+"${found[@]}"}"; do echo "${p}" >> "${tmp}"; done
-      echo "${marker_end}" >> "${tmp}"
+    } >> "${tmp}"
+  fi
+  mv "${tmp}" "${toml_file}"
+
+  # Deprecate the legacy file: stop writing it, annotate if it exists so users
+  # who still have it around understand the new location.
+  if [ -f "${legacy_file}" ]; then
+    local dep_line="# DEPRECATED — moved to .fleet/fleet.toml [[shared]] blocks."
+    if ! head -n1 "${legacy_file}" | grep -q "^# DEPRECATED"; then
+      local ltmp; ltmp="$(mktemp)"
+      echo "${dep_line}" > "${ltmp}"
+      cat "${legacy_file}" >> "${ltmp}"
+      mv "${ltmp}" "${legacy_file}"
     fi
-    mv "${tmp}" "${shared_file}"
   fi
 
-  info "Discovered ${#found[@]} .env file(s) → .fleet/shared.env"
+  info "Discovered ${#found[@]} .env file(s) → ${toml_file} [[shared]] blocks"
 }
 
 # ─── Service detection wizard ─────────────────────────────────────────────────
