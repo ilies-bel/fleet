@@ -13,10 +13,10 @@ source "${SCRIPT_DIR}/common.sh"
 
 # ─── Usage ───────────────────────────────────────────────────────────────────
 usage() {
-  echo "Usage: fleet add <name> [--title <title>] [--direct]"
+  echo "Usage: fleet add <name> --title <title> [--direct]"
   echo ""
   echo "  name     Feature name (lowercase letters, numbers, hyphens, dots)"
-  echo "  --title  Human-readable title shown in the dashboard (optional)"
+  echo "  --title  Human-readable title shown in the dashboard (required)"
   echo "  --direct Bind-mount the primary project checkout instead of a worktree."
   echo "           Live-tracks the working copy (including uncommitted changes)."
   echo "           The container's branch label reflects the primary checkout's HEAD."
@@ -98,14 +98,19 @@ else
 fi
 
 # ─── Resolve the feature title ────────────────────────────────────────────────
-# --title flag takes precedence; interactive prompt if tty; fallback to NAME.
+# --title flag takes precedence; interactive prompt if tty (no default, loops
+# until non-empty); non-interactive without --title is a hard error.
 if [ -z "${FEATURE_TITLE}" ]; then
   if [ -t 0 ]; then
-    printf "  Feature title (shown in dashboard) [%s]: " "${NAME}"
-    read -r FEATURE_TITLE </dev/tty
-    FEATURE_TITLE="${FEATURE_TITLE:-${NAME}}"
+    while [ -z "${FEATURE_TITLE}" ]; do
+      printf "  Feature title (shown in dashboard): "
+      read -r FEATURE_TITLE </dev/tty
+      if [ -z "${FEATURE_TITLE}" ]; then
+        printf "  Title cannot be empty.\n"
+      fi
+    done
   else
-    FEATURE_TITLE="${NAME}"
+    error "fleet add: --title is required (no TTY for interactive prompt)"
   fi
 fi
 
