@@ -1,40 +1,38 @@
 ---
 name: react-best-practices
-description: React and Next.js performance optimization patterns. Use BEFORE implementing any React code to ensure best practices are followed.
+description: React performance optimization patterns. Use BEFORE implementing any React code to ensure best practices are followed.
 ---
 
 # React Best Practices
 
-**Version 1.0.0**
-Source: Vercel Engineering (vercel-labs/agent-skills)
+**Version 1.1.0**
+Source: Vercel Engineering (vercel-labs/agent-skills) — trimmed for client-side React + Vite stacks
 
 > **Note:**
 > This document is for agents and LLMs to follow when maintaining,
-> generating, or refactoring React and Next.js codebases. Contains 40+ rules across 8 categories, prioritized by impact.
+> generating, or refactoring React codebases. Contains 40+ rules across 8 categories, prioritized by impact.
 
 ---
 
 ## How to Use This Skill
 
-**Before implementing ANY React/Next.js code:**
+**Before implementing ANY React code:**
 
 1. Review the relevant sections based on what you're building
 2. Apply the patterns as you write code
 3. Use the "Incorrect" vs "Correct" examples as templates
 
-**Priority order:** Eliminating Waterfalls > Bundle Size > Server-Side > Client-Side > Re-renders > Rendering > JS Perf > Advanced
+**Priority order:** Eliminating Waterfalls > Bundle Size > Client-Side > Re-renders > Rendering > JS Perf > Advanced
 
 ---
 
 ## Quick Reference: Critical Rules
 
-### Top 5 Rules (Always Apply)
+### Top 3 Rules (Always Apply)
 
 1. **Promise.all() for independent operations** - Never sequential awaits for independent data
 2. **Avoid barrel file imports** - Import directly from source files
 3. **Dynamic imports for heavy components** - Lazy-load Monaco, charts, etc.
-4. **Parallel data fetching with component composition** - Structure RSC for parallelism
-5. **Minimize serialization at RSC boundaries** - Only pass needed fields to client
 
 ---
 
@@ -123,14 +121,6 @@ import { Check, X, Menu } from 'lucide-react'
 import Check from 'lucide-react/dist/esm/icons/check'
 import X from 'lucide-react/dist/esm/icons/x'
 import Menu from 'lucide-react/dist/esm/icons/menu'
-
-// ALTERNATIVE: Next.js 13.5+ config
-// next.config.js
-module.exports = {
-  experimental: {
-    optimizePackageImports: ['lucide-react', '@mui/material']
-  }
-}
 ```
 
 ### 2.2 Dynamic Imports for Heavy Components
@@ -140,11 +130,13 @@ module.exports = {
 import { MonacoEditor } from './monaco-editor'
 
 // GOOD: Monaco loads on demand
-import dynamic from 'next/dynamic'
-const MonacoEditor = dynamic(
-  () => import('./monaco-editor').then(m => m.MonacoEditor),
-  { ssr: false }
-)
+import { lazy, Suspense } from 'react'
+const MonacoEditor = lazy(() => import('./monaco-editor').then(m => ({ default: m.MonacoEditor })))
+
+// Wrap in Suspense at usage site
+<Suspense fallback={<div>Loading editor...</div>}>
+  <MonacoEditor />
+</Suspense>
 ```
 
 ### 2.3 Defer Non-Critical Libraries
@@ -153,12 +145,9 @@ const MonacoEditor = dynamic(
 // BAD: blocks initial bundle
 import { Analytics } from '@vercel/analytics/react'
 
-// GOOD: loads after hydration
-import dynamic from 'next/dynamic'
-const Analytics = dynamic(
-  () => import('@vercel/analytics/react').then(m => m.Analytics),
-  { ssr: false }
-)
+// GOOD: loads after initial render
+import { lazy, Suspense } from 'react'
+const Analytics = lazy(() => import('@vercel/analytics/react').then(m => ({ default: m.Analytics })))
 ```
 
 ### 2.4 Preload on User Intent
@@ -180,62 +169,11 @@ function EditorButton({ onClick }: { onClick: () => void }) {
 
 ---
 
-## 3. Server-Side Performance
+## 3. Data Deduplication
 
-**Impact: HIGH**
+**Impact: MEDIUM**
 
-### 3.1 Minimize Serialization at RSC Boundaries
-
-```tsx
-// BAD: serializes all 50 fields
-async function Page() {
-  const user = await fetchUser()  // 50 fields
-  return <Profile user={user} />
-}
-
-// GOOD: serializes only needed fields
-async function Page() {
-  const user = await fetchUser()
-  return <Profile name={user.name} avatar={user.avatar} />
-}
-```
-
-### 3.2 Parallel Data Fetching with Component Composition
-
-```tsx
-// BAD: Sidebar waits for Header's fetch
-export default async function Page() {
-  const header = await fetchHeader()
-  return (
-    <div>
-      <div>{header}</div>
-      <Sidebar />
-    </div>
-  )
-}
-
-// GOOD: both fetch simultaneously
-async function Header() {
-  const data = await fetchHeader()
-  return <div>{data}</div>
-}
-
-async function Sidebar() {
-  const items = await fetchSidebarItems()
-  return <nav>{items.map(renderItem)}</nav>
-}
-
-export default function Page() {
-  return (
-    <div>
-      <Header />
-      <Sidebar />
-    </div>
-  )
-}
-```
-
-### 3.3 Per-Request Deduplication with React.cache()
+### Per-Request Deduplication with React.cache()
 
 ```typescript
 import { cache } from 'react'
@@ -245,24 +183,6 @@ export const getCurrentUser = cache(async () => {
   if (!session?.user?.id) return null
   return await db.user.findUnique({ where: { id: session.user.id } })
 })
-```
-
-### 3.4 Use after() for Non-Blocking Operations
-
-```tsx
-import { after } from 'next/server'
-
-export async function POST(request: Request) {
-  await updateDatabase(request)
-
-  // Log after response is sent
-  after(async () => {
-    const userAgent = (await headers()).get('user-agent')
-    logUserAction({ userAgent })
-  })
-
-  return Response.json({ status: 'success' })
-}
 ```
 
 ---
@@ -469,7 +389,6 @@ function useWindowEvent(event: string, handler: () => void) {
 
 - [ ] Independent async operations use Promise.all()
 - [ ] Heavy components use dynamic imports
-- [ ] RSC boundaries pass only needed fields
 - [ ] Suspense boundaries isolate data fetching
 - [ ] No barrel file imports for large libraries
 - [ ] State updates use functional form when depending on current state
@@ -481,7 +400,5 @@ function useWindowEvent(event: string, handler: () => void) {
 ## References
 
 - [React Documentation](https://react.dev)
-- [Next.js Documentation](https://nextjs.org)
 - [SWR Documentation](https://swr.vercel.app)
-- [Vercel Blog: Package Import Optimization](https://vercel.com/blog/how-we-optimized-package-imports-in-next-js)
 - [Vercel Blog: Dashboard Performance](https://vercel.com/blog/how-we-made-the-vercel-dashboard-twice-as-fast)
