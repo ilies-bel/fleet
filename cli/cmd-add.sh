@@ -343,10 +343,11 @@ if lines:
 PYEOF
 
 # ─── Resolve base image tag ──────────────────────────────────────────────────
-# Use a project-scoped image when the project ships its own Dockerfile override;
-# fall back to the global fleet-feature-base built during fleet init.
 if [ -f "${FLEET_PROJECT_ROOT}/.fleet/Dockerfile.feature-base" ]; then
   FEATURE_BASE_IMAGE="fleet-feature-base-${FLEET_PROJECT_NAME}"
+  if ! docker image inspect "${FEATURE_BASE_IMAGE}" >/dev/null 2>&1; then
+    error "Project-local base image '${FEATURE_BASE_IMAGE}' not found. Run 'fleet init' to build it."
+  fi
   info "[fleet] Using project-local base image: ${FEATURE_BASE_IMAGE}"
 else
   FEATURE_BASE_IMAGE="fleet-feature-base"
