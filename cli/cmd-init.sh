@@ -68,14 +68,15 @@ pick_port() {
   local default="$1"
   if command -v lsof >/dev/null 2>&1 \
      && lsof -iTCP:"${default}" -sTCP:LISTEN -nP >/dev/null 2>&1; then
-    warn "Port ${default} is already in use on the host"
-    printf "  Enter alternative port [%s]: " "${default}"
+    # Keep stdout reserved for the chosen port; callers capture this function.
+    warn "Port ${default} is already in use on the host" >&2
+    printf "  Enter alternative port [%s]: " "${default}" >&2
     if [ -t 0 ]; then
       read -r _PROMPT_RESULT </dev/tty
       _PROMPT_RESULT="${_PROMPT_RESULT:-${default}}"
     else
       _PROMPT_RESULT="${default}"
-      echo "${default} (no tty — keeping default)"
+      echo "${default} (no tty — keeping default)" >&2
     fi
   else
     _PROMPT_RESULT="${default}"
