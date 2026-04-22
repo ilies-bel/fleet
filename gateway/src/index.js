@@ -21,16 +21,22 @@ const PROXY_PORT = Number(process.env.PROXY_PORT) || 3000;
 const ADMIN_PORT = Number(process.env.ADMIN_PORT) || 4000;
 const BACKEND_PORT = Number(process.env.BACKEND_PORT) || 8080;
 
+const featureProxy = createFeatureProxy();
 const proxyApp = express();
-proxyApp.use(createFeatureProxy());
-proxyApp.listen(PROXY_PORT, '0.0.0.0', () => console.log(`[fleet] proxy on :${PROXY_PORT}`));
+proxyApp.use(featureProxy);
+const proxyServer = proxyApp.listen(PROXY_PORT, '0.0.0.0', () => console.log(`[fleet] proxy on :${PROXY_PORT}`));
+// Wire WebSocket upgrade so Next.js/Vite HMR and app-level WS reach the container.
+proxyServer.on('upgrade', featureProxy.upgrade);
 
 // ── backend port (BACKEND_PORT, default 8080) — mirrors proxy routing but ──
 // prepends /backend so nginx-in-container routes to the Spring backend.
 // Same selected-feature + main-fallback semantics as :3000.
+const backendProxy = createBackendProxy();
 const backendApp = express();
-backendApp.use(createBackendProxy());
-backendApp.listen(BACKEND_PORT, '0.0.0.0', () => console.log(`[fleet] backend on :${BACKEND_PORT}`));
+backendApp.use(backendProxy);
+const backendServer = backendApp.listen(BACKEND_PORT, '0.0.0.0', () => console.log(`[fleet] backend on :${BACKEND_PORT}`));
+// Wire WebSocket upgrade for backend WebSocket connections (path-rewritten to /backend/...).
+backendServer.on('upgrade', backendProxy.upgrade);
 
 // ── admin port (ADMIN_PORT, default 4000) — admin API + dashboard ────────────
 const adminApp = express();
