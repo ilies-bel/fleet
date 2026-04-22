@@ -648,6 +648,15 @@ if [ -f "${cmd_src}" ]; then
   info "Installed slash command: .claude/commands/configure-fleet-startup.md"
 fi
 
+# ─── Install /fleet-debug slash command ──────────────────────────────────────
+cmd_src="${FLEET_ROOT}/cli/templates/fleet-debug.md"
+cmd_dst="${PROJECT_ROOT}/.claude/commands/fleet-debug.md"
+if [ -f "${cmd_src}" ]; then
+  mkdir -p "$(dirname "${cmd_dst}")"
+  cp "${cmd_src}" "${cmd_dst}"
+  info "Installed slash command: .claude/commands/fleet-debug.md"
+fi
+
 # ─── Success banner ───────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}┌──────────────────────────────────────────────┐${RESET}"
