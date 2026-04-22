@@ -3,3 +3,4 @@
 fleet.toml
 shared.env
 host-runner.pid
+Dockerfile.feature-base

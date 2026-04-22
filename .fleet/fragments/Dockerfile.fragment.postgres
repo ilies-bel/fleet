@@ -1,0 +1,9 @@
+# ── PostgreSQL 16 ─────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        postgresql-16 \
+ && rm -rf /var/lib/apt/lists/* \
+ && pg_dropcluster --stop 16 main 2>/dev/null || true \
+ && rm -rf /var/lib/postgresql/16/main \
+ && mkdir -p /var/lib/postgresql/16/main \
+ && chown -R postgres:postgres /var/lib/postgresql \
+ && chmod 700 /var/lib/postgresql/16/main
