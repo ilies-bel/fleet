@@ -188,15 +188,11 @@ if [ "${peer_count}" -gt 0 ]; then
   done
 fi
 
-# ─── Determine if postgres is needed (spring/gradle services) ────────────────
-NEEDS_DB=false
+# ─── Determine if embedded postgres is needed (spring/gradle services) ────────
+EMBEDDED_DB=false
 for stack in "${SVC_STACKS[@]}"; do
-  case "${stack}" in spring|gradle) NEEDS_DB=true ;; esac
+  case "${stack}" in spring|gradle) EMBEDDED_DB=true ;; esac
 done
-
-SIDECAR_DB_NAME="${DB_NAME:-${FLEET_PROJECT_NAME}}"
-SIDECAR_DB_USER="${DB_USER:-${FLEET_PROJECT_NAME}}"
-SIDECAR_DB_PASSWORD="${DB_PASSWORD:-${FLEET_PROJECT_NAME}}"
 
 # ─── Representative branch (read from the worktree itself) ───────────────────
 # SVC_BRANCHES[0] already reflects the worktree's real branch (set above).
@@ -299,16 +295,7 @@ for svc in services:
 print(':'.join(out))
 " "${FLEET_SHARED_JSON:-[]}" "${FLEET_SERVICES_JSON}")
   [ -n "${_SHARED_TARGETS}" ] && printf 'FLEET_SHARED_ENV_FILES=%s\n' "${_SHARED_TARGETS}"
-  if [ "${NEEDS_DB}" = true ]; then
-    printf 'DB_NAME=%s\n'                    "${SIDECAR_DB_NAME}"
-    printf 'DB_USER=%s\n'                    "${SIDECAR_DB_USER}"
-    printf 'DB_PASSWORD=%s\n'               "${SIDECAR_DB_PASSWORD}"
-    printf 'SPRING_DATASOURCE_URL=%s\n'      "jdbc:postgresql://127.0.0.1:5432/${SIDECAR_DB_NAME}"
-    printf 'SPRING_DATASOURCE_USERNAME=%s\n' "${SIDECAR_DB_USER}"
-    printf 'SPRING_DATASOURCE_PASSWORD=%s\n' "${SIDECAR_DB_PASSWORD}"
-    printf 'SPRING_LIQUIBASE_URL=%s\n'       "jdbc:postgresql://127.0.0.1:5432/${SIDECAR_DB_NAME}"
-    printf 'SPRING_LIQUIBASE_USER=%s\n'      "${SIDECAR_DB_USER}"
-    printf 'SPRING_LIQUIBASE_PASSWORD=%s\n'  "${SIDECAR_DB_PASSWORD}"
+  if [ "${EMBEDDED_DB}" = true ]; then
     printf 'TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal\n'
   fi
   [ -n "${JWT_SECRET:-}" ] && printf 'JWT_SECRET=%s\n' "${JWT_SECRET}"
