@@ -125,6 +125,9 @@ check_hot_reload() {
   local svc_dir="$1" stack="$2"
   case "${stack}" in
     spring)
+      if ! grep -q 'spring-boot-devtools' "${svc_dir}/pom.xml" 2>/dev/null; then
+        warn "spring-boot-devtools not found in pom.xml — hot reload disabled"
+      fi
       ;;
     go)
       if [ ! -f "${svc_dir}/.air.toml" ]; then
