@@ -451,16 +451,6 @@ detect_services() {
     stack=$(infer_stack "${svc_dir}")
     [ "${stack}" = "unknown" ] && continue
 
-    local ans
-    printf "  Include '%s' as a service? (stack: %s) [Y/n]: " "${dname}" "${stack}"
-    if [ -t 0 ]; then
-      read -r ans </dev/tty
-    else
-      ans="y"
-      echo "y (no tty)"
-    fi
-    case "${ans:-y}" in [Nn]*) continue ;; esac
-
     local default_port="3000" default_build="" default_run=""
     case "${stack}" in
       spring)  default_port="8081"; default_build="mvn package -DskipTests -q"; default_run="java -jar /home/developer/${dname}.jar" ;;
@@ -471,9 +461,11 @@ detect_services() {
       vite)    default_port="5173"; default_build="npm run build";              default_run="npm run dev" ;;
     esac
 
-    ask "  Port for ${dname}" "${default_port}"; local svc_port="${_PROMPT_RESULT}"
-    ask "  Build command"     "${default_build}"; local svc_build="${_PROMPT_RESULT}"
-    ask "  Run command"       "${default_run}";   local svc_run="${_PROMPT_RESULT}"
+    local svc_port="${default_port}"
+    local svc_build="${default_build}"
+    local svc_run="${default_run}"
+
+    info "Detected service: ${dname} (stack: ${stack}, port: ${svc_port})"
 
     SVC_NAMES+=("${dname}")
     SVC_DIRS+=("${dname}")
