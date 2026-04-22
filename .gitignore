@@ -5,6 +5,8 @@
 !.fleet/fleet.toml.example
 !.fleet/shared.env.example
 !.fleet/Dockerfile.feature-base
+!.fleet/fragments/
+!.fleet/fragments/**
 .fleet-runner.pid
 .fleet-config
 # Fleet user config (per-machine, not tracked)
