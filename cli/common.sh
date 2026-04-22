@@ -59,8 +59,31 @@ _find_python_with_tomllib() {
   return 1
 }
 
+# _find_fleet_toml_upwards [start_dir] — walk parent directories until a
+# .fleet/fleet.toml is found. Prints the first match and returns 0, or returns 1
+# without output if nothing is found.
+_find_fleet_toml_upwards() {
+  local dir="${1:-${PWD}}"
+  local candidate
+
+  while :; do
+    candidate="${dir}/.fleet/fleet.toml"
+    if [ -f "${candidate}" ]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+
+    if [ "${dir}" = "/" ]; then
+      return 1
+    fi
+
+    dir="$(dirname "${dir}")"
+  done
+}
+
 # load_fleet_toml — parse fleet.toml and export env vars:
 #
+#   FLEET_CONFIG_ROOT       — directory containing the resolved project .fleet/
 #   FLEET_PROJECT_NAME      — project.name
 #   FLEET_PROJECT_ROOT      — project.root
 #   FLEET_WORKTREE_TEMPLATE — project.worktree_template (may be empty if key absent)
@@ -75,21 +98,24 @@ _find_python_with_tomllib() {
 # Unknown peer type → error "Unknown peer type 'X'. Allowed: wiremock, static-http, shell"
 #
 # Resolution order (first file that exists wins):
-#   1. ${PWD}/.fleet/fleet.toml      — project-level config (source of truth)
+#   1. Nearest ancestor .fleet/fleet.toml from ${PWD} — project-level config
 #   2. ${FLEET_ROOT}/.fleet/fleet.toml — CLI install fallback (backwards compat)
 #
 # Errors clearly if neither file is found or if no suitable python3 is found.
 load_fleet_toml() {
   local toml_file
+  local project_toml
 
-  # Precedence: project-local first, CLI install as fallback.
-  if [ -f "${PWD}/.fleet/fleet.toml" ]; then
-    toml_file="${PWD}/.fleet/fleet.toml"
+  # Precedence: nearest project config first, CLI install as fallback.
+  if project_toml="$(_find_fleet_toml_upwards "${PWD}")"; then
+    toml_file="${project_toml}"
+    FLEET_CONFIG_ROOT="$(cd "$(dirname "${toml_file}")/.." && pwd)"
   elif [ -f "${FLEET_ROOT}/.fleet/fleet.toml" ]; then
     # Fallback for backwards compatibility — running fleet outside a project dir
     toml_file="${FLEET_ROOT}/.fleet/fleet.toml"
+    FLEET_CONFIG_ROOT="${FLEET_ROOT}"
   else
-    error ".fleet/fleet.toml not found. Checked: ${PWD}/.fleet/fleet.toml and ${FLEET_ROOT}/.fleet/fleet.toml. Run: fleet init"
+    error ".fleet/fleet.toml not found. Checked ${PWD} and its parents, then ${FLEET_ROOT}/.fleet/fleet.toml. Run: fleet init"
   fi
 
   local pybin
@@ -185,6 +211,7 @@ PYEOF
   local _get
   _get() { "$pybin" -c "import sys,json; d=json.loads(sys.argv[1]); print(d.get(sys.argv[2],''))" "$parsed" "$1"; }
 
+  export FLEET_CONFIG_ROOT
   FLEET_PROJECT_NAME=$(_get project_name)
   FLEET_PROJECT_ROOT=$(_get project_root)
   FLEET_WORKTREE_TEMPLATE=$(_get worktree_template)
