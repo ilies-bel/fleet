@@ -125,16 +125,6 @@ check_hot_reload() {
   local svc_dir="$1" stack="$2"
   case "${stack}" in
     spring)
-      if ! grep -q 'spring-boot-devtools' "${svc_dir}/pom.xml" 2>/dev/null; then
-        warn "spring-boot-devtools not found in pom.xml — hot reload disabled"
-        if ask_yn "Add spring-boot-devtools dependency to pom.xml?"; then
-          sed -i '' 's|</dependencies>|    <dependency>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-devtools</artifactId>\n        <scope>provided</scope>\n        <optional>true</optional>\n    </dependency>\n</dependencies>|' \
-            "${svc_dir}/pom.xml"
-          info "Added spring-boot-devtools to pom.xml"
-        fi
-      else
-        info "spring-boot-devtools: already present"
-      fi
       ;;
     go)
       if [ ! -f "${svc_dir}/.air.toml" ]; then
