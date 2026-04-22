@@ -205,7 +205,13 @@ AIRCONF
   esac
 }
 
-# ─── Discover untracked .env files → fleet.toml [[shared]] blocks ────────────
+# ─── Discover untracked .env files → services[].env_files or [[shared]] ───────
+#
+# Routing logic:
+#   - .env file whose first path component matches a known service dir
+#     → written as  env_files = [...]  on that [[services]] block
+#   - .env file at the project root level (no matching service dir)
+#     → written as  [[shared]]  (mount into every container)
 
 discover_env_files() {
   local proj_root="$1"
@@ -238,11 +244,133 @@ discover_env_files() {
              \( -not -path '*/node_modules/*' -not -path '*/.git/*' \
                 -not -path '*/target/*' -not -path '*/dist/*' \) 2>/dev/null)
 
-  # Emit the auto-discovered block between markers in fleet.toml.
-  # Idempotency: on re-run, replace the existing block in place; never touch
-  # user-added [[shared]] entries outside the markers.
   [ -f "${toml_file}" ] || error "discover_env_files: ${toml_file} not found (write_fleet_toml should have run first)"
 
+  # ── Classify: service-scoped vs. project-level ──────────────────────────────
+  # SVC_DIRS is a global bash array populated by detect_services() / write_fleet_toml().
+  local -a project_level_paths=()
+  declare -A _svc_env_map=()   # svc_dir → newline-separated list of rel-paths within that dir
+
+  local p first_component matched_svc svc rel_to_svc
+  for p in "${found[@]+"${found[@]}"}"; do
+    first_component="${p%%/*}"
+    matched_svc=""
+    for svc in "${SVC_DIRS[@]+"${SVC_DIRS[@]}"}"; do
+      if [ "${first_component}" = "${svc}" ]; then
+        matched_svc="${svc}"
+        break
+      fi
+    done
+    if [ -n "${matched_svc}" ]; then
+      rel_to_svc="${p#${matched_svc}/}"
+      if [ -z "${_svc_env_map[${matched_svc}]+x}" ]; then
+        _svc_env_map["${matched_svc}"]="${rel_to_svc}"
+      else
+        _svc_env_map["${matched_svc}"]="${_svc_env_map[${matched_svc}]}
+${rel_to_svc}"
+      fi
+    else
+      project_level_paths+=("${p}")
+    fi
+  done
+
+  # ── Step 1: patch env_files onto matching [[services]] blocks ────────────────
+  # Use Python to rewrite the TOML in-place because bash string manipulation
+  # is too fragile for structured file edits.
+  if [ "${#_svc_env_map[@]}" -gt 0 ]; then
+    local pybin
+    pybin=$(_find_python_with_tomllib) \
+      || error "discover_env_files: python3 with tomllib not found"
+
+    # Build a JSON map:  { "svc_dir": ["rel_path", ...], ... }
+    # Pass each svc_dir and its newline-separated paths as separate argv pairs
+    # so that newlines inside paths don't confuse word-splitting.
+    # We use NUL-delimited pairs fed via a temp file to stay POSIX-safe.
+    local svc_env_json
+    local _pairs_file; _pairs_file="$(mktemp)"
+    local svc
+    for svc in "${!_svc_env_map[@]}"; do
+      printf '%s\034%s\035' "${svc}" "${_svc_env_map[${svc}]}"
+    done > "${_pairs_file}"
+    svc_env_json=$(
+      "${pybin}" - "${_pairs_file}" <<'PYBUILD'
+import sys, json
+pairs_file = sys.argv[1]
+with open(pairs_file) as fh:
+    raw = fh.read()
+m = {}
+if raw:
+    for pair in raw.rstrip('\x1d').split('\x1d'):
+        svc_dir, raw_paths = pair.split('\x1c', 1)
+        m[svc_dir] = [p for p in raw_paths.split('\n') if p]
+print(json.dumps(m))
+PYBUILD
+    )
+    rm -f "${_pairs_file}"
+
+    "${pybin}" - "${toml_file}" "${svc_env_json}" <<'PYEOF'
+import sys, re, json
+
+toml_path   = sys.argv[1]
+svc_env_map = json.loads(sys.argv[2])   # {svc_dir: [rel_path, ...]}
+
+with open(toml_path) as fh:
+    lines = fh.readlines()
+
+out = []
+i = 0
+while i < len(lines):
+    line = lines[i]
+    if re.match(r'^\[\[services\]\]', line):
+        # Collect entire [[services]] block until next [[ or EOF
+        block_lines = [line]
+        i += 1
+        while i < len(lines) and not re.match(r'^\[\[', lines[i]):
+            block_lines.append(lines[i])
+            i += 1
+        # Identify the service dir
+        svc_dir = None
+        for bl in block_lines:
+            m = re.match(r'^dir\s*=\s*"([^"]+)"', bl)
+            if m:
+                svc_dir = m.group(1)
+                break
+        if svc_dir and svc_dir in svc_env_map:
+            env_files = svc_env_map[svc_dir]
+            env_files_toml = "env_files = [{}]\n".format(
+                ", ".join('"{}"'.format(p) for p in env_files)
+            )
+            # Remove any existing env_files line
+            block_lines = [bl for bl in block_lines
+                           if not re.match(r'^env_files\s*=', bl)]
+            # Insert after run = ... line; fall back to appending before blank tail
+            new_block = []
+            inserted = False
+            for bl in block_lines:
+                new_block.append(bl)
+                if re.match(r'^run\s*=', bl) and not inserted:
+                    new_block.append(env_files_toml)
+                    inserted = True
+            if not inserted:
+                trailing = []
+                while new_block and new_block[-1].strip() == '':
+                    trailing.insert(0, new_block.pop())
+                new_block.append(env_files_toml)
+                new_block.extend(trailing)
+            out.extend(new_block)
+        else:
+            out.extend(block_lines)
+        continue
+    out.append(line)
+    i += 1
+
+with open(toml_path, 'w') as fh:
+    fh.writelines(out)
+PYEOF
+  fi
+
+  # ── Step 2: emit project-level paths as [[shared]] blocks between markers ────
+  # Idempotency: replace the existing marker block in place on re-run.
   local tmp; tmp="$(mktemp)"
   local inside_block=0 block_written=0
   while IFS= read -r line || [ -n "${line}" ]; do
@@ -250,7 +378,7 @@ discover_env_files() {
       inside_block=1
       echo "${marker_start}" >> "${tmp}"
       local p
-      for p in "${found[@]+"${found[@]}"}"; do
+      for p in "${project_level_paths[@]+"${project_level_paths[@]}"}"; do
         printf '[[shared]]\npath = "%s"\n\n' "${p}" >> "${tmp}"
       done
       block_written=1
@@ -270,7 +398,7 @@ discover_env_files() {
       echo ""
       echo "${marker_start}"
       local p
-      for p in "${found[@]+"${found[@]}"}"; do
+      for p in "${project_level_paths[@]+"${project_level_paths[@]}"}"; do
         printf '[[shared]]\npath = "%s"\n\n' "${p}"
       done
       echo "${marker_end}"
@@ -290,7 +418,9 @@ discover_env_files() {
     fi
   fi
 
-  info "Discovered ${#found[@]} .env file(s) → ${toml_file} [[shared]] blocks"
+  local svc_count="${#_svc_env_map[@]}"
+  local proj_count="${#project_level_paths[@]}"
+  info "Discovered ${#found[@]} .env file(s) — ${svc_count} service-scoped (env_files), ${proj_count} project-level ([[shared]])"
 }
 
 # ─── Service detection wizard ─────────────────────────────────────────────────

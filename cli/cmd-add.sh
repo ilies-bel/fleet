@@ -277,18 +277,27 @@ ENV_FILE="${FEATURE_DIR}/feature.env"
   printf 'FLEET_PEERS_JSON=%s\n'     "${FLEET_PEERS_JSON}"
   printf 'FLEET_SHARED_JSON=%s\n'    "${FLEET_SHARED_JSON:-[]}"
   # FLEET_SHARED_ENV_FILES: colon-separated container paths for entrypoints to
-  # source. Derived from [[shared]] targets (falling back to /app/<path>).
+  # source. Derived from [[shared]] targets (falling back to /app/<path>) plus
+  # per-service env_files mounted at /app/<svc_name>/<rel>.
   _SHARED_TARGETS=$("${_PYBIN}" -c "
 import sys, json
-shared = json.loads(sys.argv[1] or '[]')
+shared   = json.loads(sys.argv[1] or '[]')
+services = json.loads(sys.argv[2] or '[]')
 out = []
+# [[shared]] entries
 for s in shared:
     p = s.get('path','')
     if not p:
         continue
     out.append(s.get('target') or '/app/' + p)
+# services[].env_files entries
+for svc in services:
+    name = svc.get('name','')
+    svc_dir = svc.get('dir','')
+    for ef in svc.get('env_files', []):
+        out.append('/app/' + name + '/' + ef)
 print(':'.join(out))
-" "${FLEET_SHARED_JSON:-[]}")
+" "${FLEET_SHARED_JSON:-[]}" "${FLEET_SERVICES_JSON}")
   [ -n "${_SHARED_TARGETS}" ] && printf 'FLEET_SHARED_ENV_FILES=%s\n' "${_SHARED_TARGETS}"
   if [ "${NEEDS_DB}" = true ]; then
     printf 'DB_NAME=%s\n'                    "${SIDECAR_DB_NAME}"
@@ -430,6 +439,26 @@ for s in json.loads(sys.argv[1] or '[]'):
         continue
     print(p + '\t' + (s.get('target') or ''))
 " "${FLEET_SHARED_JSON:-[]}")
+  # services[].env_files: bind-mount read-only into the matching service only.
+  # Source path is relative to the service dir inside the worktree.
+  while IFS=$'\t' read -r svc_name svc_dir env_file_rel; do
+    [ -z "${svc_name}" ] && continue
+    src="${WORKTREE_PATH}/${svc_dir}/${env_file_rel}"
+    [ -f "${src}" ] \
+      || error "Service env file missing: ${src}
+The worktree must contain all env_files declared in fleet.toml for service '${svc_name}'.
+Copy it: cp ${FLEET_PROJECT_ROOT}/${svc_dir}/${env_file_rel} ${src}"
+    tgt="/app/${svc_name}/${env_file_rel}"
+    echo "      - ${src}:${tgt}:ro"
+  done < <("${_PYBIN}" -c "
+import sys, json
+services = json.loads(sys.argv[1])
+for svc in services:
+    name    = svc.get('name','')
+    svc_dir = svc.get('dir','')
+    for ef in svc.get('env_files', []):
+        print(name + '\t' + svc_dir + '\t' + ef)
+" "${FLEET_SERVICES_JSON}")
   # Docker socket for Testcontainers (spring/gradle stacks only)
   _needs_sock=false
   for stack in "${SVC_STACKS[@]}"; do
