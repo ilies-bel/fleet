@@ -21,6 +21,15 @@ PROJECT_NAME="${PROJECT_NAME:-}"
 FLEET_SERVICES_JSON="${FLEET_SERVICES_JSON:-[]}"
 FLEET_PEERS_JSON="${FLEET_PEERS_JSON:-[]}"
 
+# Source shared env files early so DB_USER/DB_NAME/DB_PASSWORD from .env
+# override the defaults below before PostgreSQL cluster initialisation.
+if [ -n "${FLEET_SHARED_ENV_FILES:-}" ]; then
+  IFS=':' read -ra _early_files <<< "${FLEET_SHARED_ENV_FILES}"
+  for _f in "${_early_files[@]}"; do
+    [ -r "$_f" ] && set -a && . "$_f" && set +a
+  done
+fi
+
 # DB credentials (used only when a spring/gradle service is present)
 DB_NAME="${DB_NAME:-${PROJECT_NAME:-fleet}}"
 DB_USER="${DB_USER:-${PROJECT_NAME:-fleet}}"
