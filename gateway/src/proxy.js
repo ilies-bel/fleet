@@ -28,10 +28,14 @@ import { getActiveFeature, getContainerStatus, updateStatus } from './registry.j
 export function createFeatureProxy() {
   const proxy = createProxyMiddleware({
     ws: true,
-    router: (req) => {
-      // By the time the router runs, the outer wrapper has already verified the
-      // container is running and stored the name on req._fleetFeature.
-      return `http://fleet-${req._fleetFeature}:80`;
+    router: async (req) => {
+      // Resolve the active feature fresh on every request/upgrade. Works for
+      // both the HTTP middleware path and http-proxy-middleware's auto-wired
+      // WebSocket upgrade listener (which does NOT run the outer handler).
+      const resolved = await resolveTarget();
+      if (!resolved.ok) return undefined;
+      req._fleetFeature = resolved.feature;
+      return `http://fleet-${resolved.feature}:80`;
     },
     changeOrigin: true,
     ejectPlugins: true,

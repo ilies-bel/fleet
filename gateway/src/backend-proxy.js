@@ -27,7 +27,12 @@ import { resolveTarget, stoppedContainerBody } from './proxy.js';
 export function createBackendProxy() {
   const proxy = createProxyMiddleware({
     ws: true,
-    router: (req) => `http://fleet-${req._fleetFeature}:80`,
+    router: async (req) => {
+      const resolved = await resolveTarget();
+      if (!resolved.ok) return undefined;
+      req._fleetFeature = resolved.feature;
+      return `http://fleet-${resolved.feature}:80`;
+    },
     changeOrigin: true,
     ejectPlugins: true,
     plugins: [debugProxyErrorsPlugin, proxyEventsPlugin],
