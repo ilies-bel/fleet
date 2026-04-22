@@ -1,5 +1,5 @@
-import { Router } from 'express';
-import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus } from './registry.js';
+import express, { Router } from 'express';
+import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
 import { dockerExec, dockerLogs, stopContainer, startContainer, removeContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 import { ensureMainRunning } from './lifecycle.js';
 
@@ -381,6 +381,63 @@ router.patch('/features/:name/status', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+/**
+ * POST /_fleet/api/features/:name/build-log
+ * Accepts a plain-text chunk (Content-Type: text/plain) and appends it to the
+ * in-memory ring buffer for the feature. Called by `fleet add` to stream
+ * docker compose build output into the gateway for SSE fan-out.
+ */
+router.post('/features/:name/build-log', express.text({ type: 'text/plain', limit: '1mb' }), (req, res) => {
+  const { name } = req.params;
+  if (!getFeature(name)) {
+    return res.status(404).json({ error: 'Feature not registered' });
+  }
+  const body = typeof req.body === 'string' ? req.body : '';
+  if (body.length > 0) appendBuildLog(name, body);
+  res.json({ ok: true });
+});
+
+/**
+ * GET /_fleet/api/features/:name/build-log
+ * Server-Sent Events stream of build log lines for a feature.
+ * Replays all buffered lines on connect, then pushes new lines as they arrive.
+ * Sends a keepalive comment every 15 s to prevent proxy timeouts.
+ */
+router.get('/features/:name/build-log', (req, res) => {
+  const { name } = req.params;
+  if (!getFeature(name)) {
+    return res.status(404).json({ error: 'Feature not registered' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  // Replay buffered lines
+  const existing = getBuildLog(name);
+  if (existing && existing.lines.length > 0) {
+    for (const line of existing.lines) {
+      res.write(`data: ${line}\n\n`);
+    }
+  }
+
+  // Subscribe to new lines
+  const unsubscribe = subscribeBuildLog(name, (line) => {
+    res.write(`data: ${line}\n\n`);
+  });
+
+  // Keepalive every 15 s
+  const keepalive = setInterval(() => {
+    res.write(':keepalive\n\n');
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(keepalive);
+    unsubscribe();
+  });
 });
 
 export default router;
