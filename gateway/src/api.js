@@ -1,3 +1,6 @@
+import { spawn } from 'child_process';
+import path from 'path';
+import fs from 'fs';
 import express, { Router } from 'express';
 import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
 import { dockerExec, dockerLogs, stopContainer, startContainer, removeContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
@@ -351,6 +354,196 @@ async function runSync(containerName, regenerateSources) {
   steps.push('supervisorctl restart backend');
 
   await dockerExec(containerName, ['bash', '-c', steps.join(' && ')]);
+}
+
+/**
+ * POST /_fleet/api/features/:name/rebuild
+ * Rebuild the Docker base image and recreate the container from scratch.
+ * Returns immediately (202) — the rebuild runs in the background.
+ */
+router.post('/features/:name/rebuild', async (req, res) => {
+  const { name } = req.params;
+  if (!getFeature(name)) {
+    return res.status(404).json({ error: 'Feature not registered' });
+  }
+
+  res.json({ ok: true, message: 'Rebuild started — check logs for progress' });
+
+  runRebuild(name).catch(err => {
+    console.error(`[rebuild] ${name}: ${err.message}`);
+  });
+});
+
+/**
+ * Run a host-level docker build + docker compose up -d to rebuild a feature
+ * from scratch. Streams stdout/stderr to the feature's build-log ring buffer.
+ *
+ * Sequence:
+ *   1. PATCH status → 'building'
+ *   2. docker stop fleet-<name>        (ignore "already stopped")
+ *   3. docker build --load -t <image> -f <dockerfile> <FLEET_ROOT>
+ *   4. docker compose -f <composefile> up -d
+ *   5. PATCH status → 'starting'
+ *   6. Poll /_fleet/api/features/:name/health every 2s, up to 60s
+ *   7. On healthy → PATCH status 'running'; on timeout → PATCH 'failed'
+ *
+ * @param {string} name  feature name (without the 'fleet-' prefix)
+ * @returns {Promise<void>}
+ */
+async function runRebuild(name) {
+  const FLEET_PROJECT_ROOT = process.env.FLEET_PROJECT_ROOT;
+  const FLEET_ROOT = process.env.FLEET_ROOT;
+
+  if (!FLEET_PROJECT_ROOT || !FLEET_ROOT) {
+    throw new Error('FLEET_PROJECT_ROOT and FLEET_ROOT must be set in the gateway environment');
+  }
+
+  // Step 1 — mark as building (resets build-log ring buffer)
+  updateStatus(name, 'building', null);
+
+  const log = (line) => appendBuildLog(name, line);
+  log(`[rebuild] Starting rebuild for '${name}'`);
+
+  // Step 2 — resolve paths
+  const composeFile = path.join(FLEET_PROJECT_ROOT, '.fleet', name, 'docker-compose.yml');
+
+  // Extract image name from compose file (line like `    image: fleet-feature-base-myproject`)
+  let imageName;
+  try {
+    const composeContent = fs.readFileSync(composeFile, 'utf8');
+    const imageMatch = composeContent.match(/^\s+image:\s+(.+)$/m);
+    if (!imageMatch) {
+      throw new Error(`No 'image:' line found in ${composeFile}`);
+    }
+    imageName = imageMatch[1].trim();
+  } catch (err) {
+    updateStatus(name, 'failed', `rebuild: could not read compose file: ${err.message}`);
+    throw err;
+  }
+
+  // Resolve Dockerfile: project-local first, fallback to FLEET_ROOT
+  const projectDockerfile = path.join(FLEET_PROJECT_ROOT, '.fleet', 'Dockerfile.feature-base');
+  const globalDockerfile = path.join(FLEET_ROOT, 'Dockerfile.feature-base');
+  const dockerfile = fs.existsSync(projectDockerfile) ? projectDockerfile : globalDockerfile;
+
+  if (!fs.existsSync(dockerfile)) {
+    const msg = `rebuild: Dockerfile not found at ${projectDockerfile} or ${globalDockerfile}`;
+    updateStatus(name, 'failed', msg);
+    throw new Error(msg);
+  }
+
+  log(`[rebuild] Image:      ${imageName}`);
+  log(`[rebuild] Dockerfile: ${dockerfile}`);
+  log(`[rebuild] Compose:    ${composeFile}`);
+
+  /**
+   * Run a CLI command, streaming stdout+stderr lines to the build-log.
+   * Resolves when the process exits 0, rejects with an Error otherwise.
+   * @param {string} cmd
+   * @param {string[]} args
+   * @param {{ ignoreExitCode?: boolean }} [opts]
+   */
+  const runCommand = (cmd, args, { ignoreExitCode = false } = {}) =>
+    new Promise((resolve, reject) => {
+      log(`[rebuild] + ${cmd} ${args.join(' ')}`);
+      const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+      const onLine = (chunk) => {
+        const text = chunk.toString();
+        for (const line of text.split('\n')) {
+          const trimmed = line.trimEnd();
+          if (trimmed.length > 0) log(trimmed);
+        }
+      };
+
+      proc.stdout.on('data', onLine);
+      proc.stderr.on('data', onLine);
+
+      proc.on('error', (err) => reject(new Error(`spawn error for '${cmd}': ${err.message}`)));
+
+      proc.on('close', (code) => {
+        if (ignoreExitCode || code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`'${cmd} ${args.join(' ')}' exited with code ${code}`));
+        }
+      });
+    });
+
+  try {
+    // Step 3 — stop the running container (ignore error if already stopped/missing)
+    log(`[rebuild] Stopping fleet-${name}...`);
+    try {
+      await stopContainer(`fleet-${name}`);
+    } catch {
+      // Container may already be stopped or not exist — proceed regardless
+      log(`[rebuild] Container not running or not found — proceeding`);
+    }
+
+    // Step 4 — rebuild the image
+    log(`[rebuild] Building image ${imageName}...`);
+    await runCommand('docker', [
+      'build', '--load',
+      '-t', imageName,
+      '-f', dockerfile,
+      FLEET_ROOT,
+    ]);
+
+    // Step 5 — recreate container with new image
+    log(`[rebuild] Recreating container via docker compose up -d...`);
+    await runCommand('docker', [
+      'compose', '-f', composeFile, 'up', '-d',
+    ]);
+
+    // Step 6 — transition to starting
+    updateStatus(name, 'starting', null);
+    log(`[rebuild] Container started — waiting for health...`);
+
+    // Step 7 — poll health endpoint
+    const HEALTH_MAX_MS = 60_000;
+    const HEALTH_POLL_MS = 2_000;
+    const deadline = Date.now() + HEALTH_MAX_MS;
+    let healthy = false;
+
+    while (Date.now() < deadline) {
+      const elapsed = Math.round((Date.now() - (deadline - HEALTH_MAX_MS)) / 1000);
+      log(`[rebuild] Waiting for health... (${elapsed}s / ${HEALTH_MAX_MS / 1000}s)`);
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+        const response = await fetch(`http://fleet-${name}:80/`, {
+          method: 'HEAD',
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (response.ok) {
+          healthy = true;
+          break;
+        }
+      } catch {
+        // not up yet — keep polling
+      }
+      await new Promise(resolve => setTimeout(resolve, HEALTH_POLL_MS));
+    }
+
+    if (healthy) {
+      updateStatus(name, 'running', null);
+      log(`[rebuild] Rebuild complete — '${name}' is running`);
+    } else {
+      const msg = `Health wait timed out after ${HEALTH_MAX_MS / 1000}s`;
+      updateStatus(name, 'failed', msg);
+      log(`[rebuild] ERROR: ${msg}`);
+      throw new Error(msg);
+    }
+  } catch (err) {
+    // Guard against double-setting failed (health timeout already set it above)
+    const current = getFeature(name);
+    if (current && current.status !== 'failed') {
+      updateStatus(name, 'failed', err.message);
+    }
+    log(`[rebuild] ERROR: ${err.message}`);
+    throw err;
+  }
 }
 
 /**
