@@ -105,6 +105,7 @@ import sys, json, os
 
 svcs = json.loads(sys.argv[1])
 needs_db = sys.argv[2] == 'true'
+has_backend = needs_db
 
 for svc in svcs:
     name    = svc.get('name','')
@@ -147,6 +148,8 @@ if [ -n \"\$JAR\" ]; then cp \"\$JAR\" /home/developer/''' + name + '''.jar; fi
             f.write('  echo \"[fleet] Reconciling ' + name + ' node_modules (arch=$(uname -m))...\"\n')
             f.write('  npm install --no-audit --no-fund --loglevel=error\n')
             f.write('fi\n')
+            if has_backend:
+                f.write('/usr/local/bin/wait-for-backend.sh\n')
 
         if run_cmd:
             f.write('exec ' + run_cmd + '\n')
@@ -180,7 +183,10 @@ if [ -n \"\$JAR\" ]; then cp \"\$JAR\" /home/developer/''' + name + '''.jar; fi
     if env_line:
         block += env_line + '\n'
     block += 'autostart=true\nautorestart=true\n'
-    block += 'priority=20\n'
+    is_frontend = stack in ('vite', 'next', 'webpack', 'react', 'vue') or \
+                  (stack == '' and os.path.isfile(svc_dir + '/package.json'))
+    svc_priority = '25' if (is_frontend and has_backend) else '20'
+    block += 'priority=' + svc_priority + '\n'
     block += 'startsecs=5\n'
     block += 'stdout_logfile=/var/log/supervisor/' + name + '.log\n'
     block += 'stderr_logfile=/var/log/supervisor/' + name + '.log\n'
