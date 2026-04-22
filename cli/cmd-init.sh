@@ -249,7 +249,9 @@ discover_env_files() {
   # ── Classify: service-scoped vs. project-level ──────────────────────────────
   # SVC_DIRS is a global bash array populated by detect_services() / write_fleet_toml().
   local -a project_level_paths=()
-  declare -A _svc_env_map=()   # svc_dir → newline-separated list of rel-paths within that dir
+  # Parallel arrays replace declare -A for bash 3.2 compatibility (macOS default bash).
+  local -a _svc_keys=()   # svc_dir values
+  local -a _svc_vals=()   # newline-separated rel-paths for corresponding svc_dir
 
   local p first_component matched_svc svc rel_to_svc
   for p in "${found[@]+"${found[@]}"}"; do
@@ -263,10 +265,18 @@ discover_env_files() {
     done
     if [ -n "${matched_svc}" ]; then
       rel_to_svc="${p#${matched_svc}/}"
-      if [ -z "${_svc_env_map[${matched_svc}]+x}" ]; then
-        _svc_env_map["${matched_svc}"]="${rel_to_svc}"
+      local _found_idx=-1 _ki
+      for _ki in "${!_svc_keys[@]}"; do
+        if [ "${_svc_keys[${_ki}]}" = "${matched_svc}" ]; then
+          _found_idx="${_ki}"
+          break
+        fi
+      done
+      if [ "${_found_idx}" -eq -1 ]; then
+        _svc_keys+=("${matched_svc}")
+        _svc_vals+=("${rel_to_svc}")
       else
-        _svc_env_map["${matched_svc}"]="${_svc_env_map[${matched_svc}]}
+        _svc_vals[${_found_idx}]="${_svc_vals[${_found_idx}]}
 ${rel_to_svc}"
       fi
     else
@@ -277,7 +287,7 @@ ${rel_to_svc}"
   # ── Step 1: patch env_files onto matching [[services]] blocks ────────────────
   # Use Python to rewrite the TOML in-place because bash string manipulation
   # is too fragile for structured file edits.
-  if [ "${#_svc_env_map[@]}" -gt 0 ]; then
+  if [ "${#_svc_keys[@]}" -gt 0 ]; then
     local pybin
     pybin=$(_find_python_with_tomllib) \
       || error "discover_env_files: python3 with tomllib not found"
@@ -288,9 +298,9 @@ ${rel_to_svc}"
     # We use NUL-delimited pairs fed via a temp file to stay POSIX-safe.
     local svc_env_json
     local _pairs_file; _pairs_file="$(mktemp)"
-    local svc
-    for svc in "${!_svc_env_map[@]}"; do
-      printf '%s\034%s\035' "${svc}" "${_svc_env_map[${svc}]}"
+    local _ki
+    for _ki in "${!_svc_keys[@]}"; do
+      printf '%s\034%s\035' "${_svc_keys[${_ki}]}" "${_svc_vals[${_ki}]}"
     done > "${_pairs_file}"
     svc_env_json=$(
       "${pybin}" - "${_pairs_file}" <<'PYBUILD'
@@ -418,7 +428,7 @@ PYEOF
     fi
   fi
 
-  local svc_count="${#_svc_env_map[@]}"
+  local svc_count="${#_svc_keys[@]}"
   local proj_count="${#project_level_paths[@]}"
   info "Discovered ${#found[@]} .env file(s) — ${svc_count} service-scoped (env_files), ${proj_count} project-level ([[shared]])"
 }
