@@ -74,26 +74,46 @@ _PYBIN=$(_find_python_with_tomllib) \
 # ─── Resolve source path (worktree by default, project root in --direct mode) ─
 # In --direct mode, skip worktree and bind-mount the primary checkout live.
 if [ "${DIRECT}" = true ]; then
-  WORKTREE_PATH="${FLEET_PROJECT_ROOT}"
-  info "Direct mode — mounting primary checkout at ${WORKTREE_PATH}"
+  PROJECT_WORKTREE_PATH="${FLEET_PROJECT_ROOT}"
+  info "Direct mode — mounting primary checkout at ${PROJECT_WORKTREE_PATH}"
 else
-  # worktree_template must be set in fleet.toml [project] section.
-  if [ -z "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
-    error "fleet add: [project].worktree_template is not set in .fleet/fleet.toml.
+  # Resolve the project-level worktree path when template is set.
+  # Only validate it as a git worktree if at least one service lacks a per-service
+  # worktree_template override (services with overrides manage their own paths).
+  PROJECT_WORKTREE_PATH=""
+  if [ -n "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
+    PROJECT_WORKTREE_PATH=$(fleet_resolve_worktree "${NAME}")
+  fi
+
+  # Check whether ALL services have a per-service worktree_template set.
+  # If any service is missing one, the project-level path is required.
+  _ALL_SVC_HAVE_WT=$("${_PYBIN}" -c "
+import sys, json
+services = json.loads(sys.argv[1])
+if not services:
+    print('false')
+else:
+    all_have = all(bool(sv.get('worktree_template','')) for sv in services)
+    print('true' if all_have else 'false')
+" "${FLEET_SERVICES_JSON}")
+
+  if [ "${_ALL_SVC_HAVE_WT}" = "false" ]; then
+    # Project-level template is required for at least one service.
+    if [ -z "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
+      error "fleet add: [project].worktree_template is not set in .fleet/fleet.toml.
   Add it under [project]:
     worktree_template = \".worktrees/{name}\"
   Then run: fleet init (to regenerate) or edit .fleet/fleet.toml manually.
   (Or pass --direct to bind-mount the primary checkout without a worktree.)"
-  fi
+    fi
 
-  WORKTREE_PATH=$(fleet_resolve_worktree "${NAME}")
-
-  # Verify the resolved path is an active git worktree (not just any directory)
-  if ! git -C "${WORKTREE_PATH}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    error "fleet add: worktree '${WORKTREE_PATH}' does not exist.
+    # Verify the resolved path is an active git worktree (not just any directory)
+    if ! git -C "${PROJECT_WORKTREE_PATH}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      error "fleet add: worktree '${PROJECT_WORKTREE_PATH}' does not exist.
   Create it first:
-    git worktree add ${WORKTREE_PATH} <branch>
+    git worktree add ${PROJECT_WORKTREE_PATH} <branch>
   Or pass --direct to bind-mount the primary checkout without a worktree."
+    fi
   fi
 fi
 
@@ -125,6 +145,7 @@ fi
 
 declare -a SVC_NAMES=()
 declare -a SVC_ABS_PATHS=()
+declare -a SVC_WT_ROOTS=()
 declare -a SVC_STACKS=()
 declare -a SVC_RUNS=()
 declare -a SVC_PORTS=()
@@ -139,22 +160,36 @@ for idx in $(seq 0 $((svc_count - 1))); do
   svc_run=$(  _at run)
   svc_port=$( _at port)
 
-  # Mount from the worktree, not the primary checkout
-  svc_abs_path="${WORKTREE_PATH}/${svc_dir}"
-  [ -d "${svc_abs_path}" ] \
-    || error "Service '${svc_name}': '${svc_abs_path}' does not exist in worktree.
-  Expected: ${WORKTREE_PATH}/${svc_dir}
-  Check that the worktree branch has the service directory and that 'dir' in .fleet/fleet.toml is correct."
+  svc_wt_template=$(_at worktree_template)
 
-  # Read the real branch from the worktree itself
-  branch=$(git -C "${WORKTREE_PATH}" branch --show-current 2>/dev/null || echo "")
-  if [ -z "${branch}" ]; then
-    branch=$(git -C "${WORKTREE_PATH}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+  svc_abs_path=$(fleet_resolve_service_worktree "${NAME}" "${svc_dir}" "${svc_wt_template}")
+
+  # Determine the worktree root for this service (used for branch + shared path resolution)
+  if [ -n "${svc_wt_template}" ]; then
+    svc_wt_root="${svc_abs_path}"   # the override IS the root
+  else
+    svc_wt_root="${PROJECT_WORKTREE_PATH}"
   fi
+
+  [ -d "${svc_abs_path}" ] \
+    || error "Service '${svc_name}': '${svc_abs_path}' does not exist.
+Create the worktree first:
+  git -C ${FLEET_PROJECT_ROOT}/${svc_dir} worktree add ${svc_abs_path} <branch>
+Or set a project-level worktree_template and create: git worktree add ${PROJECT_WORKTREE_PATH} <branch>"
+
+  if ! git -C "${svc_abs_path}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    error "Service '${svc_name}': '${svc_abs_path}' is not an active git worktree.
+Run: git -C ${FLEET_PROJECT_ROOT}/${svc_dir} worktree add ${svc_abs_path} <branch>"
+  fi
+
+  # Read branch from THIS service's worktree root
+  branch=$(git -C "${svc_abs_path}" branch --show-current 2>/dev/null || echo "")
+  [ -z "${branch}" ] && branch=$(git -C "${svc_abs_path}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
   [ "${branch}" = "HEAD" ] && branch="main"
 
   SVC_NAMES+=("${svc_name}")
   SVC_ABS_PATHS+=("${svc_abs_path}")
+  SVC_WT_ROOTS+=("${svc_wt_root}")
   SVC_STACKS+=("${svc_stack}")
   SVC_RUNS+=("${svc_run}")
   SVC_PORTS+=("${svc_port}")
@@ -221,7 +256,7 @@ mkdir -p "${FEATURE_DIR}"
 # with docker compose up gives a running container that nothing can route to).
 info "Registering '${NAME}' with gateway (status=building)..."
 _GW_RESULT=$(gateway_post_full "register-feature" \
-  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"title\":${title_json},\"services\":${services_json},\"status\":\"building\"}")
+  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${PROJECT_WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"title\":${title_json},\"services\":${services_json},\"status\":\"building\"}")
 HTTP_STATUS="${_GW_RESULT%|*}"
 _GW_BODY_FILE="${_GW_RESULT#*|}"
 _GW_BODY=$(cat "${_GW_BODY_FILE}" 2>/dev/null || true)
@@ -370,7 +405,7 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
   for i in "${!SVC_NAMES[@]}"; do
     echo "      - ${SVC_ABS_PATHS[$i]}:/app/${SVC_NAMES[$i]}:cached"
     svc_stack_type="${SVC_STACKS[$i]}"
-    svc_dir_rel="${SVC_ABS_PATHS[$i]#${WORKTREE_PATH}/}"  # strip worktree prefix → relative dir
+    svc_dir_rel="${SVC_ABS_PATHS[$i]#${SVC_WT_ROOTS[$i]}/}"  # strip worktree root prefix → relative dir
     while IFS= read -r shared_path; do
       [ -z "${shared_path}" ] && continue
       TARGET="/app/${SVC_NAMES[$i]}/${shared_path}"
@@ -383,7 +418,7 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
         echo "      - ${vol_name}:${TARGET}"
         NODEMOD_VOLS+=("${vol_name}")
       else
-        SOURCE="${WORKTREE_PATH}/${svc_dir_rel}/${shared_path}"
+        SOURCE="${SVC_WT_ROOTS[$i]}/${svc_dir_rel}/${shared_path}"
         [ -d "${SOURCE}" ] \
           || error "Shared path source missing: ${SOURCE}. Populate it first."
         echo "      - ${SOURCE}:${TARGET}:cached"
@@ -406,11 +441,13 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
     fi
   done
   # [[shared]] files from fleet.toml: bind-mount read-only into every container.
-  # Always mount from WORKTREE_PATH — hard fail if the file is missing.
+  # Always mount from PROJECT_WORKTREE_PATH — hard fail if the file is missing.
   # Worktrees must be fully set up before fleet add.
   while IFS=$'\t' read -r shared_path shared_target; do
     [ -z "${shared_path}" ] && continue
-    src="${WORKTREE_PATH}/${shared_path}"
+    [ -n "${PROJECT_WORKTREE_PATH:-}" ] \
+      || error "[[shared]] files require [project].worktree_template to be set when no per-service override covers all services."
+    src="${PROJECT_WORKTREE_PATH}/${shared_path}"
     [ -f "${src}" ] \
       || error "Shared file missing: ${src}
 The worktree must contain all [[shared]] files declared in fleet.toml.
@@ -427,10 +464,15 @@ for s in json.loads(sys.argv[1] or '[]'):
     print(p + '\t' + (s.get('target') or ''))
 " "${FLEET_SHARED_JSON:-[]}")
   # services[].env_files: bind-mount read-only into the matching service only.
-  # Source path is relative to the service dir inside the worktree.
+  # Source path is relative to the service's resolved abs path (handles per-service worktrees).
   while IFS=$'\t' read -r svc_name svc_dir env_file_rel; do
     [ -z "${svc_name}" ] && continue
-    src="${WORKTREE_PATH}/${svc_dir}/${env_file_rel}"
+    # Find the index for this service name to look up its abs path
+    svc_idx=0
+    for _si in "${!SVC_NAMES[@]}"; do
+      [ "${SVC_NAMES[$_si]}" = "${svc_name}" ] && { svc_idx=$_si; break; }
+    done
+    src="${SVC_ABS_PATHS[$svc_idx]}/${env_file_rel}"
     [ -f "${src}" ] \
       || error "Service env file missing: ${src}
 The worktree must contain all env_files declared in fleet.toml for service '${svc_name}'.
@@ -484,7 +526,7 @@ info "Writing .fleet/${NAME}/info.toml..."
   echo "name    = \"${NAME}\""
   echo "title   = \"${FEATURE_TITLE}\""
   echo "project = \"${FLEET_PROJECT_NAME}\""
-  echo "worktree = \"${WORKTREE_PATH}\""
+  echo "worktree = \"${PROJECT_WORKTREE_PATH}\""
   echo "direct  = ${DIRECT}"
   echo ""
   for i in "${!SVC_NAMES[@]}"; do
@@ -492,6 +534,7 @@ info "Writing .fleet/${NAME}/info.toml..."
     echo "name   = \"${SVC_NAMES[$i]}\""
     echo "dir    = \"${SVC_ABS_PATHS[$i]}\""
     echo "branch = \"${SVC_BRANCHES[$i]}\""
+    echo "worktree = \"${SVC_WT_ROOTS[$i]}\""
     [ -n "${SVC_STACKS[$i]}" ] && echo "stack  = \"${SVC_STACKS[$i]}\""
     [ -n "${SVC_PORTS[$i]}" ]  && echo "port   = ${SVC_PORTS[$i]}"
     echo ""

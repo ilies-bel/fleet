@@ -172,14 +172,15 @@ out = {
     ]),
     "services_json":  json.dumps([
         {
-            "name":  sv.get("name",""),
-            "dir":   sv.get("dir",""),
-            "stack": sv.get("stack",""),
-            "port":  str(sv.get("port","")),
-            "build": sv.get("build",""),
-            "run":       sv.get("run",""),
-            "env":       sv.get("env", {}),
-            "env_files": sv.get("env_files", []),
+            "name":              sv.get("name",""),
+            "dir":               sv.get("dir",""),
+            "stack":             sv.get("stack",""),
+            "port":              str(sv.get("port","")),
+            "build":             sv.get("build",""),
+            "run":               sv.get("run",""),
+            "env":               sv.get("env", {}),
+            "env_files":         sv.get("env_files", []),
+            "worktree_template": sv.get("worktree_template",""),
         }
         for sv in services
     ]),
@@ -311,7 +312,25 @@ fleet_resolve_worktree() {
   printf '%s\n' "${resolved}"
 }
 
-export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_stack_for_service fleet_stack_shared_paths fleet_project_root fleet_resolve_worktree
+# fleet_resolve_service_worktree <name> <svc_dir> <svc_wt_template>
+# Returns the absolute path to this service's worktree source.
+# When svc_wt_template is non-empty: substitute {name}, resolve relative to FLEET_PROJECT_ROOT.
+# Otherwise: fleet_resolve_worktree(name) + "/" + svc_dir.
+fleet_resolve_service_worktree() {
+  local name="${1:-}" svc_dir="${2:-}" svc_wt_template="${3:-}"
+  if [ -n "${svc_wt_template}" ]; then
+    local resolved="${svc_wt_template//\{name\}/${name}}"
+    case "${resolved}" in
+      /*) ;;
+      *)  resolved="${FLEET_PROJECT_ROOT}/${resolved}" ;;
+    esac
+    printf '%s\n' "${resolved}"
+  else
+    printf '%s\n' "$(fleet_resolve_worktree "${name}")/${svc_dir}"
+  fi
+}
+
+export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_stack_for_service fleet_stack_shared_paths fleet_project_root fleet_resolve_worktree fleet_resolve_service_worktree
 
 # ─── Config loaders (legacy shims) ───────────────────────────────────────────
 # These kept for backward compatibility while cmd-*.sh scripts are migrated.
