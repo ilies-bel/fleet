@@ -7,6 +7,89 @@ import { inspectContainer } from './docker.js';
  */
 const features = new Map();
 
+/**
+ * Per-feature build log store.
+ * @type {Map<string, { lines: string[], subscribers: Set<Function>, timer: NodeJS.Timeout|null }>}
+ */
+const buildLogs = new Map();
+
+/** ANSI escape sequence regex for stripping colour codes from build output. */
+const ANSI_RE = /\x1B\[[0-9;]*[A-Za-z]/g;
+
+/** Maximum number of log lines retained per feature (ring buffer cap). */
+const BUILD_LOG_MAX_LINES = 500;
+
+/**
+ * Append a chunk of build output for a feature.
+ * Splits by newline, strips ANSI escape sequences, caps buffer at 500 lines.
+ * Notifies all active SSE subscribers.
+ * @param {string} name
+ * @param {string} chunk
+ */
+export function appendBuildLog(name, chunk) {
+  if (!buildLogs.has(name)) {
+    buildLogs.set(name, { lines: [], subscribers: new Set(), timer: null });
+  }
+  const entry = buildLogs.get(name);
+  const newLines = chunk
+    .split('\n')
+    .map(l => l.replace(ANSI_RE, ''))
+    .filter(l => l.length > 0);
+
+  for (const line of newLines) {
+    entry.lines.push(line);
+    if (entry.lines.length > BUILD_LOG_MAX_LINES) {
+      entry.lines.shift();
+    }
+    for (const cb of entry.subscribers) {
+      try { cb(line); } catch { /* subscriber died; unsubscribe on next tick */ }
+    }
+  }
+}
+
+/**
+ * Return current buffered log lines for a feature, or null if no entry exists.
+ * @param {string} name
+ * @returns {{ lines: string[] }|null}
+ */
+export function getBuildLog(name) {
+  const entry = buildLogs.get(name);
+  if (!entry) return null;
+  return { lines: entry.lines };
+}
+
+/**
+ * Subscribe to live build log lines for a feature.
+ * The callback is called with each new line string as it arrives.
+ * Returns an unsubscribe function.
+ * @param {string} name
+ * @param {Function} callback
+ * @returns {Function} unsubscribe
+ */
+export function subscribeBuildLog(name, callback) {
+  if (!buildLogs.has(name)) {
+    buildLogs.set(name, { lines: [], subscribers: new Set(), timer: null });
+  }
+  const entry = buildLogs.get(name);
+  entry.subscribers.add(callback);
+  return () => { entry.subscribers.delete(callback); };
+}
+
+/**
+ * Schedule eviction of a feature's build log after delayMs milliseconds.
+ * Cancels any previously scheduled eviction for the same feature.
+ * @param {string} name
+ * @param {number} [delayMs=60000]
+ */
+export function clearBuildLog(name, delayMs = 60000) {
+  const entry = buildLogs.get(name);
+  if (!entry) return;
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => {
+    buildLogs.delete(name);
+  }, delayMs);
+}
+
 /** @type {string|null} */
 let activeFeature = null;
 
@@ -52,6 +135,15 @@ export function updateStatus(name, status, error) {
   const next = { ...entry, status };
   if (error !== undefined) next.error = error;
   features.set(name, next);
+
+  // Build log lifecycle: initialise fresh buffer on 'building', schedule
+  // eviction 60s after 'running' or 'failed' so page-refresh can replay.
+  if (status === 'building') {
+    buildLogs.delete(name);
+    buildLogs.set(name, { lines: [], subscribers: new Set(), timer: null });
+  } else if (status === 'running' || status === 'failed') {
+    clearBuildLog(name, 60000);
+  }
 }
 
 /**

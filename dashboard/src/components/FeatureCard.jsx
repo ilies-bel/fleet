@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getHealth, removeFeature, openTerminal, stopFeature, startFeature, syncFeature } from '../api.js';
+import BuildLogPanel from './BuildLogPanel.jsx';
 
 export default function FeatureCard({ feature, isActive, isPreview, isStarting, onActivate, onRemoved, onLogs }) {
   const { name, branch, title } = feature;
@@ -191,6 +192,11 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           </div>
         )}
       </div>
+
+      {/* Build log panel — shown during building, starting, or failed */}
+      {(isBuilding || isRegistryStarting || isFailed) && (
+        <BuildLogPanel featureName={name} status={feature.status} />
+      )}
 
       {/* Action buttons */}
       {isNotStarted ? (

@@ -376,7 +376,7 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
         echo "      - ${vol_name}:${TARGET}"
         NODEMOD_VOLS+=("${vol_name}")
       else
-        SOURCE="${FLEET_PROJECT_ROOT}/${svc_dir_rel}/${shared_path}"
+        SOURCE="${WORKTREE_PATH}/${svc_dir_rel}/${shared_path}"
         [ -d "${SOURCE}" ] \
           || error "Shared path source missing: ${SOURCE}. Populate it first."
         echo "      - ${SOURCE}:${TARGET}:cached"
@@ -399,10 +399,16 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
     fi
   done
   # [[shared]] files from fleet.toml: bind-mount read-only into every container.
-  # Missing host files are fatal — a misconfigured shared entry should fail fast.
+  # Prefer the worktree path when the file exists there (e.g. .env, frontend/.env.local);
+  # fall back to FLEET_PROJECT_ROOT for fleet-only files (mocks, etc.) that only live
+  # in the primary checkout and are never copied into worktrees.
+  # Missing host files in both locations are fatal — fail fast on misconfiguration.
   while IFS=$'\t' read -r shared_path shared_target; do
     [ -z "${shared_path}" ] && continue
-    src="${FLEET_PROJECT_ROOT}/${shared_path}"
+    src="${WORKTREE_PATH}/${shared_path}"
+    if [ ! -f "${src}" ]; then
+      src="${FLEET_PROJECT_ROOT}/${shared_path}"
+    fi
     [ -f "${src}" ] \
       || error "Shared file missing: ${src}. Create it or remove the [[shared]] entry from fleet.toml."
     tgt="${shared_target:-/app/${shared_path}}"
@@ -476,12 +482,45 @@ info "Writing .fleet/${NAME}/info.toml..."
 
 # ─── Bring up the single feature container ───────────────────────────────────
 info "Starting container fleet-${NAME}..."
-# Capture build/compose stderr into _FLEET_FAIL_LOG so the ERR trap can forward
-# a tail to the dashboard as the 'failed' error message.
-if ! docker compose -f "${COMPOSE_FILE}" up -d 2> >(tee -a "${_FLEET_FAIL_LOG}" >&2); then
+# Capture build/compose output into _FLEET_FAIL_LOG AND stream to the gateway
+# build-log endpoint so the dashboard can show live progress.
+# The log streaming is non-fatal: if curl or the FIFO fails, docker compose up
+# must still proceed normally. All || true / background logic ensures this.
+
+_FLEET_BUILD_LOG_FIFO=$(mktemp -u).fleet-build-log
+mkfifo "${_FLEET_BUILD_LOG_FIFO}" 2>/dev/null || true
+
+# Background process: read lines from FIFO and POST to gateway in a loop.
+# We post line-by-line so the dashboard sees progress as it happens rather than
+# waiting for the entire build to finish.
+(
+  while IFS= read -r _bl_line; do
+    printf '%s\n' "${_bl_line}" | curl -s -X POST \
+      -H "Content-Type: text/plain" \
+      --data-binary @- \
+      "${GATEWAY_URL}/_fleet/api/features/${NAME}/build-log" >/dev/null 2>&1 || true
+  done < "${_FLEET_BUILD_LOG_FIFO}"
+) &
+_LOG_STREAMER_PID=$!
+
+# Run docker compose, tee combined stdout+stderr to fail log AND to FIFO.
+# We must write the FIFO last in the tee chain so that a broken pipe to curl
+# doesn't affect _FLEET_FAIL_LOG which the ERR trap depends on.
+if ! docker compose -f "${COMPOSE_FILE}" up -d 2>&1 \
+    | tee -a "${_FLEET_FAIL_LOG}" \
+    | tee "${_FLEET_BUILD_LOG_FIFO}" >/dev/null; then
+  # Close and remove FIFO, wait for streamer before returning failure.
+  exec 3>"${_FLEET_BUILD_LOG_FIFO}" 2>/dev/null && exec 3>&- 2>/dev/null || true
+  rm -f "${_FLEET_BUILD_LOG_FIFO}"
+  wait "${_LOG_STREAMER_PID}" 2>/dev/null || true
   # docker compose already captured into fail log; ERR trap picks it up.
   false
 fi
+
+# Happy path: close FIFO by opening + closing a write-side fd, then wait for streamer.
+exec 3>"${_FLEET_BUILD_LOG_FIFO}" 2>/dev/null && exec 3>&- 2>/dev/null || true
+rm -f "${_FLEET_BUILD_LOG_FIFO}"
+wait "${_LOG_STREAMER_PID}" 2>/dev/null || true
 
 # ─── Transition: building → starting ─────────────────────────────────────────
 gateway_patch_status "${NAME}" "starting"
@@ -498,6 +537,11 @@ while [ ${_HEALTH_ELAPSED} -lt ${_HEALTH_MAX_WAIT} ]; do
   case "${_HEALTH_BODY}" in
     *'"status":"up"'*) _HEALTHY=true; break ;;
   esac
+  # Post health-check progress to build log so dashboard shows status
+  curl -s -X POST \
+    -H "Content-Type: text/plain" \
+    --data-binary "Waiting for health... (${_HEALTH_ELAPSED}s/${_HEALTH_MAX_WAIT}s)" \
+    "${GATEWAY_URL}/_fleet/api/features/${NAME}/build-log" >/dev/null 2>&1 || true
   sleep 2
   _HEALTH_ELAPSED=$((_HEALTH_ELAPSED + 2))
 done
