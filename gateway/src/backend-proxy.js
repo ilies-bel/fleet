@@ -44,9 +44,22 @@ export function createBackendProxy() {
         delete proxyRes.headers['etag'];
         delete proxyRes.headers['last-modified'];
       },
-      error: (_err, _req, res) => {
-        if (!res.headersSent)
-          res.status(502).json({ error: 'Backend container unreachable' });
+      error: (_err, _req, resOrSocket) => {
+        if (resOrSocket && typeof resOrSocket.status === 'function') {
+          if (!resOrSocket.headersSent)
+            resOrSocket.status(502).json({ error: 'Backend container unreachable' });
+          return;
+        }
+        if (resOrSocket && typeof resOrSocket.destroy === 'function') {
+          try {
+            if (resOrSocket.writable) {
+              resOrSocket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+            }
+          } catch {
+            // socket may already be half-closed
+          }
+          resOrSocket.destroy();
+        }
       },
     },
   });

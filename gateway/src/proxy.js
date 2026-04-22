@@ -46,9 +46,24 @@ export function createFeatureProxy() {
         delete proxyRes.headers['etag'];
         delete proxyRes.headers['last-modified'];
       },
-      error: (_err, _req, res) => {
-        if (!res.headersSent)
-          res.status(502).json({ error: 'Active feature container unreachable' });
+      error: (_err, _req, resOrSocket) => {
+        // For WebSocket upgrades, http-proxy passes the raw net.Socket here
+        // instead of an Express response. Detect by the absence of `status`.
+        if (resOrSocket && typeof resOrSocket.status === 'function') {
+          if (!resOrSocket.headersSent)
+            resOrSocket.status(502).json({ error: 'Active feature container unreachable' });
+          return;
+        }
+        if (resOrSocket && typeof resOrSocket.destroy === 'function') {
+          try {
+            if (resOrSocket.writable) {
+              resOrSocket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+            }
+          } catch {
+            // socket may already be half-closed
+          }
+          resOrSocket.destroy();
+        }
       },
     },
   });
