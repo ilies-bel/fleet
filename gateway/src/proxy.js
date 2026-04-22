@@ -17,10 +17,17 @@ import { getActiveFeature, getContainerStatus, updateStatus } from './registry.j
  * only config). We re-add debugProxyErrorsPlugin and proxyEventsPlugin explicitly
  * to retain error propagation and proxy event wiring. See issue #1035.
  *
- * @returns {import('express').RequestHandler}
+ * The returned function also carries an `.upgrade` property so the caller can
+ * wire it to the http.Server 'upgrade' event for WebSocket (HMR) support:
+ *
+ *   const featureProxy = createFeatureProxy();
+ *   server.on('upgrade', featureProxy.upgrade);
+ *
+ * @returns {import('express').RequestHandler & { upgrade: Function }}
  */
 export function createFeatureProxy() {
   const proxy = createProxyMiddleware({
+    ws: true,
     router: (req) => {
       // By the time the router runs, the outer wrapper has already verified the
       // container is running and stored the name on req._fleetFeature.
@@ -46,7 +53,7 @@ export function createFeatureProxy() {
     },
   });
 
-  return async (req, res, next) => {
+  const handler = async (req, res, next) => {
     const resolved = await resolveTarget();
     if (!resolved.ok) {
       return res.status(503).send(resolved.body);
@@ -54,6 +61,29 @@ export function createFeatureProxy() {
     req._fleetFeature = resolved.feature;
     return proxy(req, res, next);
   };
+
+  /**
+   * WebSocket upgrade handler — wire to http.Server 'upgrade' event.
+   * Resolves the active feature, attaches it to the request, then delegates
+   * to http-proxy-middleware's built-in upgrade handler. Falls back to a
+   * minimal HTTP 503 response and socket destroy when no container is running.
+   *
+   * @param {import('http').IncomingMessage} req
+   * @param {import('net').Socket} socket
+   * @param {Buffer} head
+   */
+  const upgrade = async (req, socket, head) => {
+    const resolved = await resolveTarget();
+    if (!resolved.ok) {
+      socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    req._fleetFeature = resolved.feature;
+    proxy.upgrade(req, socket, head);
+  };
+
+  return Object.assign(handler, { upgrade });
 }
 
 /**

@@ -13,10 +13,20 @@ import { resolveTarget, stoppedContainerBody } from './proxy.js';
  * Target resolution is delegated to proxy.js#resolveTarget so both :3000 and
  * :8080 share the same "selected feature, else main, else 503" semantics.
  *
- * @returns {import('express').RequestHandler}
+ * The returned function also carries an `.upgrade` property so the caller can
+ * wire it to the http.Server 'upgrade' event for WebSocket support:
+ *
+ *   const backendProxy = createBackendProxy();
+ *   server.on('upgrade', backendProxy.upgrade);
+ *
+ * The upgrade handler applies the same /backend path rewrite before forwarding
+ * so nginx-in-container routes the WebSocket to the correct backend service.
+ *
+ * @returns {import('express').RequestHandler & { upgrade: Function }}
  */
 export function createBackendProxy() {
   const proxy = createProxyMiddleware({
+    ws: true,
     router: (req) => `http://fleet-${req._fleetFeature}:80`,
     changeOrigin: true,
     ejectPlugins: true,
@@ -41,7 +51,7 @@ export function createBackendProxy() {
     },
   });
 
-  return async (req, res, next) => {
+  const handler = async (req, res, next) => {
     const resolved = await resolveTarget();
     if (!resolved.ok) {
       return res.status(503).send(resolved.body);
@@ -49,6 +59,33 @@ export function createBackendProxy() {
     req._fleetFeature = resolved.feature;
     return proxy(req, res, next);
   };
+
+  /**
+   * WebSocket upgrade handler — wire to http.Server 'upgrade' event.
+   * Applies the /backend path rewrite (same as proxyReq) so nginx in the
+   * container routes the WebSocket connection to the backend service.
+   * Falls back to a minimal HTTP 503 response and socket destroy when no
+   * container is running.
+   *
+   * @param {import('http').IncomingMessage} req
+   * @param {import('net').Socket} socket
+   * @param {Buffer} head
+   */
+  const upgrade = async (req, socket, head) => {
+    const resolved = await resolveTarget();
+    if (!resolved.ok) {
+      socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    req._fleetFeature = resolved.feature;
+    // Apply the /backend path rewrite before forwarding so nginx routes correctly.
+    const incoming = req.url || '/';
+    req.url = '/backend' + (incoming.startsWith('/') ? incoming : '/' + incoming);
+    proxy.upgrade(req, socket, head);
+  };
+
+  return Object.assign(handler, { upgrade });
 }
 
 // Re-exported for symmetry / tests that want to assert on the 503 body.
