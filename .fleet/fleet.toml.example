@@ -36,12 +36,17 @@ db    = 5432    # host-mapped database port (optional; 0 = disabled)
 
 # ─── Services ─────────────────────────────────────────────────────────────────
 # One [[services]] entry per deployable unit.
-# `name`  — logical identifier used in fleet commands (e.g. fleet add <name>)
-# `dir`   — path of the service source tree, relative to project.root
-# `stack` — must match one of the [[stacks]] type values above
-# `port`  — container-internal port the service listens on
-# `build` — command that produces the deployable artefact (run inside the container)
-# `run`   — command that starts the service (run inside the container)
+# `name`      — logical identifier used in fleet commands (e.g. fleet add <name>)
+# `dir`       — path of the service source tree, relative to project.root
+# `stack`     — must match one of the [[stacks]] type values above
+# `port`      — container-internal port the service listens on
+# `build`     — command that produces the deployable artefact (run inside the container)
+# `run`       — command that starts the service (run inside the container)
+# `env_files` — (optional) list of non-tracked env files, relative to this service's `dir`,
+#               to bind-mount READ-ONLY into THIS service's container only and source
+#               automatically before the service process starts.
+#               fleet init auto-discovers .env files under a service dir and writes them here.
+#               For files that must reach ALL containers use [[shared]] instead.
 #
 # JAR NAMING CONVENTION (gradle/spring stacks):
 # Each gradle/spring service's built jar is copied to /home/developer/<service-name>.jar.
@@ -55,7 +60,8 @@ stack = "spring"
 port  = 8081
 build = "mvn package -DskipTests -q"
 # uses /home/developer/<service-name>.jar — fleet copies the built jar there per-service.
-run   = "java -jar /home/developer/backend.jar"
+run       = "java -jar /home/developer/backend.jar"
+env_files = [".env"]   # auto-discovered by fleet init; mounted only into the backend container
 
 [[services]]
 name  = "frontend"
@@ -63,7 +69,8 @@ dir   = "d2r2-frontend"
 stack = "next"
 port  = 3000
 build = "npm run build"
-run   = "npm run dev"
+run       = "npm run dev"
+env_files = [".env.local"]   # auto-discovered by fleet init; mounted only into the frontend container
 # Optional per-service env vars; written as KEY=VALUE lines in feature.env.
 # env = { JIRA_BASE_URL = "http://127.0.0.1:8089" }
 
@@ -98,19 +105,27 @@ run   = "npm run dev"
 # cmd  = "node /app/custom-stub/server.js"
 
 # ─── Shared files ─────────────────────────────────────────────────────────────
-# Optional. Non-tracked env files to bind-mount READ-ONLY into every feature
-# container and source automatically before the service process starts.
+# Optional. Non-tracked env files to bind-mount READ-ONLY into EVERY feature
+# container and source automatically before any service process starts.
 # `path`   — path to the file, relative to project.root (required)
 # `target` — mount point inside the container (optional; default: /app/<path>)
 #
 # The file is sourced with `set -a; . "$target"; set +a` so every variable it
 # exports becomes visible to the service process without extra wiring.
 #
-# fleet init auto-discovers candidate files and appends [[shared]] blocks here.
-
-[[shared]]
-path = "backend/.env"
-
-[[shared]]
-path   = "frontend/.env.local"
-target = "/app/frontend/.env.local"
+# USE [[shared]] FOR: project-root-level files that must reach every container
+#   (e.g. a top-level .env holding shared secrets used by all services).
+#
+# DO NOT USE [[shared]] FOR: per-service .env files — use services[].env_files
+#   instead so the file is mounted only into the relevant service container.
+#   fleet init auto-discovers .env files inside a service dir and writes them
+#   to services[].env_files automatically, NOT here.
+#
+# Example — a root-level .env visible to all containers:
+# [[shared]]
+# path = ".env"
+#
+# Example — with an explicit container mount point:
+# [[shared]]
+# path   = ".env.local"
+# target = "/app/.env.local"
