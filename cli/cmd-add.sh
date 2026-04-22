@@ -342,6 +342,16 @@ if lines:
             fh.write(f"{k}={v}\n")
 PYEOF
 
+# ─── Resolve base image tag ──────────────────────────────────────────────────
+# Use a project-scoped image when the project ships its own Dockerfile override;
+# fall back to the global fleet-feature-base built during fleet init.
+if [ -f "${FLEET_PROJECT_ROOT}/.fleet/Dockerfile.feature-base" ]; then
+  FEATURE_BASE_IMAGE="fleet-feature-base-${FLEET_PROJECT_NAME}"
+  info "[fleet] Using project-local base image: ${FEATURE_BASE_IMAGE}"
+else
+  FEATURE_BASE_IMAGE="fleet-feature-base"
+fi
+
 # ─── Generate docker-compose.yml (ONE service per feature) ───────────────────
 info "Generating .fleet/${NAME}/docker-compose.yml..."
 COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
@@ -349,7 +359,7 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
 {
   echo "services:"
   echo "  ${NAME}:"
-  echo "    image: fleet-feature-base"
+  echo "    image: ${FEATURE_BASE_IMAGE}"
   echo "    container_name: fleet-${NAME}"
   echo "    env_file:"
   echo "      - feature.env"
@@ -399,18 +409,16 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
     fi
   done
   # [[shared]] files from fleet.toml: bind-mount read-only into every container.
-  # Prefer the worktree path when the file exists there (e.g. .env, frontend/.env.local);
-  # fall back to FLEET_PROJECT_ROOT for fleet-only files (mocks, etc.) that only live
-  # in the primary checkout and are never copied into worktrees.
-  # Missing host files in both locations are fatal — fail fast on misconfiguration.
+  # Always mount from WORKTREE_PATH — hard fail if the file is missing.
+  # Worktrees must be fully set up before fleet add.
   while IFS=$'\t' read -r shared_path shared_target; do
     [ -z "${shared_path}" ] && continue
     src="${WORKTREE_PATH}/${shared_path}"
-    if [ ! -f "${src}" ]; then
-      src="${FLEET_PROJECT_ROOT}/${shared_path}"
-    fi
     [ -f "${src}" ] \
-      || error "Shared file missing: ${src}. Create it or remove the [[shared]] entry from fleet.toml."
+      || error "Shared file missing: ${src}
+The worktree must contain all [[shared]] files declared in fleet.toml.
+Copy it from the primary checkout or generate it:
+  cp ${FLEET_PROJECT_ROOT}/${shared_path} ${src}"
     tgt="${shared_target:-/app/${shared_path}}"
     echo "      - ${src}:${tgt}:ro"
   done < <("${_PYBIN}" -c "

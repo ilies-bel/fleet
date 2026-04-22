@@ -491,12 +491,26 @@ discover_env_files "${PROJECT_ROOT}"
 # ─── Build unified base image ─────────────────────────────────────────────────
 # All stacks share a single fleet-feature-base image (Ubuntu 24.04 + Java 21 +
 # Node 20 + PostgreSQL 16 + nginx + supervisord + WireMock jar).
+#
+# If the project ships its own .fleet/Dockerfile.feature-base, build a
+# project-scoped image tagged fleet-feature-base-<project> so that custom
+# toolchains do not collide with the global image used by other projects.
+# The build context always stays FLEET_ROOT so that fleet-owned config files
+# (nginx.conf.tmpl, supervisord.conf, entrypoint.sh) remain COPYable.
 FEATURE_BASE_DOCKERFILE="${FLEET_ROOT}/.fleet/Dockerfile.feature-base"
 if [ ! -f "${FEATURE_BASE_DOCKERFILE}" ]; then
   error "Unified Dockerfile not found at ${FEATURE_BASE_DOCKERFILE}. Re-clone or reinstall qa-fleet."
 fi
-info "Building fleet-feature-base image (done once, reused for all features)..."
-docker build --load -t fleet-feature-base -f "${FEATURE_BASE_DOCKERFILE}" "${FLEET_ROOT}"
+PROJECT_LOCAL_DOCKERFILE="${PWD}/.fleet/Dockerfile.feature-base"
+if [ -f "${PROJECT_LOCAL_DOCKERFILE}" ]; then
+  FEATURE_BASE_IMAGE="fleet-feature-base-${PROJECT_NAME}"
+  info "Building project-local base image ${FEATURE_BASE_IMAGE} (from ${PROJECT_LOCAL_DOCKERFILE})..."
+  docker build --load -t "${FEATURE_BASE_IMAGE}" -f "${PROJECT_LOCAL_DOCKERFILE}" "${FLEET_ROOT}"
+else
+  FEATURE_BASE_IMAGE="fleet-feature-base"
+  info "Building fleet-feature-base image (done once, reused for all features)..."
+  docker build --load -t "${FEATURE_BASE_IMAGE}" -f "${FEATURE_BASE_DOCKERFILE}" "${FLEET_ROOT}"
+fi
 
 # ─── Infra bootstrap ─────────────────────────────────────────────────────────
 

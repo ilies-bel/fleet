@@ -118,6 +118,23 @@ docker build -f Dockerfile.feature-base -t fleet-feature-base .
 
 All existing feature containers continue using the old image. New containers (via `fleet-add.sh`) will use the updated image. Existing containers can be recreated with `fleet-teardown.sh <name>` + `fleet-add.sh <name> <branch>`.
 
+### Per-project base image override
+
+Projects that need a custom toolchain in their base image can ship their own `Dockerfile.feature-base` under `.fleet/`:
+
+```
+<project-root>/
+  .fleet/
+    Dockerfile.feature-base   ← project-local override
+    fleet.toml
+```
+
+When `fleet init` detects `.fleet/Dockerfile.feature-base` in the project root it builds a **project-scoped image** tagged `fleet-feature-base-<project>` instead of the global `fleet-feature-base`. `fleet add` automatically uses the same project-scoped tag — no extra configuration needed.
+
+The build context for both the global and project-local Dockerfiles is always `FLEET_ROOT` (the fleet install directory), so `COPY` instructions that reference fleet-owned config files (e.g. `entrypoint.sh`, `nginx.conf`) continue to work unchanged.
+
+Projects without a `.fleet/Dockerfile.feature-base` continue to use the global `fleet-feature-base` image exactly as before.
+
 ### Modifying the entrypoint
 
 Edit `config/entrypoint.sh`. Since it is volume-mounted into the container (via the base image `COPY`), you need to rebuild the base image for changes to take effect.
