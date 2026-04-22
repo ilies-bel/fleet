@@ -351,7 +351,7 @@ async function runSync(containerName, regenerateSources) {
   steps.push(buildCmd);
   const artifactPath = process.env.BACKEND_ARTIFACT_PATH || '/home/developer/backend.jar';
   steps.push(`ls target/*.jar && cp target/*.jar ${artifactPath}`);
-  steps.push('supervisorctl restart backend');
+  steps.push('supervisorctl restart all');
 
   await dockerExec(containerName, ['bash', '-c', steps.join(' && ')]);
 }
@@ -483,7 +483,7 @@ async function runRebuild(name) {
     // Step 4 — rebuild the image
     log(`[rebuild] Building image ${imageName}...`);
     await runCommand('docker', [
-      'build', '--load',
+      'build', '--load', '--no-cache',
       '-t', imageName,
       '-f', dockerfile,
       FLEET_ROOT,
