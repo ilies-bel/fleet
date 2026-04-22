@@ -566,57 +566,67 @@ docker build --load -t "${FEATURE_BASE_IMAGE}" -f "${PROJECT_LOCAL_DOCKERFILE}" 
 # ─── Infra bootstrap ─────────────────────────────────────────────────────────
 
 # Host runner
-info "Starting host runner..."
-bash "${FLEET_ROOT}/scripts/fleet-host-runner.sh" &
-echo "$!" > "${FLEET_DIR}/host-runner.pid" 2>/dev/null || true
+_runner_pid_file="${FLEET_DIR}/host-runner.pid"
+if [[ -f "${_runner_pid_file}" ]] && kill -0 "$(cat "${_runner_pid_file}")" 2>/dev/null; then
+  info "Host runner already running (pid $(cat "${_runner_pid_file}")) — skipping"
+else
+  info "Starting host runner..."
+  bash "${FLEET_ROOT}/scripts/fleet-host-runner.sh" &
+  echo "$!" > "${_runner_pid_file}" 2>/dev/null || true
+fi
 
 # Docker network
 if docker network inspect fleet-net >/dev/null 2>&1; then
-  warn "Network 'fleet-net' already exists — skipping"
+  info "Network 'fleet-net' already exists — skipping"
 else
   info "Creating Docker network 'fleet-net'..."
   docker network create fleet-net
 fi
 
-# Build gateway image
-info "Building gateway image..."
-docker build \
-  --load \
-  -f "${FLEET_ROOT}/gateway/Dockerfile" \
-  -t fleet-gateway \
-  "${FLEET_ROOT}"
+# Gateway: skip entire build+run block if already healthy
+if curl -sf "http://localhost:${ADMIN_PORT}/_fleet/api/status" >/dev/null 2>&1; then
+  info "Gateway already running and healthy — skipping rebuild"
+else
+  # Build gateway image
+  info "Building gateway image..."
+  docker build \
+    --load \
+    -f "${FLEET_ROOT}/gateway/Dockerfile" \
+    -t fleet-gateway \
+    "${FLEET_ROOT}"
 
-# Stop existing gateway container
-if docker inspect fleet-gateway >/dev/null 2>&1; then
-  warn "Stopping existing gateway container..."
-  docker rm -f fleet-gateway
+  # Stop existing gateway container
+  if docker inspect fleet-gateway >/dev/null 2>&1; then
+    warn "Stopping existing gateway container..."
+    docker rm -f fleet-gateway
+  fi
+
+  # Start gateway
+  info "Starting gateway container..."
+  docker run -d \
+    --name fleet-gateway \
+    --network fleet-net \
+    -e PROXY_PORT="${PROXY_PORT}" \
+    -e ADMIN_PORT="${ADMIN_PORT}" \
+    -e BACKEND_PORT="${BACKEND_PORT:-8080}" \
+    -p "${PROXY_PORT}:${PROXY_PORT}" \
+    -p "${ADMIN_PORT}:${ADMIN_PORT}" \
+    -p "${BACKEND_PORT:-8080}:${BACKEND_PORT:-8080}" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --security-opt label=disable \
+    --restart unless-stopped \
+    fleet-gateway
+
+  # Wait for gateway
+  info "Waiting for gateway to be ready..."
+  gw_attempts=0
+  until curl -sf "http://localhost:${ADMIN_PORT}/_fleet/api/status" >/dev/null 2>&1; do
+    gw_attempts=$((gw_attempts + 1))
+    [ "${gw_attempts}" -ge 30 ] && error "Gateway did not start within 30s"
+    sleep 1
+  done
+  info "Gateway is up."
 fi
-
-# Start gateway
-info "Starting gateway container..."
-docker run -d \
-  --name fleet-gateway \
-  --network fleet-net \
-  -e PROXY_PORT="${PROXY_PORT}" \
-  -e ADMIN_PORT="${ADMIN_PORT}" \
-  -e BACKEND_PORT="${BACKEND_PORT:-8080}" \
-  -p "${PROXY_PORT}:${PROXY_PORT}" \
-  -p "${ADMIN_PORT}:${ADMIN_PORT}" \
-  -p "${BACKEND_PORT:-8080}:${BACKEND_PORT:-8080}" \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --security-opt label=disable \
-  --restart unless-stopped \
-  fleet-gateway
-
-# Wait for gateway
-info "Waiting for gateway to be ready..."
-gw_attempts=0
-until curl -sf "http://localhost:${ADMIN_PORT}/_fleet/api/status" >/dev/null 2>&1; do
-  gw_attempts=$((gw_attempts + 1))
-  [ "${gw_attempts}" -ge 30 ] && error "Gateway did not start within 30s"
-  sleep 1
-done
-info "Gateway is up."
 
 # ─── Install fleet CLI ────────────────────────────────────────────────────────
 fleet_bin="${FLEET_ROOT}/fleet"
