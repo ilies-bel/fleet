@@ -7,7 +7,7 @@ argument-hint: "<name> [--title <title>] [--direct]"
 
 Spin up a named feature container end-to-end: pre-flight checks, invoke `fleet add`, wait for the feature to report healthy via the gateway, then print a structured report.
 
-The CLI no longer takes a branch positional argument — the branch is read from the git worktree resolved via `[project].worktree_template` in `.fleet/fleet.toml`. Pass `--direct` to bind-mount the primary checkout instead of a worktree.
+The CLI no longer takes a branch positional argument — the branch is read from the git worktree resolved via `[project].path` in `.fleet/fleet.toml`. Pass `--direct` to bind-mount the primary checkout instead of a worktree.
 
 ## Prerequisites
 
@@ -86,10 +86,10 @@ fi
 
 ```bash
 if [[ "$DIRECT" != "true" ]]; then
-  WORKTREE_TEMPLATE=$(python3 -c "import sys, tomllib; d=tomllib.load(open('.fleet/fleet.toml','rb')); print(d.get('project', {}).get('worktree_template', ''))" 2>/dev/null)
+  WORKTREE_TEMPLATE=$(python3 -c "import sys, tomllib; d=tomllib.load(open('.fleet/fleet.toml','rb')); print(d.get('project', {}).get('path', ''))" 2>/dev/null)
   if [[ -z "$WORKTREE_TEMPLATE" ]]; then
-    echo "Error: [project].worktree_template is not set in .fleet/fleet.toml."
-    echo "Recovery: add 'worktree_template = \".worktrees/{name}\"' under [project] in fleet.toml, then retry."
+    echo "Error: [project].path is not set in .fleet/fleet.toml."
+    echo "Recovery: add 'path = \".worktrees/{name}\"' under [project] in fleet.toml, then retry."
     exit 1
   fi
   RESOLVED_WT="${WORKTREE_TEMPLATE//\{name\}/$NAME}"
