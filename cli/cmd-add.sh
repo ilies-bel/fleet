@@ -291,7 +291,7 @@ if [ "${HTTP_STATUS}" != "200" ]; then
 
   Remediation:
     Inspect   → curl -sS ${GATEWAY_URL}/_fleet/api/features
-    Abandon   → docker stop fleet-${NAME}
+    Abandon   → docker stop fleet-${FLEET_PROJECT_NAME}-${NAME}
     Retry     → re-run: fleet add ${NAME} --title '${FEATURE_TITLE}'"
 fi
 
@@ -309,7 +309,7 @@ _on_failure() {
     tail_err=$(tail -c 500 "${_FLEET_FAIL_LOG}" 2>/dev/null || true)
     [ -n "${tail_err}" ] && ctx="${ctx}: ${tail_err}"
   fi
-  gateway_patch_status "${NAME}" "failed" "${ctx}" || true
+  gateway_patch_status "${FLEET_PROJECT_NAME}-${NAME}" "failed" "${ctx}" || true
   rm -f "${_FLEET_FAIL_LOG}"
   exit "${rc}"
 }
@@ -411,7 +411,7 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
   echo "services:"
   echo "  ${NAME}:"
   echo "    image: ${FEATURE_BASE_IMAGE}"
-  echo "    container_name: fleet-${NAME}"
+  echo "    container_name: fleet-${FLEET_PROJECT_NAME}-${NAME}"
   echo "    env_file:"
   echo "      - feature.env"
   echo "    volumes:"
@@ -595,7 +595,7 @@ info "Writing .fleet/${NAME}/info.toml..."
 } > "${INFO_TOML}"
 
 # ─── Bring up the single feature container ───────────────────────────────────
-info "Starting container fleet-${NAME}..."
+info "Starting container fleet-${FLEET_PROJECT_NAME}-${NAME}..."
 # Capture build/compose output into _FLEET_FAIL_LOG AND stream to the gateway
 # build-log endpoint so the dashboard can show live progress.
 # The log streaming is non-fatal: if curl or the FIFO fails, docker compose up
@@ -612,7 +612,7 @@ mkfifo "${_FLEET_BUILD_LOG_FIFO}" 2>/dev/null || true
     printf '%s\n' "${_bl_line}" | curl -s -X POST \
       -H "Content-Type: text/plain" \
       --data-binary @- \
-      "${GATEWAY_URL}/_fleet/api/features/${NAME}/build-log" >/dev/null 2>&1 || true
+      "${GATEWAY_URL}/_fleet/api/features/${FLEET_PROJECT_NAME}-${NAME}/build-log" >/dev/null 2>&1 || true
   done < "${_FLEET_BUILD_LOG_FIFO}"
 ) &
 _LOG_STREAMER_PID=$!
@@ -637,17 +637,17 @@ rm -f "${_FLEET_BUILD_LOG_FIFO}"
 wait "${_LOG_STREAMER_PID}" 2>/dev/null || true
 
 # ─── Transition: building → starting ─────────────────────────────────────────
-gateway_patch_status "${NAME}" "starting"
+gateway_patch_status "${FLEET_PROJECT_NAME}-${NAME}" "starting"
 
 # ─── Wait for container health ───────────────────────────────────────────────
 # Uses the gateway's existing /features/:name/health endpoint (HEADs nginx on
 # port 80 inside the container). Times out after 60s → trap fires 'failed'.
-info "Waiting for fleet-${NAME} to become healthy..."
+info "Waiting for fleet-${FLEET_PROJECT_NAME}-${NAME} to become healthy..."
 _HEALTH_MAX_WAIT=60
 _HEALTH_ELAPSED=0
 _HEALTHY=false
 while [ ${_HEALTH_ELAPSED} -lt ${_HEALTH_MAX_WAIT} ]; do
-  _HEALTH_BODY=$(curl -s "${GATEWAY_URL}/_fleet/api/features/${NAME}/health" 2>/dev/null || echo '')
+  _HEALTH_BODY=$(curl -s "${GATEWAY_URL}/_fleet/api/features/${FLEET_PROJECT_NAME}-${NAME}/health" 2>/dev/null || echo '')
   case "${_HEALTH_BODY}" in
     *'"status":"up"'*) _HEALTHY=true; break ;;
   esac
@@ -655,7 +655,7 @@ while [ ${_HEALTH_ELAPSED} -lt ${_HEALTH_MAX_WAIT} ]; do
   curl -s -X POST \
     -H "Content-Type: text/plain" \
     --data-binary "Waiting for health... (${_HEALTH_ELAPSED}s/${_HEALTH_MAX_WAIT}s)" \
-    "${GATEWAY_URL}/_fleet/api/features/${NAME}/build-log" >/dev/null 2>&1 || true
+    "${GATEWAY_URL}/_fleet/api/features/${FLEET_PROJECT_NAME}-${NAME}/build-log" >/dev/null 2>&1 || true
   sleep 2
   _HEALTH_ELAPSED=$((_HEALTH_ELAPSED + 2))
 done
@@ -667,7 +667,7 @@ if [ "${_HEALTHY}" != true ]; then
 fi
 
 # ─── Transition: starting → running ──────────────────────────────────────────
-gateway_patch_status "${NAME}" "running"
+gateway_patch_status "${FLEET_PROJECT_NAME}-${NAME}" "running"
 
 # Happy path reached — tear down the ERR trap so post-summary activity doesn't
 # re-trigger 'failed' if, say, the terminal close causes a SIGPIPE.
@@ -678,12 +678,12 @@ rm -f "${_FLEET_FAIL_LOG}"
 echo ""
 echo -e "${GREEN}┌──────────────────────────────────────────────────────────────┐${RESET}"
 echo -e "${GREEN}│  '${NAME}' started                                           ${RESET}"
-echo -e "${GREEN}│    container : fleet-${NAME}                                 ${RESET}"
+echo -e "${GREEN}│    container : fleet-${FLEET_PROJECT_NAME}-${NAME}           ${RESET}"
 echo -e "${GREEN}│    services  : ${svc_count}                                  ${RESET}"
 if [ "${peer_count}" -gt 0 ]; then
   echo -e "${GREEN}│    peers     : ${peer_count} (internal)                    ${RESET}"
 fi
 echo -e "${GREEN}│  Proxy  → http://localhost:${FLEET_PORT_PROXY}               ${RESET}"
-echo -e "${GREEN}│  Logs   → docker logs -f fleet-${NAME}                       ${RESET}"
-echo -e "${GREEN}│  Status → docker exec fleet-${NAME} supervisorctl status     ${RESET}"
+echo -e "${GREEN}│  Logs   → docker logs -f fleet-${FLEET_PROJECT_NAME}-${NAME} ${RESET}"
+echo -e "${GREEN}│  Status → docker exec fleet-${FLEET_PROJECT_NAME}-${NAME} supervisorctl status ${RESET}"
 echo -e "${GREEN}└──────────────────────────────────────────────────────────────┘${RESET}"
