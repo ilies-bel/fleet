@@ -53,7 +53,7 @@ function FeaturesPage() {
       setActivePreview(prev => {
         if (prev !== null) return prev;
         const gwActive = data.find(f => f.isActive);
-        return gwActive ? gwActive.name : null;
+        return gwActive ? gwActive.key : null;
       });
     } catch {
       // Gateway might be starting up — stay silent, keep polling
@@ -66,15 +66,15 @@ function FeaturesPage() {
     return () => clearInterval(poll);
   }, [fetchFeatures]);
 
-  function handleRemoved(name) {
-    setFeatures(prev => prev.filter(f => f.name !== name));
-    if (activePreview === name) setActivePreview(null);
+  function handleRemoved(key) {
+    setFeatures(prev => prev.filter(f => f.key !== key));
+    if (activePreview === key) setActivePreview(null);
   }
 
-  async function handleActivate(name) {
+  async function handleActivate(key) {
     try {
-      await activateFeature(name);
-      setActivePreview(name);
+      await activateFeature(key);
+      setActivePreview(key);
       setPreviewKey(k => k + 1);
       await fetchFeatures();
     } catch (err) {
@@ -83,19 +83,19 @@ function FeaturesPage() {
     }
   }
 
-  async function handleAdded(name) {
-    setStartingFeatures(prev => new Set([...prev, name]));
+  async function handleAdded(key) {
+    setStartingFeatures(prev => new Set([...prev, key]));
     await fetchFeatures();
     setTimeout(() => {
       setStartingFeatures(prev => {
         const next = new Set(prev);
-        next.delete(name);
+        next.delete(key);
         return next;
       });
     }, 120_000);
   }
 
-  const activeBranch = features.find(f => f.name === activePreview)?.branch ?? '';
+  const activeBranch = features.find(f => f.key === activePreview)?.branch ?? '';
 
   return (
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -106,7 +106,7 @@ function FeaturesPage() {
         onActivate={handleActivate}
         onRemoved={handleRemoved}
         onAdd={() => setShowAddModal(true)}
-        onLogs={name => setLogFeature(name)}
+        onLogs={key => setLogFeature(key)}
       />
       <PreviewFrame
         activePreview={activePreview}

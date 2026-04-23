@@ -3,7 +3,7 @@ import { getHealth, removeFeature, openTerminal, stopFeature, startFeature, sync
 import BuildLogPanel from './BuildLogPanel.jsx';
 
 export default function FeatureCard({ feature, isActive, isPreview, isStarting, onActivate, onRemoved, onLogs }) {
-  const { name, branch, title } = feature;
+  const { key, name, branch, title, project } = feature;
   const [health, setHealth] = useState('checking');
   const [confirming, setConfirming] = useState(false);
   const [activating, setActivating] = useState(false);
@@ -18,7 +18,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
 
     async function check() {
       try {
-        const res = await getHealth(name);
+        const res = await getHealth(key);
         setHealth(res.status);
       } catch {
         setHealth('down');
@@ -31,13 +31,13 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       controller.abort();
       clearInterval(poll);
     };
-  }, [name]);
+  }, [key]);
 
   async function handleActivate() {
     setActivating(true);
     setActionError(null);
     try {
-      await onActivate(name);
+      await onActivate(key);
     } catch (err) {
       setActionError(err.message);
     } finally {
@@ -50,10 +50,10 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     setActionError(null);
     try {
       if (health === 'up') {
-        await stopFeature(name);
+        await stopFeature(key);
         setHealth('down');
       } else {
-        await startFeature(name);
+        await startFeature(key);
         setHealth('starting');
       }
     } catch (err) {
@@ -66,8 +66,8 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   async function handleKill() {
     if (!confirming) { setConfirming(true); return; }
     try {
-      await removeFeature(name);
-      onRemoved(name);
+      await removeFeature(key);
+      onRemoved(key);
     } catch (err) {
       console.error('Kill failed:', err);
     }
@@ -78,8 +78,8 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     setSyncing(true);
     setActionError(null);
     try {
-      await syncFeature(name);
-      onLogs(name);
+      await syncFeature(key);
+      onLogs(key);
     } catch (err) {
       setActionError(err.message);
     } finally {
@@ -92,7 +92,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     setTermDone(false);
     setActionError(null);
     try {
-      await openTerminal(name);
+      await openTerminal(key);
       setTermDone(true);
       setTimeout(() => setTermDone(false), 3000);
     } catch (err) {
@@ -141,16 +141,38 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       onMouseLeave={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'transparent'; }}
     >
       <div style={{
-        color: isActive ? 'var(--color-accent)' : '#eee',
-        fontFamily: 'var(--font-mono)',
-        fontSize: '0.9rem',
-        fontWeight: 700,
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: '0.4rem',
         marginBottom: '0.2rem',
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
+        minWidth: 0,
       }}>
-        {title || name}
+        <div style={{
+          color: isActive ? 'var(--color-accent)' : '#eee',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.9rem',
+          fontWeight: 700,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          minWidth: 0,
+        }}>
+          {title || name}
+        </div>
+        {project && (
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.58rem',
+            color: '#888',
+            background: '#111',
+            border: '1px solid #2a2a2a',
+            padding: '1px 5px',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}>
+            {project}
+          </span>
+        )}
       </div>
       <div style={{
         color: 'var(--color-muted)',
@@ -195,7 +217,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
 
       {/* Build log panel — shown during building, starting, or failed */}
       {(isBuilding || isRegistryStarting || isFailed) && (
-        <BuildLogPanel featureName={name} status={feature.status} />
+        <BuildLogPanel featureKey={key} status={feature.status} />
       )}
 
       {/* Action buttons */}
@@ -243,7 +265,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           {openingTerm ? '[...]' : termDone ? '[DONE]' : '[GEMINI]'}
         </button>
         <button
-          onClick={() => onLogs(name)}
+          onClick={() => onLogs(key)}
           style={btn('accent')}
           title="View container logs"
         >
@@ -252,6 +274,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
         <button
           onClick={handleKill}
           style={btn(confirming ? 'danger-fill' : 'danger')}
+          aria-label={`Kill feature ${title || name}`}
         >
           {confirming ? '[CONFIRM?]' : '[KILL]'}
         </button>
@@ -259,12 +282,15 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       )}
 
       {actionError && (
-        <div style={{
-          color: 'var(--color-danger)',
-          fontFamily: 'var(--font-mono)',
-          fontSize: '0.65rem',
-          marginTop: '0.4rem',
-        }}>
+        <div
+          role="alert"
+          style={{
+            color: 'var(--color-danger)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.65rem',
+            marginTop: '0.4rem',
+          }}
+        >
           {actionError}
         </div>
       )}

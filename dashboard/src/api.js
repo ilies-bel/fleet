@@ -38,36 +38,36 @@ export function addFeature(name, branch) {
 }
 
 /**
- * @param {string} name
+ * @param {string} key  Composite key: "<project>-<name>"
  * @returns {Promise<{ ok: boolean, active: string }>}
  */
-export function activateFeature(name) {
-  return request(`/_fleet/api/features/${name}/activate`, { method: 'POST' });
+export function activateFeature(key) {
+  return request(`/_fleet/api/features/${key}/activate`, { method: 'POST' });
 }
 
 /**
- * @param {string} name
+ * @param {string} key  Composite key: "<project>-<name>"
  * @returns {Promise<object>}
  */
-export function removeFeature(name) {
-  return request(`/_fleet/api/features/${name}`, { method: 'DELETE' });
+export function removeFeature(key) {
+  return request(`/_fleet/api/features/${key}`, { method: 'DELETE' });
 }
 
 /**
- * @param {string} name
+ * @param {string} key  Composite key: "<project>-<name>"
  * @returns {Promise<{ status: 'up'|'down' }>}
  */
-export function getHealth(name) {
-  return request(`/_fleet/api/features/${name}/health`);
+export function getHealth(key) {
+  return request(`/_fleet/api/features/${key}/health`);
 }
 
 /**
  * Open an iTerm2 tab with a shell inside the feature container.
- * @param {string} name
+ * @param {string} key  Composite key: "<project>-<name>"
  * @returns {Promise<{ ok: boolean, containerName: string }>}
  */
-export function openTerminal(name) {
-  return request(`/_fleet/api/features/${name}/open-terminal`, { method: 'POST' });
+export function openTerminal(key) {
+  return request(`/_fleet/api/features/${key}/open-terminal`, { method: 'POST' });
 }
 
 /** @returns {Promise<{ uptimeMs: number, featureCount: number, activeFeature: string|null, nodeVersion: string }>} */
@@ -76,46 +76,50 @@ export function getStatus() {
 }
 
 /**
- * @param {string} name
+ * @param {string} key  Composite key: "<project>-<name>"
  * @param {{ source?: string, tail?: number, since?: number }} opts
  * @returns {Promise<
  *   | { lines: string, fetchedAt: number }
  *   | { sources: { backend: string, nginx: string, postgresql: string, supervisord: string }, fetchedAt: number }
  * >}
  */
-export function getLogs(name, { source = 'backend', tail = 200, since = 0 } = {}) {
+export function getLogs(key, { source = 'backend', tail = 200, since = 0 } = {}) {
   const params = new URLSearchParams({ source, tail });
   // 'since' is only meaningful for per-source streaming (not used by source=all)
   if (source !== 'all' && since) params.set('since', since);
-  return request(`/_fleet/api/features/${name}/logs?${params}`);
-}
-
-/** @param {string} name */
-export function stopFeature(name) {
-  return request(`/_fleet/api/features/${name}/stop`, { method: 'POST' });
-}
-
-/** @param {string} name */
-export function startFeature(name) {
-  return request(`/_fleet/api/features/${name}/start`, { method: 'POST' });
+  return request(`/_fleet/api/features/${key}/logs?${params}`);
 }
 
 /**
- * @param {string} name
+ * @param {string} key  Composite key: "<project>-<name>"
+ */
+export function stopFeature(key) {
+  return request(`/_fleet/api/features/${key}/stop`, { method: 'POST' });
+}
+
+/**
+ * @param {string} key  Composite key: "<project>-<name>"
+ */
+export function startFeature(key) {
+  return request(`/_fleet/api/features/${key}/start`, { method: 'POST' });
+}
+
+/**
+ * @param {string} key  Composite key: "<project>-<name>"
  * @returns {Promise<{ cpuPercent: number, memUsageMB: number, memLimitMB: number, netRxMB: number, netTxMB: number }>}
  */
-export function getStats(name) {
-  return request(`/_fleet/api/features/${name}/stats`);
+export function getStats(key) {
+  return request(`/_fleet/api/features/${key}/stats`);
 }
 
 /**
  * Pull latest code, rebuild and restart the backend.
  * Returns immediately (202) — sync runs in background inside the container.
- * @param {string} name
+ * @param {string} key  Composite key: "<project>-<name>"
  * @param {{ regenerateSources?: boolean }} opts
  * @returns {Promise<{ ok: boolean, message: string }>}
  */
-export function syncFeature(name, { regenerateSources = false } = {}) {
+export function syncFeature(key, { regenerateSources = false } = {}) {
   const params = regenerateSources ? '?regenerateSources=true' : '';
-  return request(`/_fleet/api/features/${name}/sync${params}`, { method: 'POST' });
+  return request(`/_fleet/api/features/${key}/sync${params}`, { method: 'POST' });
 }

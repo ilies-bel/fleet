@@ -21,11 +21,11 @@ export default function FeatureList({ features, activePreview, startingFeatures,
   const isMultiProject = groups.length > 1 || (groups.length === 1 && groups[0][0] !== '');
 
   const cardProps = f => ({
-    key: f.name,
+    key: f.key,
     feature: f,
     isActive: f.isActive,
-    isPreview: activePreview === f.name,
-    isStarting: startingFeatures.has(f.name),
+    isPreview: activePreview === f.key,
+    isStarting: startingFeatures.has(f.key),
     onActivate,
     onRemoved,
     onLogs,
