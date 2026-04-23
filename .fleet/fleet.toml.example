@@ -67,6 +67,7 @@ name  = "backend"
 dir   = "d2r2-backend"
 stack = "spring"
 port  = 8081
+# host_port = 8081   # optional — expose this port directly on the host (bypasses nginx proxy)
 build = "mvn package -DskipTests -q"
 # uses /home/developer/<service-name>.jar — fleet copies the built jar there per-service.
 run       = "java -jar /home/developer/backend.jar"

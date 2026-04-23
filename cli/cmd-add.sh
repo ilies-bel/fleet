@@ -149,6 +149,7 @@ declare -a SVC_WT_ROOTS=()
 declare -a SVC_STACKS=()
 declare -a SVC_RUNS=()
 declare -a SVC_PORTS=()
+declare -a SVC_HOST_PORTS=()
 declare -a SVC_BRANCHES=()
 
 for idx in $(seq 0 $((svc_count - 1))); do
@@ -159,6 +160,7 @@ for idx in $(seq 0 $((svc_count - 1))); do
   svc_stack=$(_at stack)
   svc_run=$(  _at run)
   svc_port=$( _at port)
+  svc_host_port=$(_at host_port)
 
   svc_wt_template=$(_at worktree_template)
 
@@ -193,6 +195,7 @@ Run: git -C ${FLEET_PROJECT_ROOT}/${svc_dir} worktree add ${svc_abs_path} <branc
   SVC_STACKS+=("${svc_stack}")
   SVC_RUNS+=("${svc_run}")
   SVC_PORTS+=("${svc_port}")
+  SVC_HOST_PORTS+=("${svc_host_port}")
   SVC_BRANCHES+=("${branch}")
 done
 
@@ -498,6 +501,17 @@ for svc in services:
   fi
   echo "    networks:"
   echo "      - fleet-net"
+  # Emit host port mappings for services that declare host_port
+  _has_host_ports=false
+  for hp in "${SVC_HOST_PORTS[@]}"; do
+    [ -n "${hp}" ] && { _has_host_ports=true; break; }
+  done
+  if [ "${_has_host_ports}" = true ]; then
+    echo "    ports:"
+    for hp in "${SVC_HOST_PORTS[@]}"; do
+      [ -n "${hp}" ] && echo "      - \"${hp}:${hp}\""
+    done
+  fi
   # label:disable only needed when docker.sock is mounted
   if [ "${_needs_sock}" = true ]; then
     echo "    security_opt:"

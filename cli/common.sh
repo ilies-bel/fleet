@@ -91,7 +91,7 @@ _find_fleet_toml_upwards() {
 #   FLEET_PORT_ADMIN        — ports.admin
 #   FLEET_PORT_DB           — ports.db
 #   FLEET_STACKS_JSON       — [[stacks]] as a JSON array of {type,dockerfile,shared_paths}
-#   FLEET_SERVICES_JSON     — [[services]] as a JSON array of {name,dir,stack,port,build,run,env,env_files}
+#   FLEET_SERVICES_JSON     — [[services]] as a JSON array of {name,dir,stack,port,host_port,build,run,env,env_files}
 #   FLEET_PEERS_JSON        — [[peers]] as a JSON array of {name,type,port,mappings,files}
 #
 # Peer type whitelist: wiremock, static-http, shell.
@@ -176,6 +176,7 @@ out = {
             "dir":               sv.get("dir",""),
             "stack":             sv.get("stack",""),
             "port":              str(sv.get("port","")),
+            "host_port":         str(sv.get("host_port","")),
             "build":             sv.get("build",""),
             "run":               sv.get("run",""),
             "env":               sv.get("env", {}),
