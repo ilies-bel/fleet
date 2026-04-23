@@ -268,11 +268,13 @@ title_json=$("${_PYBIN}" -c "import sys, json; print(json.dumps(sys.argv[1]))" "
 
 # ─── Create feature dir ───────────────────────────────────────────────────────
 mkdir -p "${FEATURE_DIR}"
+write_state "${FEATURE_DIR}" created
 
 # ─── Register EARLY with status='building' ───────────────────────────────────
 # If this initial registration fails, we exit loudly (preserves yn2's intent:
 # the user needs to know when the gateway is unreachable — silently proceeding
 # with docker compose up gives a running container that nothing can route to).
+write_state "${FEATURE_DIR}" building
 info "Registering '${NAME}' with gateway (status=building)..."
 _GW_RESULT=$(gateway_post_full "register-feature" \
   "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${PROJECT_WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"title\":${title_json},\"services\":${services_json},\"status\":\"building\"}")
@@ -309,6 +311,7 @@ _on_failure() {
     tail_err=$(tail -c 500 "${_FLEET_FAIL_LOG}" 2>/dev/null || true)
     [ -n "${tail_err}" ] && ctx="${ctx}: ${tail_err}"
   fi
+  write_state "${FEATURE_DIR}" failed "${ctx}" || true
   gateway_patch_status "${FLEET_PROJECT_NAME}-${NAME}" "failed" "${ctx}" || true
   rm -f "${_FLEET_FAIL_LOG}"
   exit "${rc}"
@@ -637,6 +640,7 @@ rm -f "${_FLEET_BUILD_LOG_FIFO}"
 wait "${_LOG_STREAMER_PID}" 2>/dev/null || true
 
 # ─── Transition: building → starting ─────────────────────────────────────────
+write_state "${FEATURE_DIR}" starting
 gateway_patch_status "${FLEET_PROJECT_NAME}-${NAME}" "starting"
 
 # ─── Wait for container health ───────────────────────────────────────────────
@@ -667,6 +671,7 @@ if [ "${_HEALTHY}" != true ]; then
 fi
 
 # ─── Transition: starting → running ──────────────────────────────────────────
+write_state "${FEATURE_DIR}" up
 gateway_patch_status "${FLEET_PROJECT_NAME}-${NAME}" "running"
 
 # Happy path reached — tear down the ERR trap so post-summary activity doesn't

@@ -258,10 +258,6 @@ if [ ! -f "${APP_ROOT}/.fleet-shared" ] && [ -f "${SHARED_EXAMPLE}" ]; then
   info "Created ${APP_ROOT}/.fleet-shared — edit to list non-tracked files to share with containers"
 fi
 
-# ─── Start host runner (AppleScript relay) ───────────────────────────────────
-info "Starting host runner (osascript relay on port 4001)..."
-bash "${SCRIPT_DIR}/fleet-host-runner.sh"
-
 # ─── Network ─────────────────────────────────────────────────────────────────
 if docker network inspect fleet-net >/dev/null 2>&1; then
   warn "Network 'fleet-net' already exists — skipping"

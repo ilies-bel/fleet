@@ -17,7 +17,6 @@ import FeatureList from '../FeatureList.jsx';
 vi.mock('../../api.js', () => ({
   getHealth: vi.fn().mockResolvedValue({ status: 'up' }),
   removeFeature: vi.fn().mockResolvedValue({}),
-  openTerminal: vi.fn().mockResolvedValue({ ok: true, containerName: 'fleet-my-feature' }),
   stopFeature: vi.fn().mockResolvedValue({}),
   startFeature: vi.fn().mockResolvedValue({}),
   syncFeature: vi.fn().mockResolvedValue({ ok: true, message: 'syncing' }),

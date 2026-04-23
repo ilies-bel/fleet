@@ -628,3 +628,120 @@ write_examples() {
   fi
 }
 export -f write_examples
+
+# ─── write_state ──────────────────────────────────────────────────────────────
+# write_state <feature-dir> <status> [error]
+#
+# Writes (or updates) <feature-dir>/state.json with the current lifecycle
+# status and appends a transitions entry. The write is atomic (tmp → mv).
+#
+# Status vocabulary: created | building | starting | up | failed | stopped
+#
+# Variables consumed from the caller's environment (all exported by cmd-add.sh):
+#   NAME                  — feature name
+#   FLEET_PROJECT_NAME    — project name
+#   FIRST_BRANCH          — feature branch
+#   PROJECT_WORKTREE_PATH — abs path to worktree
+#   FEATURE_TITLE         — human-readable title
+#   FLEET_SERVICES_JSON   — [[services]] JSON array
+#
+# Fails loud (exits non-zero) on any write error.
+write_state() {
+  local feature_dir="${1:-}"
+  local new_status="${2:-}"
+  local error_msg="${3:-}"
+
+  [ -n "${feature_dir}" ] || { echo "[fleet] write_state: feature-dir is required" >&2; return 1; }
+  [ -n "${new_status}"  ] || { echo "[fleet] write_state: status is required" >&2; return 1; }
+
+  local pybin
+  pybin=$(_find_python_with_tomllib 2>/dev/null) \
+    || pybin=$(command -v python3 2>/dev/null) \
+    || { echo "[fleet] write_state: no python3 found" >&2; return 1; }
+
+  local state_file="${feature_dir}/state.json"
+  local tmp_file="${feature_dir}/.state.json.tmp"
+
+  # Collect caller-side variables (may be unset before feature dir creation)
+  local _name="${NAME:-}"
+  local _project="${FLEET_PROJECT_NAME:-}"
+  local _branch="${FIRST_BRANCH:-}"
+  local _wt_path="${PROJECT_WORKTREE_PATH:-}"
+  local _title="${FEATURE_TITLE:-}"
+  local _services_json="${FLEET_SERVICES_JSON:-[]}"
+
+  "$pybin" - \
+    "${state_file}" \
+    "${tmp_file}" \
+    "${new_status}" \
+    "${error_msg}" \
+    "${_name}" \
+    "${_project}" \
+    "${_branch}" \
+    "${_wt_path}" \
+    "${_title}" \
+    "${_services_json}" \
+  <<'PYEOF' || { echo "[fleet] write_state: python script failed" >&2; return 1; }
+import sys, json, os
+from datetime import datetime, timezone
+
+state_file   = sys.argv[1]
+tmp_file     = sys.argv[2]
+new_status   = sys.argv[3]
+error_msg    = sys.argv[4] or None
+name         = sys.argv[5]
+project      = sys.argv[6]
+branch       = sys.argv[7]
+wt_path      = sys.argv[8]
+title        = sys.argv[9]
+services_raw = sys.argv[10]
+
+now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+# Parse services for the compact {name, port} representation
+try:
+    raw_svcs = json.loads(services_raw) if services_raw else []
+    services = [{"name": s["name"], "port": int(s["port"])} for s in raw_svcs if s.get("port")]
+except Exception:
+    services = []
+
+# Load existing state if present; otherwise build from scratch
+if os.path.isfile(state_file):
+    try:
+        with open(state_file, "r") as fh:
+            state = json.load(fh)
+    except Exception:
+        state = {}
+else:
+    state = {}
+
+# Populate static fields (only set them if absent so re-runs are idempotent)
+state.setdefault("schemaVersion", 1)
+state.setdefault("key",           f"{project}-{name}" if project and name else name)
+state.setdefault("project",       project)
+state.setdefault("name",          name)
+state.setdefault("branch",        branch)
+state.setdefault("worktreePath",  wt_path)
+state.setdefault("title",         title)
+state.setdefault("containerName", f"fleet-{project}-{name}" if project and name else f"fleet-{name}")
+state.setdefault("services",      services)
+state.setdefault("transitions",   [])
+
+# Append transition (idempotent — skip if last entry has same status)
+transitions = state["transitions"]
+if not transitions or transitions[-1].get("status") != new_status:
+    transitions.append({"status": new_status, "at": now_iso})
+
+# Update top-level mutable fields
+state["status"]    = new_status
+state["error"]     = error_msg
+state["updatedAt"] = now_iso
+
+# Atomic write
+with open(tmp_file, "w") as fh:
+    json.dump(state, fh, indent=2)
+    fh.write("\n")
+
+os.replace(tmp_file, state_file)
+PYEOF
+}

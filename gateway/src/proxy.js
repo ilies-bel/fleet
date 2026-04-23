@@ -1,5 +1,5 @@
 import { createProxyMiddleware, debugProxyErrorsPlugin, proxyEventsPlugin } from 'http-proxy-middleware';
-import { getActiveFeature, getContainerStatus, updateStatus } from './registry.js';
+import { getActiveFeature, getContainerStatus, getFeature, updateStatus } from './registry.js';
 
 /**
  * Transparent proxy middleware for PROXY_PORT (3000).
@@ -125,6 +125,14 @@ export async function resolveTarget() {
   if (selected) {
     const status = await getContainerStatus(selected);
     if (status === 'running') {
+      // Upgrade stale registry status back to 'up' when Docker reports the
+      // container is actually running. Fixes the inverse of the bug below:
+      // a container marked 'failed' from a previous crashed `fleet add` that
+      // later became healthy was never reverted by the in-memory registry.
+      const entry = getFeature(selected);
+      if (entry && entry.status !== 'up') {
+        updateStatus(selected, 'up', null);
+      }
       return { ok: true, key: selected };
     }
     // Sync registry so the dashboard reflects reality

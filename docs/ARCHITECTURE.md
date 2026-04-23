@@ -152,8 +152,7 @@ fleet/
 └── scripts/            Bash CLI
     ├── fleet-init.sh   One-time setup (network, images, gateway, first feature)
     ├── fleet-add.sh    Spin up a new feature (worktree + compose + register)
-    ├── fleet-teardown.sh  Remove features or entire system
-    └── fleet-host-runner.sh AppleScript relay for iTerm2 (macOS, port 4001)
+    └── fleet-teardown.sh  Remove features or entire system
 ```
 
 ---
@@ -363,10 +362,6 @@ fleet-add.sh <name> <branch> [--direct]
 | `--all` | All features, keep gateway |
 | `--nuke` | Features + gateway + `fleet-net` network + `.fleet-config` |
 
-### `fleet-host-runner.sh`
-
-Tiny Express server (port 4001, host network) that receives `POST /open-terminal` and executes AppleScript to open an iTerm2 tab. Runs as a background process started by `fleet-init.sh`. Required because the gateway runs inside Docker and cannot call AppleScript directly.
-
 ---
 
 ## Volume Strategy
@@ -398,7 +393,6 @@ All endpoints on port 4000. Prefix: `/_fleet/api/`.
 | `POST` | `/features/:name/start` | Start container |
 | `GET` | `/features/:name/stats` | CPU%, memory MB, network MB |
 | `GET` | `/features/:name/logs` | Log lines (`?source=backend\|nginx\|postgresql\|supervisord\|all&tail=200`) |
-| `POST` | `/features/:name/open-terminal` | Open iTerm2 tab (macOS) |
 | `GET` | `/status` | Gateway uptime, feature count, active feature |
 
 Internal (called by scripts):
@@ -430,4 +424,3 @@ Error: `{ error: "message" }` with appropriate HTTP status (404, 409, 502, 503)
 | Peer stubs (wiremock, static-http, shell) | Mock external services without external dependencies; each feature gets isolated peer instances |
 | Node_modules seed volume | Avoids full `npm install` per feature; shares base dependencies across branches |
 | Static Next.js export | No Node.js runtime in production path; nginx serves directly, reduces resource usage |
-| Host runner for iTerm (port 4001) | Gateway sandboxed in Docker; AppleScript must run on host to open iTerm tabs |
