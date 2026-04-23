@@ -15,6 +15,9 @@ cmd="${1:-help}"
 shift || true
 
 case "$cmd" in
+  --write-examples)
+    write_examples "$@"
+    ;;
   init)            exec "$FLEET_ROOT/cli/cmd-init.sh" "$@" ;;
   add)             exec "$FLEET_ROOT/cli/cmd-add.sh" "$@" ;;
   rm)              exec "$FLEET_ROOT/cli/cmd-rm.sh" "$@" ;;
@@ -25,7 +28,29 @@ case "$cmd" in
     command -v node >/dev/null 2>&1 || { echo "[fleet] ERROR: node is required for 'install-claude'" >&2; exit 1; }
     exec node "$FLEET_ROOT/bin/fleet.js" install-claude "$@"
     ;;
-  help|--help|-h) show_help ;;
+  help|--help|-h)
+    # fleet help <cmd> → delegate to that command's --help (single source of truth)
+    if [ -n "${1:-}" ]; then
+      subcmd="$1"
+      shift
+      case "$subcmd" in
+        init)           exec "$FLEET_ROOT/cli/cmd-init.sh" --help ;;
+        add)            exec "$FLEET_ROOT/cli/cmd-add.sh" --help ;;
+        rm)             exec "$FLEET_ROOT/cli/cmd-rm.sh" --help ;;
+        restart)        exec "$FLEET_ROOT/cli/cmd-restart.sh" --help ;;
+        push)           exec "$FLEET_ROOT/cli/cmd-push.sh" --help ;;
+        sync)           exec "$FLEET_ROOT/cli/cmd-sync.sh" --help ;;
+        install-claude)
+          command -v node >/dev/null 2>&1 || { echo "[fleet] ERROR: node is required for 'install-claude'" >&2; exit 1; }
+          exec node "$FLEET_ROOT/bin/fleet.js" install-claude --help
+          ;;
+        *)
+          error "No help available for unknown command: $subcmd\nRun 'fleet help' for the full command list."
+          ;;
+      esac
+    fi
+    show_help
+    ;;
   *)
     error "Unknown command: $cmd\nRun 'fleet help' for usage."
     ;;
