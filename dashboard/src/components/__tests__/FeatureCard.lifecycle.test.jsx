@@ -26,6 +26,7 @@ vi.mock('../../api.js', () => ({
 }));
 
 const makeFeature = (overrides = {}) => ({
+  key: 'proj-test-feature',
   name: 'test-feature',
   branch: 'main',
   project: 'proj',

@@ -31,6 +31,7 @@ vi.mock('../../api.js', () => ({
 
 /** Feature payload that mirrors what the gateway currently returns, extended with services[]. */
 const makeFeature = (overrides = {}) => ({
+  key: 'my-project-my-feature',
   name: 'my-feature',
   branch: 'feature/my-branch',
   project: 'my-project',
@@ -171,9 +172,10 @@ describe('FeatureList — services[] forward-compatibility', () => {
 
   it('renders a list of features each with services[] without errors', () => {
     const features = [
-      makeFeature({ name: 'feature-a', branch: 'feat/a', project: 'proj-1', isActive: true }),
-      makeFeature({ name: 'feature-b', branch: 'feat/b', project: 'proj-1', isActive: false }),
+      makeFeature({ key: 'proj-1-feature-a', name: 'feature-a', branch: 'feat/a', project: 'proj-1', isActive: true }),
+      makeFeature({ key: 'proj-1-feature-b', name: 'feature-b', branch: 'feat/b', project: 'proj-1', isActive: false }),
       makeFeature({
+        key: 'proj-2-feature-c',
         name: 'feature-c',
         branch: 'feat/c',
         project: 'proj-2',
@@ -186,7 +188,7 @@ describe('FeatureList — services[] forward-compatibility', () => {
       render(
         <FeatureList
           features={features}
-          activePreview="feature-a"
+          activePreview="proj-1-feature-a"
           startingFeatures={new Set()}
           onActivate={noopFn}
           onRemoved={noopFn}
@@ -199,8 +201,8 @@ describe('FeatureList — services[] forward-compatibility', () => {
 
   it('groups multi-service features by project correctly', () => {
     const features = [
-      makeFeature({ name: 'alpha', branch: 'main', project: 'project-x', services: [{ name: 'backend' }, { name: 'frontend' }] }),
-      makeFeature({ name: 'beta', branch: 'main', project: 'project-y', services: [{ name: 'app' }] }),
+      makeFeature({ key: 'project-x-alpha', name: 'alpha', branch: 'main', project: 'project-x', services: [{ name: 'backend' }, { name: 'frontend' }] }),
+      makeFeature({ key: 'project-y-beta', name: 'beta', branch: 'main', project: 'project-y', services: [{ name: 'app' }] }),
     ];
 
     render(
