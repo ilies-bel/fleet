@@ -39,6 +39,11 @@ if [ -z "$name" ]; then
   exit 1
 fi
 
+load_fleet_toml
+
+# Composite key used for gateway API calls: <project>-<feature>
+feature_key="${FLEET_PROJECT_NAME}-${name}"
+
 regen=false
 rebuild=false
 for arg in "${@:2}"; do
@@ -47,12 +52,12 @@ for arg in "${@:2}"; do
 done
 
 if [ "$rebuild" = true ]; then
-  url="${GATEWAY_URL}/_fleet/api/features/${name}/rebuild"
+  url="${GATEWAY_URL}/_fleet/api/features/${feature_key}/rebuild"
   info "Rebuilding image for '${name}'..."
   curl -sf -X POST "$url" | python3 -m json.tool
   info "Rebuild started — open logs in dashboard to follow progress"
 else
-  url="${GATEWAY_URL}/_fleet/api/features/${name}/sync"
+  url="${GATEWAY_URL}/_fleet/api/features/${feature_key}/sync"
   [ "$regen" = true ] && url="${url}?regenerateSources=true"
   info "Syncing '${name}'$([ "$regen" = true ] && echo ' (with source regen)' || true)..."
   curl -sf -X POST "$url" | python3 -m json.tool
