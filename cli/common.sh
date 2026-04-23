@@ -539,16 +539,92 @@ show_help() {
   echo ""
   echo "Commands:"
   echo -e "  ${BLUE}init${RESET}                                 Initialize fleet for a project (no args)"
-  echo -e "  ${BLUE}add${RESET}     <name> [--service s=p:i ...]  Start a multi-service feature"
+  echo -e "  ${BLUE}add${RESET}     <name> [--title <t>] [--direct]  Start a multi-service feature"
   echo -e "  ${BLUE}rm${RESET}      <name>|--all|--nuke          Remove feature(s) or everything"
   echo -e "  ${BLUE}restart${RESET} <name>                       Restart a feature container"
   echo -e "  ${BLUE}push${RESET}    <name>                       Push service branches to remote"
-  echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] Pull latest code and rebuild"
-  echo -e "  ${BLUE}install-claude${RESET} [--local|--global] [--force]  Install Claude Code assets (agents, skills, commands)"
-  echo -e "  ${BLUE}install-claude${RESET} [--local|--global] [--force]  Install Claude Code assets (agents, skills, commands)"
-  echo -e "  ${BLUE}help${RESET}                                 Show this help"
+  echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] [--rebuild]  Pull latest code and rebuild"
+  echo -e "  ${BLUE}install-claude${RESET} [--local|--global] [--force]  Install Claude Code assets"
+  echo -e "  ${BLUE}help${RESET}    [<command>]                  Show this help, or help for <command>"
+  echo ""
+  echo "Top-level flags:"
+  echo -e "  ${BLUE}--write-examples${RESET} [--dir <path>] [--force]"
+  echo "                   Copy fleet.toml.example and shared.env.example into <dir>"
+  echo "                   (default: ./.fleet/). Useful for bootstrapping a new project."
   echo ""
   echo "Environment:"
   echo "  FLEET_GATEWAY   Gateway base URL (default: http://localhost:4000)"
   echo ""
+  echo "Examples:"
+  echo "  fleet init                          # set up fleet for the current project"
+  echo "  fleet add my-feature                # start a feature container"
+  echo "  fleet help add                      # show full help for 'fleet add'"
+  echo "  fleet --write-examples              # seed .fleet/ with example config files"
+  echo "  fleet --write-examples --dir ~/tmp  # seed a custom directory"
+  echo ""
 }
+
+# ─── write_examples ───────────────────────────────────────────────────────────
+# write_examples [--dir <path>] [--force]
+# Copies $FLEET_ROOT/.fleet/fleet.toml.example and shared.env.example into
+# the target directory (default: ./.fleet/).  Refuses to overwrite unless
+# --force is passed.  Prints each written path.  Creates the directory if
+# it is missing.
+write_examples() {
+  local target_dir="./.fleet"
+  local force=false
+  local arg
+
+  while [ $# -gt 0 ]; do
+    arg="$1"
+    case "${arg}" in
+      --dir)
+        [ -n "${2:-}" ] || { echo -e "${RED}[fleet] ERROR:${RESET} --dir requires a path argument" >&2; exit 1; }
+        target_dir="$2"
+        shift 2
+        ;;
+      --force)
+        force=true
+        shift
+        ;;
+      *)
+        echo -e "${RED}[fleet] ERROR:${RESET} --write-examples: unknown argument '${arg}'" >&2
+        echo "Usage: fleet --write-examples [--dir <path>] [--force]" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  mkdir -p "${target_dir}"
+
+  local src_toml="${FLEET_ROOT}/.fleet/fleet.toml.example"
+  local src_env="${FLEET_ROOT}/.fleet/shared.env.example"
+  local dst_toml="${target_dir}/fleet.toml.example"
+  local dst_env="${target_dir}/shared.env.example"
+
+  [ -f "${src_toml}" ] || { echo -e "${RED}[fleet] ERROR:${RESET} source not found: ${src_toml}" >&2; exit 1; }
+  [ -f "${src_env}"  ] || { echo -e "${RED}[fleet] ERROR:${RESET} source not found: ${src_env}" >&2; exit 1; }
+
+  local wrote=0 errors=0
+
+  for pair in "${dst_toml}:${src_toml}" "${dst_env}:${src_env}"; do
+    local dst="${pair%%:*}"
+    local src="${pair#*:}"
+    if [ -f "${dst}" ] && [ "${force}" = false ]; then
+      echo -e "${YELLOW}[fleet]${RESET} already exists (use --force to overwrite): ${dst}" >&2
+      errors=$((errors + 1))
+    else
+      cp "${src}" "${dst}"
+      echo -e "${GREEN}[fleet]${RESET} written: ${dst}"
+      wrote=$((wrote + 1))
+    fi
+  done
+
+  if [ "${errors}" -gt 0 ] && [ "${wrote}" -eq 0 ]; then
+    exit 1
+  fi
+  if [ "${errors}" -gt 0 ]; then
+    exit 1
+  fi
+}
+export -f write_examples

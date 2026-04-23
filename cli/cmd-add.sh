@@ -13,13 +13,19 @@ source "${SCRIPT_DIR}/common.sh"
 
 # ─── Usage ───────────────────────────────────────────────────────────────────
 usage() {
+  local exit_code="${1:-1}"
+  echo ""
+  echo -e "${GREEN}fleet add${RESET} — start a multi-service feature container"
+  echo ""
   echo "Usage: fleet add <name> [--title <title>] [--direct]"
   echo ""
-  echo "  name     Feature name (lowercase letters, numbers, hyphens, dots)"
-  echo "  --title  Human-readable title shown in the dashboard (optional)"
-  echo "  --direct Bind-mount the primary project checkout instead of a worktree."
-  echo "           Live-tracks the working copy (including uncommitted changes)."
-  echo "           The container's branch label reflects the primary checkout's HEAD."
+  echo "Arguments:"
+  echo -e "  ${BLUE}<name>${RESET}           Feature name (lowercase letters, numbers, hyphens, dots)"
+  echo ""
+  echo "Flags:"
+  echo -e "  ${BLUE}--title <title>${RESET}  Human-readable title shown in the dashboard (optional)"
+  echo -e "  ${BLUE}--direct${RESET}         Bind-mount the primary project checkout instead of a worktree."
+  echo "                   Live-tracks the working copy (including uncommitted changes)."
   echo ""
   echo "  Starts a single container fleet-<name> that runs every [[services]]"
   echo "  and [[peers]] entry from .fleet/fleet.toml under supervisord."
@@ -32,12 +38,16 @@ usage() {
   echo "  fleet add my-feature"
   echo "  fleet add my-feature --title 'My feature title'"
   echo "  fleet add qa-main --direct"
-  exit 1
+  echo ""
+  exit "${exit_code}"
 }
 
 # ─── Args ────────────────────────────────────────────────────────────────────
-if [ -z "${1:-}" ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-  usage
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  usage 0
+fi
+if [ -z "${1:-}" ]; then
+  usage 1
 fi
 
 NAME="$1"

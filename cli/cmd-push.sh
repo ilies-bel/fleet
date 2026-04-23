@@ -11,6 +11,24 @@ export FLEET_ROOT
 source "${SCRIPT_DIR}/common.sh"
 
 NAME="${1:-}"
+if [ "${NAME}" = "--help" ] || [ "${NAME}" = "-h" ]; then
+  echo ""
+  echo -e "${GREEN}fleet push${RESET} — push service branches to remote"
+  echo ""
+  echo "Usage: fleet push <name>"
+  echo ""
+  echo "Arguments:"
+  echo -e "  ${BLUE}<name>${RESET}   Feature name (must have an active .fleet/<name>/info.toml)"
+  echo ""
+  echo "  Reads each service's repo dir and branch from info.toml, then"
+  echo "  runs 'git push' (setting upstream on the first push if needed)."
+  echo ""
+  echo "Examples:"
+  echo "  fleet push my-feature"
+  echo "  fleet push qa-main"
+  echo ""
+  exit 0
+fi
 if [ -z "$NAME" ]; then
   echo "Usage: fleet push <feature-name>"
   exit 1

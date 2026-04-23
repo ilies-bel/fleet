@@ -71,15 +71,38 @@ remove_feature() {
   info "Removed '${name}'"
 }
 
+# ─── Help ────────────────────────────────────────────────────────────────────
+_rm_help() {
+  local exit_code="${1:-0}"
+  echo ""
+  echo -e "${GREEN}fleet rm${RESET} — remove feature containers"
+  echo ""
+  echo "Usage: fleet rm <name>|--all|--nuke"
+  echo ""
+  echo "Arguments:"
+  echo -e "  ${BLUE}<name>${RESET}   Feature name to remove (containers + .fleet/<name>/ directory)"
+  echo ""
+  echo "Flags:"
+  echo -e "  ${BLUE}--all${RESET}    Remove all features; keep gateway and network running"
+  echo -e "  ${BLUE}--nuke${RESET}   Remove everything: all features, gateway, network, and base images"
+  echo ""
+  echo "Examples:"
+  echo "  fleet rm my-feature"
+  echo "  fleet rm --all"
+  echo "  fleet rm --nuke"
+  echo ""
+  exit "${exit_code}"
+}
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 MODE="${1:-}"
 
+if [ "${MODE}" = "--help" ] || [ "${MODE}" = "-h" ]; then
+  _rm_help 0
+fi
+
 if [ -z "$MODE" ]; then
-  echo "Usage:"
-  echo "  fleet rm <name>      — remove one feature (containers + volumes)"
-  echo "  fleet rm --all       — remove all features, keep gateway running"
-  echo "  fleet rm --nuke      — remove everything including gateway and network"
-  exit 1
+  _rm_help 1
 fi
 
 case "$MODE" in
