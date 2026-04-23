@@ -50,15 +50,54 @@ remove_feature() {
   local compose_file="${feature_dir}/docker-compose.yml"
   local info_toml="${feature_dir}/info.toml"
 
-  info "Removing feature: ${name}"
+  # Read project name from info.toml to build the composite container/gateway key.
+  # Falls back gracefully if info.toml is absent (e.g. partial-add cleanup).
+  local project=""
+  if [ -f "${info_toml}" ]; then
+    local pybin
+    pybin=$(_find_python_with_tomllib 2>/dev/null) || true
+    if [ -n "${pybin}" ]; then
+      project=$("${pybin}" - "${info_toml}" <<'PYEOF' 2>/dev/null || true
+import sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+with open(sys.argv[1], "rb") as fh:
+    data = tomllib.load(fh)
+print(data.get("feature", {}).get("project", ""))
+PYEOF
+      )
+    fi
+  fi
+
+  # Composite container name: fleet-<project>-<name> when project is known,
+  # else legacy fleet-<name> (orphan cleanup path).
+  local container_name
+  if [ -n "${project}" ]; then
+    container_name="fleet-${project}-${name}"
+  else
+    container_name="fleet-${name}"
+    warn "Could not read project from info.toml — attempting legacy container name '${container_name}'"
+  fi
+
+  # Composite gateway key: <project>-<name> when project is known, else bare name.
+  local gateway_key
+  if [ -n "${project}" ]; then
+    gateway_key="${project}-${name}"
+  else
+    gateway_key="${name}"
+  fi
+
+  info "Removing feature: ${name} (container: ${container_name})"
 
   # Deregister from gateway (best-effort)
-  curl -sf -X DELETE "http://localhost:4000/register-feature/${name}" >/dev/null 2>&1 \
+  curl -sf -X DELETE "${GATEWAY_URL}/register-feature/${gateway_key}" >/dev/null 2>&1 \
     || warn "Could not notify gateway (is it running?)"
 
   # Stop the single feature container (mono-container architecture)
-  docker rm -f "fleet-${name}" 2>/dev/null \
-    || warn "Container 'fleet-${name}' not found (already removed?)"
+  docker rm -f "${container_name}" 2>/dev/null \
+    || warn "Container '${container_name}' not found (already removed?)"
 
   # Bring down compose stack (removes any lingering compose-managed resources)
   if [ -f "${compose_file}" ]; then
@@ -157,8 +196,11 @@ case "$MODE" in
     validate_feature_name "${NAME}"
     INFO_TOML="${FLEET_ROOT}/.fleet/${NAME}/info.toml"
 
-    if [ ! -f "${INFO_TOML}" ] && ! docker inspect "fleet-${NAME}" >/dev/null 2>&1; then
-      error "Feature '${NAME}' not found. Run: fleet ls"
+    # Without info.toml we cannot know the composite container name, so we can
+    # only check for the info.toml itself. If it is missing, the feature was
+    # never fully added (or was already removed).
+    if [ ! -f "${INFO_TOML}" ]; then
+      error "Feature '${NAME}' not found (.fleet/${NAME}/info.toml missing). Run: fleet ls"
     fi
 
     remove_feature "${NAME}"

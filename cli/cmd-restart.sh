@@ -20,7 +20,7 @@ if [ "${NAME}" = "--help" ] || [ "${NAME}" = "-h" ]; then
   echo "Arguments:"
   echo -e "  ${BLUE}<name>${RESET}   Feature name (as shown in the dashboard)"
   echo ""
-  echo "  Runs 'docker restart fleet-<name>' and reports the health status"
+  echo "  Runs 'docker restart fleet-<project>-<name>' and reports the health status"
   echo "  from the gateway after a brief settle period."
   echo ""
   echo "Examples:"
@@ -37,10 +37,13 @@ fi
 validate_feature_name "$NAME"
 load_qa_config
 
-info "Restarting container fleet-${NAME}..."
-docker restart "fleet-${NAME}"
+CONTAINER_NAME="fleet-${FLEET_PROJECT_NAME}-${NAME}"
+FEATURE_KEY="${FLEET_PROJECT_NAME}-${NAME}"
+
+info "Restarting container ${CONTAINER_NAME}..."
+docker restart "${CONTAINER_NAME}"
 
 # Quick health confirmation
 sleep 2
-STATUS=$(curl -sf "${GATEWAY_URL}/_fleet/api/features/${NAME}/health" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo '{"status":"unknown"}')
+STATUS=$(curl -sf "${GATEWAY_URL}/_fleet/api/features/${FEATURE_KEY}/health" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo '{"status":"unknown"}')
 info "Restarted. Health: $STATUS"
