@@ -421,9 +421,25 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
         echo "      - ${vol_name}:${TARGET}"
         NODEMOD_VOLS+=("${vol_name}")
       else
-        SOURCE="${SVC_WT_ROOTS[$i]}/${svc_dir_rel}/${shared_path}"
-        [ -d "${SOURCE}" ] \
-          || error "Shared path source missing: ${SOURCE}. Populate it first."
+        # Split on first ':' to separate optional explicit container target
+        path_part="${shared_path%%:*}"
+        target_part="${shared_path#*:}"
+        [ "${target_part}" = "${shared_path}" ] && target_part=""  # no ':' present → empty
+        # Expand leading '~' to $HOME
+        [ "${path_part#\~}" != "${path_part}" ] && path_part="${HOME}${path_part#\~}"
+        if [ "${path_part#/}" != "${path_part}" ]; then
+          # Absolute path
+          SOURCE="${path_part}"
+          TARGET="${target_part:-/app/${SVC_NAMES[$i]}/$(basename "${path_part}")}"
+          [ -e "${SOURCE}" ] \
+            || error "Shared path '${SOURCE}' does not exist on the host."
+        else
+          # Relative path — existing behaviour
+          SOURCE="${SVC_WT_ROOTS[$i]}/${svc_dir_rel}/${path_part}"
+          TARGET="${target_part:-/app/${SVC_NAMES[$i]}/${path_part}}"
+          [ -d "${SOURCE}" ] \
+            || error "Shared path source missing: ${SOURCE}. Populate it first."
+        fi
         echo "      - ${SOURCE}:${TARGET}:cached"
       fi
     done < <(fleet_stack_shared_paths "${svc_stack_type}" 2>/dev/null || true)

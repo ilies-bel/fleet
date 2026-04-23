@@ -28,6 +28,11 @@ db    = 5432    # host-mapped database port (optional; 0 = disabled)
 #                  fleet add auto-runs `npm install` in the primary checkout if
 #                  node_modules is missing; for other stacks it errors and asks
 #                  you to populate the directory manually.
+#                  Absolute host paths and explicit container targets are also supported:
+#                    "/abs/path"              → source=/abs/path, target=/app/<svc>/<basename>
+#                    "/abs/path:/ctr/target"  → source=/abs/path, target=/ctr/target
+#                    "~/foo"                  → ~ expanded to $HOME
+#                  Relative paths remain relative to each service's checkout directory.
 #
 # [[stacks]]
 # type         = "vite"
