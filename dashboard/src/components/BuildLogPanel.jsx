@@ -5,11 +5,11 @@ import { useState, useEffect, useRef } from 'react';
  * BuildLogPanel — collapsible terminal-style panel that streams docker build
  * output for a feature while it is in the building / starting / failed state.
  *
- * The panel opens an SSE connection to GET /_fleet/api/features/:name/build-log.
+ * The panel opens an SSE connection to GET /_fleet/api/features/:key/build-log.
  * On mount the server replays buffered lines so a page refresh mid-build works.
  * Auto-collapses when status transitions to 'running'.
  */
-export default function BuildLogPanel({ featureName, status }) {
+export default function BuildLogPanel({ featureKey, status }) {
   const [lines, setLines] = useState([]);
   const [collapsed, setCollapsed] = useState(false);
   const containerRef = useRef(null);
@@ -21,7 +21,7 @@ export default function BuildLogPanel({ featureName, status }) {
   useEffect(() => {
     if (!isActive) return;
 
-    const es = new EventSource(`/_fleet/api/features/${featureName}/build-log`);
+    const es = new EventSource(`/_fleet/api/features/${featureKey}/build-log`);
 
     es.onmessage = (event) => {
       setLines(prev => {
@@ -35,7 +35,7 @@ export default function BuildLogPanel({ featureName, status }) {
     };
 
     return () => es.close();
-  }, [featureName, status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [featureKey, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom whenever new lines arrive (if user hasn't scrolled up).
   useEffect(() => {

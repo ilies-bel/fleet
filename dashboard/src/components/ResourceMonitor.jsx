@@ -55,12 +55,14 @@ export default function ResourceMonitor() {
     const updated = await Promise.all(
       features.map(async (f) => {
         try {
-          const stats = await getStats(f.name);
-          return { name: f.name, branch: f.branch, status: 'running', ...stats };
+          const stats = await getStats(f.key);
+          return { key: f.key, name: f.name, project: f.project, branch: f.branch, status: 'running', ...stats };
         } catch (err) {
           const stopped = err.message?.includes('not running') || err.message?.includes('409');
           return {
+            key: f.key,
             name: f.name,
+            project: f.project,
             branch: f.branch,
             status: stopped ? 'stopped' : 'error',
             cpuPercent: 0,
@@ -120,6 +122,7 @@ export default function ResourceMonitor() {
           <thead>
             <tr>
               <th style={{ ...th, textAlign: 'left' }}>FEATURE</th>
+              <th style={{ ...th, textAlign: 'left' }}>PROJECT</th>
               <th style={{ ...th, textAlign: 'left' }}>BRANCH</th>
               <th style={{ ...th, textAlign: 'left' }}>STATUS</th>
               <th style={{ ...th, textAlign: 'left' }}>CPU</th>
@@ -136,8 +139,9 @@ export default function ResourceMonitor() {
                   : 'var(--color-danger)';
 
               return (
-                <tr key={r.name} style={{ background: '#0d0d0d' }}>
+                <tr key={r.key} style={{ background: '#0d0d0d' }}>
                   <td style={{ ...col, color: '#eee', fontWeight: 700 }}>{r.name}</td>
+                  <td style={{ ...col, color: '#555', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.project || '—'}</td>
                   <td style={{ ...col, color: 'var(--color-muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch}</td>
                   <td style={{ ...col, color: statusColor }}>{r.status.toUpperCase()}</td>
                   <td style={col}>
