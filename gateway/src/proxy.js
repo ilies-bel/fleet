@@ -4,9 +4,9 @@ import { getActiveFeature, getContainerStatus, updateStatus } from './registry.j
 /**
  * Transparent proxy middleware for PROXY_PORT (3000).
  *
- * Post mono-container pivot each feature runs as a single `fleet-NAME` container
- * with nginx listening on :80. Internal path fan-out to backend/frontend/peers is
- * handled by nginx inside the container — the gateway forwards everything verbatim.
+ * Each feature runs as a single `fleet-<project>-<name>` container with nginx
+ * listening on :80. Internal path fan-out to backend/frontend/peers is handled
+ * by nginx inside the container — the gateway forwards everything verbatim.
  *
  * Returns 503 when no feature is active or the active feature's container is not
  * running (lazy liveness check on every request). Returns 502 on upstream
@@ -34,8 +34,8 @@ export function createFeatureProxy() {
       // WebSocket upgrade listener (which does NOT run the outer handler).
       const resolved = await resolveTarget();
       if (!resolved.ok) return undefined;
-      req._fleetFeature = resolved.feature;
-      return `http://fleet-${resolved.feature}:80`;
+      req._fleetFeature = resolved.key;
+      return `http://fleet-${resolved.key}:80`;
     },
     changeOrigin: true,
     ejectPlugins: true,
@@ -77,7 +77,7 @@ export function createFeatureProxy() {
     if (!resolved.ok) {
       return res.status(503).send(resolved.body);
     }
-    req._fleetFeature = resolved.feature;
+    req._fleetFeature = resolved.key;
     return proxy(req, res, next);
   };
 
@@ -98,7 +98,7 @@ export function createFeatureProxy() {
       socket.destroy();
       return;
     }
-    req._fleetFeature = resolved.feature;
+    req._fleetFeature = resolved.key;
     proxy.upgrade(req, socket, head);
   };
 
@@ -114,7 +114,10 @@ export function createFeatureProxy() {
  *   3. No active feature → try main.
  *   4. main is not running → 503.
  *
- * @returns {Promise<{ ok: true, feature: string } | { ok: false, body: string }>}
+ * The `key` in the success shape is the composite registry key (= the
+ * Docker container name suffix, i.e. `fleet-${key}` is the container).
+ *
+ * @returns {Promise<{ ok: true, key: string } | { ok: false, body: string }>}
  */
 export async function resolveTarget() {
   const selected = getActiveFeature();
@@ -122,16 +125,18 @@ export async function resolveTarget() {
   if (selected) {
     const status = await getContainerStatus(selected);
     if (status === 'running') {
-      return { ok: true, feature: selected };
+      return { ok: true, key: selected };
     }
     // Sync registry so the dashboard reflects reality
     updateStatus(selected, 'stopped');
   }
 
-  // Fallback: try main
+  // Fallback: try main. In the composite-key world there is no project for
+  // the main container — it predates the project namespace. We keep it as the
+  // literal container name `fleet-main` for backward compatibility.
   const mainStatus = await getContainerStatus('main');
   if (mainStatus === 'running') {
-    return { ok: true, feature: 'main' };
+    return { ok: true, key: 'main' };
   }
 
   return { ok: false, body: stoppedContainerBody('main') };
@@ -140,17 +145,17 @@ export async function resolveTarget() {
 /**
  * Build the 503 HTML response body for a stopped/missing container.
  * Exported so tests can assert on the exact HTML without spinning a server.
- * @param {string} name  feature name (without 'fleet-' prefix)
+ * @param {string} key  composite key (without 'fleet-' prefix)
  * @returns {string}
  */
-export function stoppedContainerBody(name) {
+export function stoppedContainerBody(key) {
   return (
     '<html><body style="font-family:monospace;background:#0a0a0a;color:#888;padding:2rem">' +
     '<h2 style="color:#ff4444">// FEATURE CONTAINER NOT RUNNING</h2>' +
-    `<p>Container <code style="color:#ffaa00">fleet-${name}</code> is not running.</p>` +
+    `<p>Container <code style="color:#ffaa00">fleet-${key}</code> is not running.</p>` +
     '<p>Remediation options:</p>' +
     '<ul>' +
-    `<li>Start it: <code style="color:#00ff88">docker start fleet-${name}</code></li>` +
+    `<li>Start it: <code style="color:#00ff88">docker start fleet-${key}</code></li>` +
     '<li>Or activate a different feature at <a href="http://localhost:4000" style="color:#00ff88">localhost:4000</a></li>' +
     '</ul>' +
     '</body></html>'

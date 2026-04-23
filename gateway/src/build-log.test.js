@@ -69,24 +69,32 @@ function request(server, { method, path, body, contentType = 'application/json' 
   });
 }
 
+/** Project name used in all build-log tests. */
+const TEST_PROJECT = 'testproj';
+
 /**
- * Register a feature, then POST a build-log chunk.
+ * Register a feature under TEST_PROJECT, then POST a build-log chunk.
+ * Returns the composite key `${TEST_PROJECT}-${name}`.
  */
 async function registerFeature(server, name) {
   await request(server, {
     method: 'POST',
     path: '/register-feature',
-    body: { name, branch: 'main', status: 'building' },
+    body: { project: TEST_PROJECT, name, branch: 'main', status: 'building' },
   });
+  return `${TEST_PROJECT}-${name}`;
 }
 
 /**
  * POST a plain-text build-log chunk.
+ * @param {http.Server} server
+ * @param {string} key  composite key `${project}-${name}`
+ * @param {string} text
  */
-async function postLog(server, name, text) {
+async function postLog(server, key, text) {
   return request(server, {
     method: 'POST',
-    path: `/_fleet/api/features/${name}/build-log`,
+    path: `/_fleet/api/features/${key}/build-log`,
     body: text,
     contentType: 'text/plain',
   });
@@ -95,8 +103,12 @@ async function postLog(server, name, text) {
 /**
  * Consume the first N SSE data lines from the build-log SSE endpoint, then
  * abort the connection and return those lines.
+ * @param {http.Server} server
+ * @param {string} key  composite key `${project}-${name}`
+ * @param {number} count
+ * @param {number} [timeoutMs]
  */
-function collectSseLines(server, name, count, timeoutMs = 3000) {
+function collectSseLines(server, key, count, timeoutMs = 3000) {
   return new Promise((resolve, reject) => {
     const addr = server.address();
     const port = addr.port;
@@ -109,7 +121,7 @@ function collectSseLines(server, name, count, timeoutMs = 3000) {
     const options = {
       hostname: '127.0.0.1',
       port,
-      path: `/_fleet/api/features/${name}/build-log`,
+      path: `/_fleet/api/features/${key}/build-log`,
       method: 'GET',
     };
 
@@ -158,7 +170,7 @@ describe('Build log endpoints', () => {
   let server;
 
   beforeEach((t, done) => {
-    for (const f of getAll()) unregister(f.name);
+    for (const f of getAll()) unregister(f.key);
     if (server) {
       if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
       server.close(() => {
@@ -185,14 +197,14 @@ describe('Build log endpoints', () => {
   // ── POST /build-log ─────────────────────────────────────────────────────
 
   test('POST /build-log returns 404 for unregistered feature', async () => {
-    const res = await postLog(server, 'ghost', 'hello\n');
+    const res = await postLog(server, 'testproj-ghost', 'hello\n');
     assert.equal(res.status, 404);
     assert.ok(res.body.error);
   });
 
   test('POST /build-log appends lines and returns {ok:true}', async () => {
-    await registerFeature(server, 'foo');
-    const res = await postLog(server, 'foo', 'line one\nline two\n');
+    const key = await registerFeature(server, 'foo');
+    const res = await postLog(server, key, 'line one\nline two\n');
     assert.equal(res.status, 200);
     assert.equal(res.body.ok, true);
   });
@@ -202,17 +214,17 @@ describe('Build log endpoints', () => {
   test('GET /build-log returns 404 for unregistered feature', async () => {
     const res = await request(server, {
       method: 'GET',
-      path: '/_fleet/api/features/ghost/build-log',
+      path: '/_fleet/api/features/testproj-ghost/build-log',
     });
     assert.equal(res.status, 404);
     assert.ok(res.body.error);
   });
 
   test('GET /build-log replays buffered lines via SSE', async () => {
-    await registerFeature(server, 'replay-test');
-    await postLog(server, 'replay-test', 'alpha\nbeta\ngamma\n');
+    const key = await registerFeature(server, 'replay-test');
+    await postLog(server, key, 'alpha\nbeta\ngamma\n');
 
-    const lines = await collectSseLines(server, 'replay-test', 3);
+    const lines = await collectSseLines(server, key, 3);
     assert.equal(lines.length, 3);
     assert.equal(lines[0], 'alpha');
     assert.equal(lines[1], 'beta');
@@ -222,11 +234,11 @@ describe('Build log endpoints', () => {
   // ── ANSI stripping ───────────────────────────────────────────────────────
 
   test('ANSI escape sequences are stripped on POST', async () => {
-    await registerFeature(server, 'ansi-test');
+    const key = await registerFeature(server, 'ansi-test');
     // Post a line with colour codes: ESC[32m = green, ESC[0m = reset
-    await postLog(server, 'ansi-test', '\x1B[32mStep 1/10\x1B[0m\n');
+    await postLog(server, key, '\x1B[32mStep 1/10\x1B[0m\n');
 
-    const lines = await collectSseLines(server, 'ansi-test', 1);
+    const lines = await collectSseLines(server, key, 1);
     assert.equal(lines.length, 1);
     assert.equal(lines[0], 'Step 1/10');
   });
@@ -234,13 +246,13 @@ describe('Build log endpoints', () => {
   // ── Buffer cap ───────────────────────────────────────────────────────────
 
   test('buffer is capped at 500 lines (oldest lines dropped)', async () => {
-    await registerFeature(server, 'cap-test');
+    const key = await registerFeature(server, 'cap-test');
     // Post 600 lines in one chunk
     const chunk = Array.from({ length: 600 }, (_, i) => `line-${i}`).join('\n') + '\n';
-    await postLog(server, 'cap-test', chunk);
+    await postLog(server, key, chunk);
 
     // Collect first batch — should be capped to 500
-    const lines = await collectSseLines(server, 'cap-test', 500, 5000);
+    const lines = await collectSseLines(server, key, 500, 5000);
     assert.ok(lines.length <= 500, `expected ≤500 lines, got ${lines.length}`);
     // Oldest lines (0-99) should have been shifted off; newest should be present
     assert.ok(lines.includes('line-599'), 'last line should be present');
@@ -250,16 +262,16 @@ describe('Build log endpoints', () => {
   // ── Multiple subscribers ─────────────────────────────────────────────────
 
   test('multiple SSE subscribers receive the same data', async () => {
-    await registerFeature(server, 'multi-sub');
+    const key = await registerFeature(server, 'multi-sub');
 
     // Open two SSE connections before posting
-    const p1 = collectSseLines(server, 'multi-sub', 2, 3000);
-    const p2 = collectSseLines(server, 'multi-sub', 2, 3000);
+    const p1 = collectSseLines(server, key, 2, 3000);
+    const p2 = collectSseLines(server, key, 2, 3000);
 
     // Give both connections time to subscribe
     await new Promise(r => setTimeout(r, 50));
 
-    await postLog(server, 'multi-sub', 'msg-a\nmsg-b\n');
+    await postLog(server, key, 'msg-a\nmsg-b\n');
 
     const [l1, l2] = await Promise.all([p1, p2]);
     assert.deepEqual(l1, ['msg-a', 'msg-b']);
