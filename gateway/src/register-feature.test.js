@@ -1,10 +1,8 @@
 /**
  * Integration test: POST /register-feature contract verification
  *
- * Verifies that the gateway tolerates the payload shape the new stack-agnostic
- * `fleet add` will send:
- *   { name, branch, worktreePath, project }
- * where worktreePath is the project root (not a per-service worktree path).
+ * Verifies that the gateway enforces composite `${project}-${name}` keying
+ * and exposes project, name, and key in all responses.
  *
  * Uses Node.js 20+ built-in test runner (node:test) — zero external deps.
  */
@@ -15,9 +13,6 @@ import http from 'node:http';
 import express from 'express';
 import cors from 'cors';
 
-// We import the routers directly — registry.js is a module-level Map so we
-// need to reset state between tests. We do this by calling unregister() and
-// re-importing within the same process (modules are cached, state persists).
 import authRouter from './auth.js';
 import apiRouter from './api.js';
 import { getAll, unregister } from './registry.js';
@@ -76,14 +71,13 @@ function request(server, { method, path, body }) {
 
 // ── Test suite ───────────────────────────────────────────────────────────────
 
-describe('POST /register-feature — stack-agnostic contract', () => {
+describe('POST /register-feature — composite key contract', () => {
   let server;
 
   // Reset registry state before each test so tests are isolated
   beforeEach((t, done) => {
-    // Unregister any features that might linger from previous test
     for (const f of getAll()) {
-      unregister(f.name);
+      unregister(f.key);
     }
 
     if (server) {
@@ -100,14 +94,14 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     else done();
   });
 
-  // ── Happy path: new payload with worktreePath = project root ───────────────
+  // ── Happy path: project + name ────────────────────────────────────────────
 
-  test('accepts {name, branch, worktreePath, project} and echoes name+branch', async () => {
+  test('accepts {project, name, branch, worktreePath} and echoes composite key', async () => {
     const payload = {
+      project: 'my-project',
       name: 'my-feature',
       branch: 'feat/my-feature',
       worktreePath: '/Users/dev/projects/my-project',
-      project: 'my-project',
     };
 
     const res = await request(server, {
@@ -118,16 +112,18 @@ describe('POST /register-feature — stack-agnostic contract', () => {
 
     assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
     assert.equal(res.body.ok, true);
+    assert.equal(res.body.project, 'my-project');
     assert.equal(res.body.name, 'my-feature');
+    assert.equal(res.body.key, 'my-project-my-feature');
     assert.equal(res.body.branch, 'feat/my-feature');
   });
 
-  test('round-trips through GET /_fleet/api/features with all fields', async () => {
+  test('round-trips through GET /_fleet/api/features with project, name, and key', async () => {
     const payload = {
+      project: 'acme',
       name: 'round-trip',
       branch: 'feat/round-trip',
       worktreePath: '/Users/dev/projects/acme',
-      project: 'acme',
     };
 
     await request(server, { method: 'POST', path: '/register-feature', body: payload });
@@ -139,32 +135,56 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     assert.equal(res.body.length, 1);
 
     const feature = res.body[0];
+    assert.equal(feature.project, 'acme');
     assert.equal(feature.name, 'round-trip');
+    assert.equal(feature.key, 'acme-round-trip');
     assert.equal(feature.branch, 'feat/round-trip');
     assert.equal(feature.worktreePath, '/Users/dev/projects/acme');
-    assert.equal(feature.project, 'acme');
     assert.equal(feature.status, 'running', 'default status should be running');
     assert.ok(feature.isActive, 'first registered feature should become active');
     assert.ok(feature.addedAt, 'addedAt timestamp should be present');
   });
 
-  // ── Backward compat: old minimal payload (name + branch only) ─────────────
+  // ── Collision isolation: same name, different project ────────────────────
 
-  test('tolerates minimal payload without worktreePath or project (old CLI)', async () => {
+  test('two projects registering same feature name get distinct keys', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { project: 'alpha', name: 'foo', branch: 'main' },
+    });
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { project: 'beta', name: 'foo', branch: 'main' },
+    });
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    assert.equal(list.body.length, 2, 'both features should be registered independently');
+
+    const keys = list.body.map(f => f.key).sort();
+    assert.deepEqual(keys, ['alpha-foo', 'beta-foo']);
+  });
+
+  // ── Backward compat: project required ────────────────────────────────────
+
+  test('rejects payload without project with 400 and upgrade message', async () => {
     const res = await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'minimal', branch: 'main' },
+      body: { name: 'no-project', branch: 'main' },
     });
 
-    assert.equal(res.status, 200);
-    assert.equal(res.body.ok, true);
-
-    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'minimal');
-    assert.ok(feature, 'feature should be in registry');
-    assert.equal(feature.worktreePath, null, 'worktreePath defaults to null');
-    assert.equal(feature.project, null, 'project defaults to null');
+    assert.equal(res.status, 400);
+    assert.ok(res.body.error, 'should return error message');
+    assert.ok(
+      res.body.error.includes('project required'),
+      `error should mention project required, got: ${res.body.error}`
+    );
+    assert.ok(
+      res.body.error.includes('upgrade'),
+      `error should mention upgrading CLI, got: ${res.body.error}`
+    );
   });
 
   // ── worktreePath semantics: project root (not per-service) ─────────────────
@@ -175,31 +195,31 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'mono-test', branch: 'main', worktreePath: projectRoot },
+      body: { project: 'acme', name: 'mono-test', branch: 'main', worktreePath: projectRoot },
     });
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'mono-test');
+    const feature = list.body.find((f) => f.key === 'acme-mono-test');
     assert.equal(feature.worktreePath, projectRoot, 'path stored verbatim — gateway does not transform it');
   });
 
   // ── Registration idempotency / overwrite ───────────────────────────────────
 
-  test('re-registering same name overwrites the entry', async () => {
+  test('re-registering same composite key overwrites the entry', async () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'idempotent', branch: 'v1', worktreePath: '/old/path', project: 'p1' },
+      body: { project: 'p1', name: 'idempotent', branch: 'v1', worktreePath: '/old/path' },
     });
 
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'idempotent', branch: 'v2', worktreePath: '/new/path', project: 'p2' },
+      body: { project: 'p1', name: 'idempotent', branch: 'v2', worktreePath: '/new/path' },
     });
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const features = list.body.filter((f) => f.name === 'idempotent');
+    const features = list.body.filter((f) => f.key === 'p1-idempotent');
     assert.equal(features.length, 1, 'should not create duplicate entries');
     assert.equal(features[0].branch, 'v2');
     assert.equal(features[0].worktreePath, '/new/path');
@@ -211,7 +231,7 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     const res = await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { branch: 'main' },
+      body: { project: 'myproj', branch: 'main' },
     });
     assert.equal(res.status, 400);
     assert.ok(res.body.error, 'should return error message');
@@ -221,7 +241,7 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     const res = await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'no-branch' },
+      body: { project: 'myproj', name: 'no-branch' },
     });
     assert.equal(res.status, 400);
     assert.ok(res.body.error, 'should return error message');
@@ -236,24 +256,25 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     assert.equal(res.status, 400);
   });
 
-  // ── DELETE /register-feature/:name ────────────────────────────────────────
+  // ── DELETE /register-feature/:key ─────────────────────────────────────────
 
-  test('DELETE /register-feature/:name removes from registry', async () => {
+  test('DELETE /register-feature/:key removes from registry', async () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'to-remove', branch: 'main' },
+      body: { project: 'myproj', name: 'to-remove', branch: 'main' },
     });
 
     const del = await request(server, {
       method: 'DELETE',
-      path: '/register-feature/to-remove',
+      path: '/register-feature/myproj-to-remove',
     });
     assert.equal(del.status, 200);
     assert.equal(del.body.ok, true);
+    assert.equal(del.body.key, 'myproj-to-remove');
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const found = list.body.find((f) => f.name === 'to-remove');
+    const found = list.body.find((f) => f.key === 'myproj-to-remove');
     assert.equal(found, undefined, 'feature should be gone from registry');
   });
 
@@ -263,43 +284,44 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     const res = await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'not-started', branch: 'main', status: 'not_started' },
+      body: { project: 'myproj', name: 'not-started', branch: 'main', status: 'not_started' },
     });
     assert.equal(res.status, 200);
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'not-started');
+    const feature = list.body.find((f) => f.key === 'myproj-not-started');
     assert.equal(feature.status, 'not_started');
     // not_started feature should NOT be auto-activated
     assert.equal(feature.isActive, false, 'not_started feature should not become active');
   });
+
   // ── Title field: optional, persisted, exposed via GET /features ──────────────
 
   test('persists title and exposes it through GET /_fleet/api/features', async () => {
     const res = await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'foo', branch: 'foo', title: 'Hello' },
+      body: { project: 'myproj', name: 'foo', branch: 'foo', title: 'Hello' },
     });
 
     assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
     assert.equal(res.body.ok, true);
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'foo');
+    const feature = list.body.find((f) => f.key === 'myproj-foo');
     assert.ok(feature, 'feature should be in registry');
     assert.equal(feature.title, 'Hello', 'title should be persisted and returned');
   });
 
-  test('title defaults to null when omitted (backward compat)', async () => {
+  test('title defaults to null when omitted', async () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'no-title', branch: 'main' },
+      body: { project: 'myproj', name: 'no-title', branch: 'main' },
     });
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'no-title');
+    const feature = list.body.find((f) => f.key === 'myproj-no-title');
     assert.ok(feature, 'feature should be in registry');
     assert.equal(feature.title, null, 'title should default to null');
   });
@@ -310,11 +332,11 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'build-early', branch: 'main', status: 'building' },
+      body: { project: 'myproj', name: 'build-early', branch: 'main', status: 'building' },
     });
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'build-early');
+    const feature = list.body.find((f) => f.key === 'myproj-build-early');
     assert.equal(feature.status, 'building');
     assert.equal(feature.isActive, false, 'building feature must not be auto-activated (would 502)');
   });
@@ -323,11 +345,11 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'booting', branch: 'main', status: 'starting' },
+      body: { project: 'myproj', name: 'booting', branch: 'main', status: 'starting' },
     });
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'booting');
+    const feature = list.body.find((f) => f.key === 'myproj-booting');
     assert.equal(feature.status, 'starting');
     assert.equal(feature.isActive, false);
   });
@@ -337,6 +359,7 @@ describe('POST /register-feature — stack-agnostic contract', () => {
       method: 'POST',
       path: '/register-feature',
       body: {
+        project: 'myproj',
         name: 'broken',
         branch: 'main',
         status: 'failed',
@@ -345,7 +368,7 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     });
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'broken');
+    const feature = list.body.find((f) => f.key === 'myproj-broken');
     assert.equal(feature.status, 'failed');
     assert.equal(feature.error, 'docker build step 3: ENOENT Dockerfile.feature-base.spring');
     assert.equal(feature.isActive, false);
@@ -355,26 +378,26 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'no-error', branch: 'main' },
+      body: { project: 'myproj', name: 'no-error', branch: 'main' },
     });
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'no-error');
+    const feature = list.body.find((f) => f.key === 'myproj-no-error');
     assert.equal(feature.error, null);
   });
 
-  // ── PATCH /_fleet/api/features/:name/status contract ─────────────────────
+  // ── PATCH /_fleet/api/features/:key/status contract ──────────────────────
 
   test('PATCH status transitions building → starting → running', async () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'lifecycle', branch: 'main', status: 'building' },
+      body: { project: 'myproj', name: 'lifecycle', branch: 'main', status: 'building' },
     });
 
     let res = await request(server, {
       method: 'PATCH',
-      path: '/_fleet/api/features/lifecycle/status',
+      path: '/_fleet/api/features/myproj-lifecycle/status',
       body: { status: 'starting' },
     });
     assert.equal(res.status, 200);
@@ -382,13 +405,13 @@ describe('POST /register-feature — stack-agnostic contract', () => {
 
     res = await request(server, {
       method: 'PATCH',
-      path: '/_fleet/api/features/lifecycle/status',
+      path: '/_fleet/api/features/myproj-lifecycle/status',
       body: { status: 'running' },
     });
     assert.equal(res.status, 200);
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'lifecycle');
+    const feature = list.body.find((f) => f.key === 'myproj-lifecycle');
     assert.equal(feature.status, 'running');
   });
 
@@ -396,18 +419,18 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'crashy', branch: 'main', status: 'building' },
+      body: { project: 'myproj', name: 'crashy', branch: 'main', status: 'building' },
     });
 
     const res = await request(server, {
       method: 'PATCH',
-      path: '/_fleet/api/features/crashy/status',
+      path: '/_fleet/api/features/myproj-crashy/status',
       body: { status: 'failed', error: 'mvn build exited 1' },
     });
     assert.equal(res.status, 200);
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'crashy');
+    const feature = list.body.find((f) => f.key === 'myproj-crashy');
     assert.equal(feature.status, 'failed');
     assert.equal(feature.error, 'mvn build exited 1');
   });
@@ -417,6 +440,7 @@ describe('POST /register-feature — stack-agnostic contract', () => {
       method: 'POST',
       path: '/register-feature',
       body: {
+        project: 'myproj',
         name: 'preserve-err',
         branch: 'main',
         status: 'failed',
@@ -427,13 +451,13 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     // Transition back to building without sending error → original must persist.
     const res = await request(server, {
       method: 'PATCH',
-      path: '/_fleet/api/features/preserve-err/status',
+      path: '/_fleet/api/features/myproj-preserve-err/status',
       body: { status: 'building' },
     });
     assert.equal(res.status, 200);
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'preserve-err');
+    const feature = list.body.find((f) => f.key === 'myproj-preserve-err');
     assert.equal(feature.status, 'building');
     assert.equal(feature.error, 'original build failure', 'error must persist when not explicitly cleared');
   });
@@ -443,6 +467,7 @@ describe('POST /register-feature — stack-agnostic contract', () => {
       method: 'POST',
       path: '/register-feature',
       body: {
+        project: 'myproj',
         name: 'clear-err',
         branch: 'main',
         status: 'failed',
@@ -452,13 +477,13 @@ describe('POST /register-feature — stack-agnostic contract', () => {
 
     const res = await request(server, {
       method: 'PATCH',
-      path: '/_fleet/api/features/clear-err/status',
+      path: '/_fleet/api/features/myproj-clear-err/status',
       body: { status: 'running', error: null },
     });
     assert.equal(res.status, 200);
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
-    const feature = list.body.find((f) => f.name === 'clear-err');
+    const feature = list.body.find((f) => f.key === 'myproj-clear-err');
     assert.equal(feature.error, null, 'explicit null must clear the error');
   });
 
@@ -466,12 +491,12 @@ describe('POST /register-feature — stack-agnostic contract', () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
-      body: { name: 'bad-err-type', branch: 'main' },
+      body: { project: 'myproj', name: 'bad-err-type', branch: 'main' },
     });
 
     const res = await request(server, {
       method: 'PATCH',
-      path: '/_fleet/api/features/bad-err-type/status',
+      path: '/_fleet/api/features/myproj-bad-err-type/status',
       body: { status: 'failed', error: 42 },
     });
     assert.equal(res.status, 400);
