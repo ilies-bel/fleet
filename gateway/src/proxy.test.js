@@ -43,7 +43,7 @@ describe('stoppedContainerBody', () => {
 // ── Registry cleanup helper ───────────────────────────────────────────────────
 
 function clearRegistry() {
-  for (const f of getAll()) unregister(f.name);
+  for (const f of getAll()) unregister(f.key);
 }
 
 // ── Proxy middleware integration tests ───────────────────────────────────────
@@ -87,13 +87,13 @@ describe('proxy middleware — no active feature', () => {
 describe('registry updateStatus side-effect on liveness failure', () => {
   test('updateStatus marks feature as stopped in registry', async () => {
     clearRegistry();
-    register('dying', 'main', null, null, 'running');
-    setActiveFeature('dying');
+    register('testproject', 'dying', 'main', null, 'running');
+    setActiveFeature('testproject-dying');
 
     const { updateStatus, getFeature } = await import('./registry.js');
-    updateStatus('dying', 'stopped');
+    updateStatus('testproject-dying', 'stopped');
 
-    const entry = getFeature('dying');
+    const entry = getFeature('testproject-dying');
     assert.equal(entry.status, 'stopped', 'registry should reflect stopped status');
 
     clearRegistry();

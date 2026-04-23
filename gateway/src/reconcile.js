@@ -6,7 +6,13 @@ const GATEWAY_NAME = 'fleet-gateway';
 /**
  * At startup, scan Docker for all fleet-* containers (running or stopped),
  * start any that are stopped, and register them.
- * Recovers NAME and BRANCH from container env, WORKTREE_PATH from the /app bind mount.
+ *
+ * Container name format: `fleet-<project>-<name>`
+ * Recovers PROJECT_NAME from container env (set by `fleet add`), NAME from env,
+ * BRANCH from env, WORKTREE_PATH from the /app bind mount.
+ *
+ * Containers that lack a PROJECT_NAME env var are skipped with a warning —
+ * they were created by an old CLI that predates composite keys.
  */
 export async function reconcileFromDocker() {
   let containers;
@@ -32,9 +38,6 @@ export async function reconcileFromDocker() {
   let registered = 0;
   for (const container of qaContainers) {
     const containerName = container.Names[0].replace(/^\//, '');
-    const name = containerName.replace(/^fleet-/, '');
-
-    if (isRegistered(name)) continue;
 
     // Start stopped/created containers so the proxy can reach them
     if (container.State !== 'running') {
@@ -57,16 +60,26 @@ export async function reconcileFromDocker() {
         .map(([k, ...rest]) => [k, rest.join('=')])
     );
 
+    const project = env.PROJECT_NAME;
+    if (!project) {
+      console.warn(`[reconcile] skipping ${containerName}: no PROJECT_NAME env — old CLI container`);
+      continue;
+    }
+
+    const name = env.FEATURE_NAME ?? containerName.replace(/^fleet-/, '').replace(new RegExp(`^${project}-`), '');
+    const key = `${project}-${name}`;
+
+    if (isRegistered(key)) continue;
+
     const branch = env.BRANCH ?? 'unknown';
-    const project = env.PROJECT_NAME ?? null;
     const appMount = (info.Mounts ?? []).find(
       (m) => m.Type === 'bind' && m.Destination === '/app'
     );
     const worktreePath = appMount?.Source ?? null;
 
-    register(name, branch, worktreePath, project);
+    register(project, name, branch, worktreePath);
     registered++;
-    console.log(`[reconcile] restored: ${name} (branch: ${branch})`);
+    console.log(`[reconcile] restored: ${key} (branch: ${branch})`);
   }
 
   console.log(`[reconcile] ${registered} feature(s) restored.`);

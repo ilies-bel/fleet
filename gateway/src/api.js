@@ -12,19 +12,21 @@ const startedAt = Date.now();
 /**
  * GET /_fleet/api/features
  * Returns all registered features with isActive flag.
+ * Each entry includes project, name, and key (composite) for dashboard use.
  */
 router.get('/features', (_req, res) => {
   res.json(getAll());
 });
 
 /**
- * GET /_fleet/api/features/:name/health
+ * GET /_fleet/api/features/:key/health
  * HEAD the container's nginx to check if the full stack is responding.
+ * `:key` is the composite `${project}-${name}` string.
  */
-router.get('/features/:name/health', async (req, res) => {
-  const { name } = req.params;
+router.get('/features/:key/health', async (req, res) => {
+  const { key } = req.params;
 
-  if (!getFeature(name)) {
+  if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
 
@@ -32,7 +34,7 @@ router.get('/features/:name/health', async (req, res) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
 
-    const response = await fetch(`http://fleet-${name}:80/`, {
+    const response = await fetch(`http://fleet-${key}:80/`, {
       method: 'HEAD',
       signal: controller.signal,
     });
@@ -45,33 +47,35 @@ router.get('/features/:name/health', async (req, res) => {
 });
 
 /**
- * POST /_fleet/api/features/:name/activate
+ * POST /_fleet/api/features/:key/activate
  * Set the active feature for the transparent proxy (PROXY_PORT).
+ * `:key` is the composite `${project}-${name}` string.
  */
-router.post('/features/:name/activate', (req, res) => {
-  const { name } = req.params;
-  if (!getFeature(name)) {
+router.post('/features/:key/activate', (req, res) => {
+  const { key } = req.params;
+  if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
   try {
-    setActiveFeature(name);
-    res.json({ ok: true, active: name });
+    setActiveFeature(key);
+    res.json({ ok: true, active: key });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
 /**
- * DELETE /_fleet/api/features/:name
+ * DELETE /_fleet/api/features/:key
  * Force-stop and remove the container, then unregister from the registry.
+ * `:key` is the composite `${project}-${name}` string.
  */
-router.delete('/features/:name', async (req, res) => {
-  const { name } = req.params;
-  if (!getFeature(name)) {
+router.delete('/features/:key', async (req, res) => {
+  const { key } = req.params;
+  if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
   try {
-    await removeContainer(`fleet-${name}`);
+    await removeContainer(`fleet-${key}`);
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
     if (err instanceof DockerContainerError && err.status !== 404) {
@@ -79,19 +83,19 @@ router.delete('/features/:name', async (req, res) => {
     }
     // 404 from Docker is fine — container was already gone
   }
-  unregister(name);
+  unregister(key);
   res.json({ ok: true });
 });
 
 /**
- * POST /_fleet/api/features/:name/open-terminal
+ * POST /_fleet/api/features/:key/open-terminal
  * Opens an iTerm2 window on the Mac host in the feature's local worktree.
  * The gateway is Linux so osascript is forwarded to the host runner at
  * host.docker.internal:4001/run-osascript.
  */
-router.post('/features/:name/open-terminal', async (req, res) => {
-  const { name } = req.params;
-  const feature = getFeature(name);
+router.post('/features/:key/open-terminal', async (req, res) => {
+  const { key } = req.params;
+  const feature = getFeature(key);
 
   if (!feature) {
     return res.status(404).json({ error: 'Feature not registered' });
@@ -126,14 +130,14 @@ router.post('/features/:name/open-terminal', async (req, res) => {
 });
 
 /**
- * POST /_fleet/api/features/:name/stop
+ * POST /_fleet/api/features/:key/stop
  * Stop the container without removing it from the registry.
  */
-router.post('/features/:name/stop', async (req, res) => {
-  const { name } = req.params;
-  if (!getFeature(name)) return res.status(404).json({ error: 'Feature not registered' });
+router.post('/features/:key/stop', async (req, res) => {
+  const { key } = req.params;
+  if (!getFeature(key)) return res.status(404).json({ error: 'Feature not registered' });
   try {
-    await stopContainer(`fleet-${name}`);
+    await stopContainer(`fleet-${key}`);
     res.json({ ok: true });
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
@@ -143,14 +147,14 @@ router.post('/features/:name/stop', async (req, res) => {
 });
 
 /**
- * POST /_fleet/api/features/:name/start
+ * POST /_fleet/api/features/:key/start
  * Start a previously stopped container.
  */
-router.post('/features/:name/start', async (req, res) => {
-  const { name } = req.params;
-  if (!getFeature(name)) return res.status(404).json({ error: 'Feature not registered' });
+router.post('/features/:key/start', async (req, res) => {
+  const { key } = req.params;
+  if (!getFeature(key)) return res.status(404).json({ error: 'Feature not registered' });
   try {
-    await startContainer(`fleet-${name}`);
+    await startContainer(`fleet-${key}`);
     res.json({ ok: true });
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
@@ -160,14 +164,14 @@ router.post('/features/:name/start', async (req, res) => {
 });
 
 /**
- * GET /_fleet/api/features/:name/stats
+ * GET /_fleet/api/features/:key/stats
  * Returns a one-shot resource snapshot: CPU %, memory, network I/O.
  */
-router.get('/features/:name/stats', async (req, res) => {
-  const { name } = req.params;
-  if (!getFeature(name)) return res.status(404).json({ error: 'Feature not registered' });
+router.get('/features/:key/stats', async (req, res) => {
+  const { key } = req.params;
+  if (!getFeature(key)) return res.status(404).json({ error: 'Feature not registered' });
   try {
-    const stats = await getContainerStats(`fleet-${name}`);
+    const stats = await getContainerStats(`fleet-${key}`);
     res.json(stats);
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
@@ -180,23 +184,23 @@ router.get('/features/:name/stats', async (req, res) => {
 });
 
 /**
- * GET /_fleet/api/features/:name/logs?source=backend&tail=200&since=0
+ * GET /_fleet/api/features/:key/logs?source=backend&tail=200&since=0
  * Stream the last N lines of a supervisor log file or combined Docker logs.
  * source: backend | nginx | postgresql | supervisord | all
  */
 const ALLOWED_SOURCES = new Set(['backend', 'nginx', 'postgresql', 'supervisord']);
 
-router.get('/features/:name/logs', async (req, res) => {
-  const { name } = req.params;
+router.get('/features/:key/logs', async (req, res) => {
+  const { key } = req.params;
 
-  if (!getFeature(name)) {
+  if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
 
   const source = req.query.source || 'backend';
   const tail = Math.min(Math.max(parseInt(req.query.tail) || 200, 1), 2000);
   const since = Math.max(parseInt(req.query.since) || 0, 0);
-  const containerName = `fleet-${name}`;
+  const containerName = `fleet-${key}`;
 
   try {
     if (source === 'all') {
@@ -251,7 +255,7 @@ router.post('/main/ensure', async (_req, res) => {
 });
 
 /**
- * GET /_fleet/api/doctor/:name
+ * GET /_fleet/api/doctor/:key
  * Defense-in-depth check that no internal-only supervisord peer ports
  * (jira-proxy 8081, wiremock 8089) are accidentally published to the host.
  *
@@ -262,17 +266,17 @@ router.post('/main/ensure', async (_req, res) => {
  */
 const FORBIDDEN_INTERNAL_PORTS = [8081, 8089];
 
-router.get('/doctor/:name', async (req, res) => {
-  const { name } = req.params;
+router.get('/doctor/:key', async (req, res) => {
+  const { key } = req.params;
   try {
-    const info = await inspectContainer(`fleet-${name}`);
-    if (!info) return res.status(404).json({ error: `Container fleet-${name} not found` });
+    const info = await inspectContainer(`fleet-${key}`);
+    if (!info) return res.status(404).json({ error: `Container fleet-${key} not found` });
 
     const ports = info.NetworkSettings?.Ports ?? {};
     const exposed = [];
-    for (const [key, bindings] of Object.entries(ports)) {
-      // key is "8081/tcp" etc.
-      const portNum = parseInt(key.split('/')[0], 10);
+    for (const [portKey, bindings] of Object.entries(ports)) {
+      // portKey is "8081/tcp" etc.
+      const portNum = parseInt(portKey.split('/')[0], 10);
       if (!FORBIDDEN_INTERNAL_PORTS.includes(portNum)) continue;
       if (Array.isArray(bindings) && bindings.length > 0) {
         exposed.push(portNum);
@@ -298,24 +302,24 @@ router.get('/status', (_req, res) => {
 });
 
 /**
- * POST /_fleet/api/features/:name/sync
+ * POST /_fleet/api/features/:key/sync
  * Pull latest code, rebuild backend, restart via supervisord.
  * Accepts ?regenerateSources=true to also regenerate jOOQ DSL after Liquibase migrations.
  * Returns immediately (202) — the sync runs inside the container in the background.
  */
-router.post('/features/:name/sync', async (req, res) => {
-  const { name } = req.params;
-  if (!getFeature(name)) {
+router.post('/features/:key/sync', async (req, res) => {
+  const { key } = req.params;
+  if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
 
   const regenerateSources = req.query.regenerateSources === 'true';
-  const containerName = `fleet-${name}`;
+  const containerName = `fleet-${key}`;
 
   res.json({ ok: true, message: 'Sync started — check logs for progress' });
 
   runSync(containerName, regenerateSources).catch(err => {
-    console.error(`[sync] ${name}: ${err.message}`);
+    console.error(`[sync] ${key}: ${err.message}`);
   });
 });
 
@@ -357,20 +361,20 @@ async function runSync(containerName, regenerateSources) {
 }
 
 /**
- * POST /_fleet/api/features/:name/rebuild
+ * POST /_fleet/api/features/:key/rebuild
  * Rebuild the Docker base image and recreate the container from scratch.
  * Returns immediately (202) — the rebuild runs in the background.
  */
-router.post('/features/:name/rebuild', async (req, res) => {
-  const { name } = req.params;
-  if (!getFeature(name)) {
+router.post('/features/:key/rebuild', async (req, res) => {
+  const { key } = req.params;
+  if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
 
   res.json({ ok: true, message: 'Rebuild started — check logs for progress' });
 
-  runRebuild(name).catch(err => {
-    console.error(`[rebuild] ${name}: ${err.message}`);
+  runRebuild(key).catch(err => {
+    console.error(`[rebuild] ${key}: ${err.message}`);
   });
 });
 
@@ -380,17 +384,17 @@ router.post('/features/:name/rebuild', async (req, res) => {
  *
  * Sequence:
  *   1. PATCH status → 'building'
- *   2. docker stop fleet-<name>        (ignore "already stopped")
+ *   2. docker stop fleet-<key>        (ignore "already stopped")
  *   3. docker build --load -t <image> -f <dockerfile> <FLEET_ROOT>
  *   4. docker compose -f <composefile> up -d
  *   5. PATCH status → 'starting'
- *   6. Poll /_fleet/api/features/:name/health every 2s, up to 60s
+ *   6. Poll /_fleet/api/features/:key/health every 2s, up to 60s
  *   7. On healthy → PATCH status 'running'; on timeout → PATCH 'failed'
  *
- * @param {string} name  feature name (without the 'fleet-' prefix)
+ * @param {string} key  composite key (without the 'fleet-' prefix)
  * @returns {Promise<void>}
  */
-async function runRebuild(name) {
+async function runRebuild(key) {
   const FLEET_PROJECT_ROOT = process.env.FLEET_PROJECT_ROOT;
   const FLEET_ROOT = process.env.FLEET_ROOT;
 
@@ -399,13 +403,13 @@ async function runRebuild(name) {
   }
 
   // Step 1 — mark as building (resets build-log ring buffer)
-  updateStatus(name, 'building', null);
+  updateStatus(key, 'building', null);
 
-  const log = (line) => appendBuildLog(name, line);
-  log(`[rebuild] Starting rebuild for '${name}'`);
+  const log = (line) => appendBuildLog(key, line);
+  log(`[rebuild] Starting rebuild for '${key}'`);
 
   // Step 2 — resolve paths
-  const composeFile = path.join(FLEET_PROJECT_ROOT, '.fleet', name, 'docker-compose.yml');
+  const composeFile = path.join(FLEET_PROJECT_ROOT, '.fleet', key, 'docker-compose.yml');
 
   // Extract image name from compose file (line like `    image: fleet-feature-base-myproject`)
   let imageName;
@@ -417,7 +421,7 @@ async function runRebuild(name) {
     }
     imageName = imageMatch[1].trim();
   } catch (err) {
-    updateStatus(name, 'failed', `rebuild: could not read compose file: ${err.message}`);
+    updateStatus(key, 'failed', `rebuild: could not read compose file: ${err.message}`);
     throw err;
   }
 
@@ -428,7 +432,7 @@ async function runRebuild(name) {
 
   if (!fs.existsSync(dockerfile)) {
     const msg = `rebuild: Dockerfile not found at ${projectDockerfile} or ${globalDockerfile}`;
-    updateStatus(name, 'failed', msg);
+    updateStatus(key, 'failed', msg);
     throw new Error(msg);
   }
 
@@ -472,9 +476,9 @@ async function runRebuild(name) {
 
   try {
     // Step 3 — stop the running container (ignore error if already stopped/missing)
-    log(`[rebuild] Stopping fleet-${name}...`);
+    log(`[rebuild] Stopping fleet-${key}...`);
     try {
-      await stopContainer(`fleet-${name}`);
+      await stopContainer(`fleet-${key}`);
     } catch {
       // Container may already be stopped or not exist — proceed regardless
       log(`[rebuild] Container not running or not found — proceeding`);
@@ -496,7 +500,7 @@ async function runRebuild(name) {
     ]);
 
     // Step 6 — transition to starting
-    updateStatus(name, 'starting', null);
+    updateStatus(key, 'starting', null);
     log(`[rebuild] Container started — waiting for health...`);
 
     // Step 7 — poll health endpoint
@@ -511,7 +515,7 @@ async function runRebuild(name) {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
-        const response = await fetch(`http://fleet-${name}:80/`, {
+        const response = await fetch(`http://fleet-${key}:80/`, {
           method: 'HEAD',
           signal: controller.signal,
         });
@@ -527,19 +531,19 @@ async function runRebuild(name) {
     }
 
     if (healthy) {
-      updateStatus(name, 'running', null);
-      log(`[rebuild] Rebuild complete — '${name}' is running`);
+      updateStatus(key, 'running', null);
+      log(`[rebuild] Rebuild complete — '${key}' is running`);
     } else {
       const msg = `Health wait timed out after ${HEALTH_MAX_MS / 1000}s`;
-      updateStatus(name, 'failed', msg);
+      updateStatus(key, 'failed', msg);
       log(`[rebuild] ERROR: ${msg}`);
       throw new Error(msg);
     }
   } catch (err) {
     // Guard against double-setting failed (health timeout already set it above)
-    const current = getFeature(name);
+    const current = getFeature(key);
     if (current && current.status !== 'failed') {
-      updateStatus(name, 'failed', err.message);
+      updateStatus(key, 'failed', err.message);
     }
     log(`[rebuild] ERROR: ${err.message}`);
     throw err;
@@ -547,7 +551,7 @@ async function runRebuild(name) {
 }
 
 /**
- * PATCH /_fleet/api/features/:name/status
+ * PATCH /_fleet/api/features/:key/status
  * Update the lifecycle status of a feature — used by `fleet add` to emit
  * building → starting → running transitions, or failed on an error.
  *
@@ -556,10 +560,10 @@ async function runRebuild(name) {
  *     (transitions away from 'failed' do not need to clear it explicitly).
  *     Pass null to clear. Pass a string (typically with status='failed').
  */
-router.patch('/features/:name/status', (req, res) => {
-  const { name } = req.params;
+router.patch('/features/:key/status', (req, res) => {
+  const { key } = req.params;
   const { status, error } = req.body;
-  if (!getFeature(name)) {
+  if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
   if (!status || typeof status !== 'string') {
@@ -569,38 +573,38 @@ router.patch('/features/:name/status', (req, res) => {
     return res.status(400).json({ error: 'error field must be a string or null' });
   }
   try {
-    updateStatus(name, status, error);
-    res.json({ ok: true, name, status });
+    updateStatus(key, status, error);
+    res.json({ ok: true, key, status });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
 /**
- * POST /_fleet/api/features/:name/build-log
+ * POST /_fleet/api/features/:key/build-log
  * Accepts a plain-text chunk (Content-Type: text/plain) and appends it to the
  * in-memory ring buffer for the feature. Called by `fleet add` to stream
  * docker compose build output into the gateway for SSE fan-out.
  */
-router.post('/features/:name/build-log', express.text({ type: 'text/plain', limit: '1mb' }), (req, res) => {
-  const { name } = req.params;
-  if (!getFeature(name)) {
+router.post('/features/:key/build-log', express.text({ type: 'text/plain', limit: '1mb' }), (req, res) => {
+  const { key } = req.params;
+  if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
   const body = typeof req.body === 'string' ? req.body : '';
-  if (body.length > 0) appendBuildLog(name, body);
+  if (body.length > 0) appendBuildLog(key, body);
   res.json({ ok: true });
 });
 
 /**
- * GET /_fleet/api/features/:name/build-log
+ * GET /_fleet/api/features/:key/build-log
  * Server-Sent Events stream of build log lines for a feature.
  * Replays all buffered lines on connect, then pushes new lines as they arrive.
  * Sends a keepalive comment every 15 s to prevent proxy timeouts.
  */
-router.get('/features/:name/build-log', (req, res) => {
-  const { name } = req.params;
-  if (!getFeature(name)) {
+router.get('/features/:key/build-log', (req, res) => {
+  const { key } = req.params;
+  if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
 
@@ -610,7 +614,7 @@ router.get('/features/:name/build-log', (req, res) => {
   res.flushHeaders();
 
   // Replay buffered lines
-  const existing = getBuildLog(name);
+  const existing = getBuildLog(key);
   if (existing && existing.lines.length > 0) {
     for (const line of existing.lines) {
       res.write(`data: ${line}\n\n`);
@@ -618,7 +622,7 @@ router.get('/features/:name/build-log', (req, res) => {
   }
 
   // Subscribe to new lines
-  const unsubscribe = subscribeBuildLog(name, (line) => {
+  const unsubscribe = subscribeBuildLog(key, (line) => {
     res.write(`data: ${line}\n\n`);
   });
 
