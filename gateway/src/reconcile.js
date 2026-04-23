@@ -77,9 +77,16 @@ export async function reconcileFromDocker() {
     );
     const worktreePath = appMount?.Source ?? null;
 
-    register(project, name, branch, worktreePath);
+    // Derive lifecycle status from live Docker state rather than defaulting
+    // to 'running'. A container that exited during a crashed `fleet add` must
+    // NOT be reported as running — that was the root cause of the "FAILED
+    // shows UP (and vice versa) after gateway restart" bug.
+    const isRunning = info.State?.Running === true;
+    const status = isRunning ? 'up' : 'stopped';
+
+    register(project, name, branch, worktreePath, status);
     registered++;
-    console.log(`[reconcile] restored: ${key} (branch: ${branch})`);
+    console.log(`[reconcile] restored: ${key} (branch: ${branch}, status: ${status})`);
   }
 
   console.log(`[reconcile] ${registered} feature(s) restored.`);

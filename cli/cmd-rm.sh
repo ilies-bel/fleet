@@ -178,16 +178,6 @@ case "$MODE" in
     docker network rm fleet-net 2>/dev/null && info "Network 'fleet-net' removed" \
       || warn "Network not found"
 
-    # Stop host-runner if PID file exists at .fleet/host-runner.pid
-    RUNNER_PID_FILE="${FLEET_ROOT}/.fleet/host-runner.pid"
-    if [ -f "${RUNNER_PID_FILE}" ]; then
-      RUNNER_PID=$(cat "${RUNNER_PID_FILE}")
-      kill "${RUNNER_PID}" 2>/dev/null \
-        && info "Host runner stopped (PID ${RUNNER_PID})" \
-        || warn "Host runner not running"
-      rm -f "${RUNNER_PID_FILE}"
-    fi
-
     info "Nuke complete."
     ;;
 

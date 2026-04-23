@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
-import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
+import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
 import { dockerExec, dockerLogs, stopContainer, startContainer, removeContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 import { ensureMainRunning } from './lifecycle.js';
 
@@ -85,48 +85,6 @@ router.delete('/features/:key', async (req, res) => {
   }
   unregister(key);
   res.json({ ok: true });
-});
-
-/**
- * POST /_fleet/api/features/:key/open-terminal
- * Opens an iTerm2 window on the Mac host in the feature's local worktree.
- * The gateway is Linux so osascript is forwarded to the host runner at
- * host.docker.internal:4001/run-osascript.
- */
-router.post('/features/:key/open-terminal', async (req, res) => {
-  const { key } = req.params;
-  const feature = getFeature(key);
-
-  if (!feature) {
-    return res.status(404).json({ error: 'Feature not registered' });
-  }
-
-  const { worktreePath } = feature;
-  if (!worktreePath) {
-    return res.status(400).json({ error: 'No worktree path recorded for this feature — re-register with fleet add' });
-  }
-
-  const script = [
-    'tell application "iTerm2"',
-    '  activate',
-    `  set newWindow to (create window with default profile)`,
-    `  tell current session of newWindow`,
-    `    write text "cd '${worktreePath}' && claude"`,
-    '  end tell',
-    'end tell',
-  ].join('\n');
-
-  try {
-    const response = await fetch('http://host.docker.internal:4001/run-osascript', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script }),
-    });
-    if (!response.ok) throw new Error(`Host runner returned HTTP ${response.status}`);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(502).json({ error: `Host runner unreachable: ${err.message}` });
-  }
 });
 
 /**
@@ -290,6 +248,60 @@ router.get('/doctor/:key', async (req, res) => {
 });
 
 /**
+ * POST /_fleet/api/features/:key/reconcile
+ * Re-derive the lifecycle status of a single feature from live Docker state
+ * plus nginx health probe. Fixes the "FAILED when actually UP" and inverse
+ * drifts by overwriting the registry with ground truth.
+ *
+ * Rules:
+ *   - Docker says running AND nginx HEAD succeeds → 'up' (clears error).
+ *   - Docker says running AND nginx HEAD fails    → leave current lifecycle
+ *     intact if it's 'building'/'starting' (still booting); otherwise 'starting'.
+ *   - Docker says exited/missing                   → 'stopped'.
+ */
+router.post('/features/:key/reconcile', async (req, res) => {
+  const { key } = req.params;
+  const feature = getFeature(key);
+  if (!feature) return res.status(404).json({ error: 'Feature not registered' });
+
+  try {
+    const containerStatus = await getContainerStatus(key);
+    if (containerStatus !== 'running') {
+      updateStatus(key, 'stopped');
+      return res.json({ ok: true, key, status: 'stopped' });
+    }
+
+    // Container is running — probe nginx on port 80 before declaring 'up'.
+    let healthy = false;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const response = await fetch(`http://fleet-${key}:80/`, { method: 'HEAD', signal: controller.signal });
+      clearTimeout(timeout);
+      healthy = response.ok;
+    } catch {
+      healthy = false;
+    }
+
+    if (healthy) {
+      updateStatus(key, 'up', null);
+      return res.json({ ok: true, key, status: 'up' });
+    }
+
+    // Container running but nginx not responding yet. Preserve transient
+    // lifecycle states; downgrade anything else to 'starting'.
+    const current = feature.status;
+    if (current !== 'building' && current !== 'starting') {
+      updateStatus(key, 'starting');
+    }
+    res.json({ ok: true, key, status: 'starting' });
+  } catch (err) {
+    if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /_fleet/api/status
  */
 router.get('/status', (_req, res) => {
@@ -389,7 +401,7 @@ router.post('/features/:key/rebuild', async (req, res) => {
  *   4. docker compose -f <composefile> up -d
  *   5. PATCH status → 'starting'
  *   6. Poll /_fleet/api/features/:key/health every 2s, up to 60s
- *   7. On healthy → PATCH status 'running'; on timeout → PATCH 'failed'
+ *   7. On healthy → PATCH status 'up'; on timeout → PATCH 'failed'
  *
  * @param {string} key  composite key (without the 'fleet-' prefix)
  * @returns {Promise<void>}
@@ -531,8 +543,8 @@ async function runRebuild(key) {
     }
 
     if (healthy) {
-      updateStatus(key, 'running', null);
-      log(`[rebuild] Rebuild complete — '${key}' is running`);
+      updateStatus(key, 'up', null);
+      log(`[rebuild] Rebuild complete — '${key}' is up`);
     } else {
       const msg = `Health wait timed out after ${HEALTH_MAX_MS / 1000}s`;
       updateStatus(key, 'failed', msg);

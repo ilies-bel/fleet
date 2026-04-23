@@ -1,14 +1,11 @@
 import { useState, useEffect } from 'react';
-import { getHealth, removeFeature, openTerminal, stopFeature, startFeature, syncFeature } from '../api.js';
-import BuildLogPanel from './BuildLogPanel.jsx';
+import { getHealth, removeFeature, stopFeature, startFeature, syncFeature } from '../api.js';
 
 export default function FeatureCard({ feature, isActive, isPreview, isStarting, onActivate, onRemoved, onLogs }) {
   const { key, name, branch, title, project } = feature;
   const [health, setHealth] = useState('checking');
   const [confirming, setConfirming] = useState(false);
   const [activating, setActivating] = useState(false);
-  const [openingTerm, setOpeningTerm] = useState(false);
-  const [termDone, setTermDone] = useState(false);
   const [togglingPower, setTogglingPower] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [actionError, setActionError] = useState(null);
@@ -87,25 +84,12 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     }
   }
 
-  async function handleOpenTerm() {
-    setOpeningTerm(true);
-    setTermDone(false);
-    setActionError(null);
-    try {
-      await openTerminal(key);
-      setTermDone(true);
-      setTimeout(() => setTermDone(false), 3000);
-    } catch (err) {
-      setActionError(err.message);
-    } finally {
-      setOpeningTerm(false);
-    }
-  }
-
   const isNotStarted = feature.status === 'not_started';
+  const isCreated = feature.status === 'created';
   const isBuilding = feature.status === 'building';
   const isRegistryStarting = feature.status === 'starting';
   const isFailed = feature.status === 'failed';
+  const isUp = feature.status === 'up' || feature.status === 'running';
   const isLifecycleBusy = isBuilding || isRegistryStarting || isFailed;
   // When the registry reports building/starting/failed, surface those directly.
   // The client-side health sentinel (isStarting+health) only applies to
@@ -113,19 +97,23 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   const effectiveHealth = isStarting && health !== 'up' ? 'starting' : health;
   const healthDot = isNotStarted
     ? { color: '#555', label: '● NOT STARTED' }
-    : isBuilding
-      ? { color: '#ffaa00', label: '● BUILDING' }
-      : isRegistryStarting
-        ? { color: '#00aaff', label: '● STARTING' }
-        : isFailed
-          ? { color: '#ff4444', label: '● FAILED' }
-          : effectiveHealth === 'up'
-            ? { color: 'var(--color-accent)', label: '● UP' }
-            : effectiveHealth === 'starting'
-              ? { color: 'var(--color-warning)', label: '● STARTING' }
-              : effectiveHealth === 'down'
-                ? { color: 'var(--color-danger)', label: '● DOWN' }
-                : { color: 'var(--color-warning)', label: '● ...' };
+    : isCreated
+      ? { color: '#888', label: '● CREATED' }
+      : isBuilding
+        ? { color: '#ffaa00', label: '● BUILDING' }
+        : isRegistryStarting
+          ? { color: '#00aaff', label: '● STARTING' }
+          : isFailed
+            ? { color: '#ff4444', label: '● FAILED' }
+            : isUp && effectiveHealth !== 'down'
+              ? { color: 'var(--color-accent)', label: '● UP' }
+              : effectiveHealth === 'up'
+                ? { color: 'var(--color-accent)', label: '● UP' }
+                : effectiveHealth === 'starting'
+                  ? { color: 'var(--color-warning)', label: '● STARTING' }
+                  : effectiveHealth === 'down'
+                    ? { color: 'var(--color-danger)', label: '● DOWN' }
+                    : { color: 'var(--color-warning)', label: '● ...' };
 
   return (
     <div
@@ -215,11 +203,6 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
         )}
       </div>
 
-      {/* Build log panel — shown during building, starting, or failed */}
-      {(isBuilding || isRegistryStarting || isFailed) && (
-        <BuildLogPanel featureKey={key} status={feature.status} />
-      )}
-
       {/* Action buttons */}
       {isNotStarted ? (
         <div style={{
@@ -255,14 +238,6 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           title="Pull latest code, rebuild and restart backend (logs open automatically)"
         >
           {syncing ? '[...]' : '[SYNC]'}
-        </button>
-        <button
-          onClick={handleOpenTerm}
-          disabled={openingTerm}
-          style={btn(termDone ? 'accent-fill' : 'accent', openingTerm)}
-          title="Open Claude Code in the local worktree via iTerm2"
-        >
-          {openingTerm ? '[...]' : termDone ? '[DONE]' : '[GEMINI]'}
         </button>
         <button
           onClick={() => onLogs(key)}

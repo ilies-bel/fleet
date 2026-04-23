@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getLogs } from '../api.js';
 
-const SOURCES = ['backend', 'nginx', 'postgresql', 'supervisord', 'all'];
+const SOURCES = ['build', 'backend', 'nginx', 'postgresql', 'supervisord', 'all'];
 
 /** Color for each named source in the ALL view */
 const SOURCE_COLOR = {
@@ -73,13 +73,38 @@ export default function LogPanel({ featureName, onClose }) {
     }
   }, [featureName, source]);
 
-  // Polling effect
+  // 'build' source: SSE stream (not REST polling). Connects once and accumulates
+  // lines as the gateway sends them. Reconnects automatically via EventSource.
   useEffect(() => {
+    if (source !== 'build') return;
+    setLoading(true);
+    setError(null);
+    const es = new EventSource(`/_fleet/api/features/${featureName}/build-log`);
+    es.onopen = () => setLoading(false);
+    es.onmessage = (event) => {
+      setBuffer(prev => {
+        const next = prev ? `${prev}\n${event.data}` : event.data;
+        // Cap to ~500 lines so modal stays responsive
+        const lines = next.split('\n');
+        return lines.length > 500 ? lines.slice(-500).join('\n') : next;
+      });
+      setFetchedAt(Date.now());
+    };
+    es.onerror = () => {
+      // EventSource will reconnect on its own; surface a soft hint only
+      setLoading(false);
+    };
+    return () => es.close();
+  }, [featureName, source]);
+
+  // REST polling effect (skipped for build source — that one uses SSE)
+  useEffect(() => {
+    if (source === 'build') return;
     fetchLogs();
     if (!autoTail) return;
     const id = setInterval(fetchLogs, 3000);
     return () => clearInterval(id);
-  }, [fetchLogs, autoTail]);
+  }, [fetchLogs, autoTail, source]);
 
   // Auto-scroll to bottom when content changes
   useEffect(() => {

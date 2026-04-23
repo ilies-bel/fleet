@@ -94,21 +94,32 @@ export function clearBuildLog(key, delayMs = 60000) {
 let activeFeature = null;
 
 /**
- * Register a new feature container. Auto-activates only when status is 'running' —
+ * Normalise legacy 'running' tokens from older CLIs to the canonical 'up'.
+ * New vocabulary: 'created' | 'building' | 'starting' | 'up' | 'failed' | 'stopped' | 'not_started'.
+ * @param {string} status
+ * @returns {string}
+ */
+function normaliseStatus(status) {
+  return status === 'running' ? 'up' : status;
+}
+
+/**
+ * Register a new feature container. Auto-activates only when status is 'up' —
  * routing traffic to a not-yet-running container (building/starting) would 502.
  * @param {string} project - project name (required — determines composite key)
  * @param {string} name - feature/branch short name
  * @param {string} branch
  * @param {string|null} worktreePath - absolute path on the host Mac
- * @param {string} status - lifecycle: 'building' | 'starting' | 'running' | 'stopped' | 'not_started' | 'failed'
+ * @param {string} status - lifecycle: 'created' | 'building' | 'starting' | 'up' | 'stopped' | 'not_started' | 'failed'. 'running' is silently mapped to 'up' for back-compat.
  * @param {ServiceEntry[]} services - per-service {name, port} entries for path-prefix routing
  * @param {string|null} title - human-readable display title for the dashboard card
  * @param {string|null} error - human-readable failure reason (populated for status='failed')
  */
-export function register(project, name, branch, worktreePath = null, status = 'running', services = [], title = null, error = null) {
+export function register(project, name, branch, worktreePath = null, status = 'up', services = [], title = null, error = null) {
   const key = `${project}-${name}`;
-  features.set(key, { project, name, key, branch, worktreePath, title, addedAt: new Date(), status, error, services });
-  if (activeFeature === null && status === 'running') activeFeature = key;
+  const normalised = normaliseStatus(status);
+  features.set(key, { project, name, key, branch, worktreePath, title, addedAt: new Date(), status: normalised, error, services });
+  if (activeFeature === null && normalised === 'up') activeFeature = key;
 }
 
 /**
@@ -133,16 +144,17 @@ export function getServices(key) {
 export function updateStatus(key, status, error) {
   const entry = features.get(key);
   if (!entry) throw new Error(`Feature '${key}' is not registered`);
-  const next = { ...entry, status };
+  const normalised = normaliseStatus(status);
+  const next = { ...entry, status: normalised };
   if (error !== undefined) next.error = error;
   features.set(key, next);
 
   // Build log lifecycle: initialise fresh buffer on 'building', schedule
-  // eviction 60s after 'running' or 'failed' so page-refresh can replay.
-  if (status === 'building') {
+  // eviction 60s after 'up' or 'failed' so page-refresh can replay.
+  if (normalised === 'building') {
     buildLogs.delete(key);
     buildLogs.set(key, { lines: [], subscribers: new Set(), timer: null });
-  } else if (status === 'running' || status === 'failed') {
+  } else if (normalised === 'up' || normalised === 'failed') {
     clearBuildLog(key, 60000);
   }
 }

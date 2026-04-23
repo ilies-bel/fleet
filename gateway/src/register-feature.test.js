@@ -140,7 +140,7 @@ describe('POST /register-feature — composite key contract', () => {
     assert.equal(feature.key, 'acme-round-trip');
     assert.equal(feature.branch, 'feat/round-trip');
     assert.equal(feature.worktreePath, '/Users/dev/projects/acme');
-    assert.equal(feature.status, 'running', 'default status should be running');
+    assert.equal(feature.status, 'up', 'default status should be up (running normalised)');
     assert.ok(feature.isActive, 'first registered feature should become active');
     assert.ok(feature.addedAt, 'addedAt timestamp should be present');
   });
@@ -388,7 +388,7 @@ describe('POST /register-feature — composite key contract', () => {
 
   // ── PATCH /_fleet/api/features/:key/status contract ──────────────────────
 
-  test('PATCH status transitions building → starting → running', async () => {
+  test('PATCH status transitions building → starting → up (running normalised)', async () => {
     await request(server, {
       method: 'POST',
       path: '/register-feature',
@@ -403,6 +403,7 @@ describe('POST /register-feature — composite key contract', () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.status, 'starting');
 
+    // Legacy CLI still sends 'running' — gateway normalises it to 'up'.
     res = await request(server, {
       method: 'PATCH',
       path: '/_fleet/api/features/myproj-lifecycle/status',
@@ -412,7 +413,7 @@ describe('POST /register-feature — composite key contract', () => {
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
     const feature = list.body.find((f) => f.key === 'myproj-lifecycle');
-    assert.equal(feature.status, 'running');
+    assert.equal(feature.status, 'up');
   });
 
   test('PATCH status=failed accepts and persists an error field', async () => {

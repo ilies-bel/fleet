@@ -178,7 +178,6 @@ Scanning test/project for service directories...
 ```
 
 Notes:
-- `scripts/fleet-host-runner.sh` is a no-op stub so init proceeds past that step
 - If `.fleet/fleet.toml` already exists in `test/project/`, the wizard is skipped and the file is used as-is. The example schema lives at `.fleet/fleet.toml.example` (tracked); the real `.fleet/fleet.toml` is gitignored
 - Generated Dockerfiles land at `.fleet/Dockerfile.feature-base.<stack>` (e.g. `.fleet/Dockerfile.feature-base.spring`), not at the repo root
 - Services are expressed as `[[services]]` entries in `fleet.toml` — no separate frontend/backend distinction

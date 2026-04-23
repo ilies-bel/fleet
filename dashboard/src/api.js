@@ -61,15 +61,6 @@ export function getHealth(key) {
   return request(`/_fleet/api/features/${key}/health`);
 }
 
-/**
- * Open an iTerm2 tab with a shell inside the feature container.
- * @param {string} key  Composite key: "<project>-<name>"
- * @returns {Promise<{ ok: boolean, containerName: string }>}
- */
-export function openTerminal(key) {
-  return request(`/_fleet/api/features/${key}/open-terminal`, { method: 'POST' });
-}
-
 /** @returns {Promise<{ uptimeMs: number, featureCount: number, activeFeature: string|null, nodeVersion: string }>} */
 export function getStatus() {
   return request('/_fleet/api/status');

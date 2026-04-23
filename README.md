@@ -286,7 +286,6 @@ All management endpoints are on port 4000.
 | `GET` | `/_fleet/api/features` | List all registered features (includes `status` for not-yet-started containers) |
 | `GET` | `/_fleet/api/features/:name/health` | Health check for a container (`up`/`down`) |
 | `POST` | `/_fleet/api/features/:name/activate` | Set the active feature on port 3000 |
-| `POST` | `/_fleet/api/features/:name/open-terminal` | Open iTerm2 tab into container (macOS) |
 | `GET` | `/_fleet/api/status` | Gateway uptime, active feature, feature count |
 | `POST` | `/register-feature` | Register a feature (called by `fleet add`) |
 | `DELETE` | `/register-feature/:name` | Deregister a feature (called by `fleet rm`) |
@@ -337,7 +336,7 @@ Vite proxies `/_fleet/` to the gateway at localhost:4000, so you get hot-reload 
 
 ## Testing fleet init
 
-`test/project/` is a ready-to-use copy of `test/reference/` (Spring Boot backend + Next.js frontend). `scripts/fleet-host-runner.sh` is a no-op stub so init proceeds past that step.
+`test/project/` is a ready-to-use copy of `test/reference/` (Spring Boot backend + Next.js frontend).
 
 ```bash
 fleet init test/project main
