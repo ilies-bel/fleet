@@ -43,25 +43,25 @@ afterEach(() => {
 describe('BuildLogPanel', () => {
   it('renders nothing when status is running and no lines buffered', () => {
     const { container } = render(
-      <BuildLogPanel featureName="foo" status="running" />
+      <BuildLogPanel featureKey="foo" status="running" />
     );
     expect(container.firstChild).toBeNull();
   });
 
   it('renders nothing when status is stopped and no lines buffered', () => {
     const { container } = render(
-      <BuildLogPanel featureName="foo" status="stopped" />
+      <BuildLogPanel featureKey="foo" status="stopped" />
     );
     expect(container.firstChild).toBeNull();
   });
 
   it('renders panel and toggle button when status is building', () => {
-    render(<BuildLogPanel featureName="bar" status="building" />);
+    render(<BuildLogPanel featureKey="bar" status="building" />);
     expect(screen.getByRole('button')).toBeInTheDocument();
   });
 
   it('shows log lines when status is building and messages arrive', async () => {
-    render(<BuildLogPanel featureName="bar" status="building" />);
+    render(<BuildLogPanel featureKey="bar" status="building" />);
 
     await act(async () => {
       MockEventSource._last.deliver('Step 1/10 : FROM node:20');
@@ -72,18 +72,18 @@ describe('BuildLogPanel', () => {
     expect(screen.getByText('Step 2/10 : COPY package.json .')).toBeInTheDocument();
   });
 
-  it('opens EventSource to the correct URL for the feature name', () => {
-    render(<BuildLogPanel featureName="my-feature" status="building" />);
-    expect(MockEventSource._last.url).toBe('/_fleet/api/features/my-feature/build-log');
+  it('opens EventSource to the correct URL for the composite key', () => {
+    render(<BuildLogPanel featureKey="myproject-my-feature" status="building" />);
+    expect(MockEventSource._last.url).toBe('/_fleet/api/features/myproject-my-feature/build-log');
   });
 
   it('does NOT open EventSource when status is running', () => {
-    render(<BuildLogPanel featureName="foo" status="running" />);
+    render(<BuildLogPanel featureKey="foo" status="running" />);
     expect(MockEventSource._last).toBeNull();
   });
 
   it('toggle button collapses and expands the log', async () => {
-    render(<BuildLogPanel featureName="baz" status="building" />);
+    render(<BuildLogPanel featureKey="baz" status="building" />);
 
     await act(async () => {
       MockEventSource._last.deliver('hello world');
@@ -105,7 +105,7 @@ describe('BuildLogPanel', () => {
 
   it('auto-collapses when status transitions to running', async () => {
     const { rerender } = render(
-      <BuildLogPanel featureName="baz" status="building" />
+      <BuildLogPanel featureKey="baz" status="building" />
     );
 
     await act(async () => {
@@ -115,14 +115,14 @@ describe('BuildLogPanel', () => {
     expect(screen.getByText('building...')).toBeInTheDocument();
 
     // Transition to running → should collapse
-    rerender(<BuildLogPanel featureName="baz" status="running" />);
+    rerender(<BuildLogPanel featureKey="baz" status="running" />);
 
     expect(screen.queryByText('building...')).not.toBeInTheDocument();
     expect(screen.getByRole('button')).toHaveTextContent('[SHOW LOG]');
   });
 
   it('shows failed hint in toggle button when status is failed and collapsed', async () => {
-    render(<BuildLogPanel featureName="baz" status="failed" />);
+    render(<BuildLogPanel featureKey="baz" status="failed" />);
 
     await act(async () => {
       MockEventSource._last.deliver('error: build failed');
@@ -135,7 +135,7 @@ describe('BuildLogPanel', () => {
   });
 
   it('caps client-side lines at 500', async () => {
-    render(<BuildLogPanel featureName="cap" status="building" />);
+    render(<BuildLogPanel featureKey="cap" status="building" />);
 
     await act(async () => {
       for (let i = 0; i < 520; i++) {
@@ -151,7 +151,7 @@ describe('BuildLogPanel', () => {
   });
 
   it('closes EventSource on unmount', () => {
-    const { unmount } = render(<BuildLogPanel featureName="foo" status="building" />);
+    const { unmount } = render(<BuildLogPanel featureKey="foo" status="building" />);
     const es = MockEventSource._last;
     unmount();
     expect(es._closed).toBe(true);
