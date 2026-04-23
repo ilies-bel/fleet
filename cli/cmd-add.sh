@@ -164,27 +164,33 @@ for idx in $(seq 0 $((svc_count - 1))); do
 
   svc_wt_template=$(_at worktree_template)
 
-  svc_abs_path=$(fleet_resolve_service_worktree "${NAME}" "${svc_dir}" "${svc_wt_template}")
-
-  # Determine the worktree root for this service (used for branch + shared path resolution)
-  if [ -n "${svc_wt_template}" ]; then
-    svc_wt_root="${svc_abs_path}"   # the override IS the root
+  if [ "${DIRECT}" = true ]; then
+    # --direct: bind-mount the primary checkout; skip worktree resolution and validation.
+    svc_abs_path="${FLEET_PROJECT_ROOT}/${svc_dir}"
+    svc_wt_root="${svc_abs_path}"
   else
-    svc_wt_root="${PROJECT_WORKTREE_PATH}"
-  fi
+    svc_abs_path=$(fleet_resolve_service_worktree "${NAME}" "${svc_dir}" "${svc_wt_template}")
 
-  [ -d "${svc_abs_path}" ] \
-    || error "Service '${svc_name}': '${svc_abs_path}' does not exist.
+    # Determine the worktree root for this service (used for branch + shared path resolution)
+    if [ -n "${svc_wt_template}" ]; then
+      svc_wt_root="${svc_abs_path}"   # the override IS the root
+    else
+      svc_wt_root="${PROJECT_WORKTREE_PATH}"
+    fi
+
+    [ -d "${svc_abs_path}" ] \
+      || error "Service '${svc_name}': '${svc_abs_path}' does not exist.
 Create the worktree first:
   git -C ${FLEET_PROJECT_ROOT}/${svc_dir} worktree add ${svc_abs_path} <branch>
 Or set a project-level worktree_template and create: git worktree add ${PROJECT_WORKTREE_PATH} <branch>"
 
-  if ! git -C "${svc_abs_path}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    error "Service '${svc_name}': '${svc_abs_path}' is not an active git worktree.
+    if ! git -C "${svc_abs_path}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      error "Service '${svc_name}': '${svc_abs_path}' is not an active git worktree.
 Run: git -C ${FLEET_PROJECT_ROOT}/${svc_dir} worktree add ${svc_abs_path} <branch>"
+    fi
   fi
 
-  # Read branch from THIS service's worktree root
+  # Read branch from THIS service's worktree root (works for both worktree and primary checkout)
   branch=$(git -C "${svc_abs_path}" branch --show-current 2>/dev/null || echo "")
   [ -z "${branch}" ] && branch=$(git -C "${svc_abs_path}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
   [ "${branch}" = "HEAD" ] && branch="main"
