@@ -9,7 +9,7 @@
 [project]
 name = "d2r2"
 root = "/Users/x/projects/d2r2"   # absolute path to the project root on this host
-worktree_template = ".worktrees/{name}"  # path template for git worktrees; {name} expands to the feature name
+path = ".worktrees/{name}"  # path template for git worktrees; {name} expands to the feature name
 
 # ─── Ports ────────────────────────────────────────────────────────────────────
 [ports]
@@ -52,15 +52,15 @@ db    = 5432    # host-mapped database port (optional; 0 = disabled)
 #                        automatically before the service process starts.
 #                        fleet init auto-discovers .env files under a service dir and writes them here.
 #                        For files that must reach ALL containers use [[shared]] instead.
-# `worktree_template`  — (optional) per-service worktree path template for multi-repo layouts.
-#                        Overrides [project].worktree_template for THIS service only.
+# `path`              — (optional) per-service worktree path template for multi-repo layouts.
+#                        Overrides [project].path for THIS service only.
 #                        {name} is substituted with the feature name. Relative paths resolve
 #                        from project.root. Use when each service directory is its own git repo
 #                        (e.g. frontend/ and backend/ are independent repos inside the project root).
 #                        When set, the resolved path is used directly as the mount source for this
 #                        service — NOT combined with svc dir. fleet init does NOT emit this key
 #                        automatically; it is opt-in.
-#                        Example: worktree_template = "backend/.worktrees/{name}"
+#                        Example: path = "backend/.worktrees/{name}"
 #
 # JAR NAMING CONVENTION (gradle/spring stacks):
 # Each gradle/spring service's built jar is copied to /home/developer/<service-name>.jar.
@@ -78,7 +78,7 @@ build = "mvn package -DskipTests -q"
 run       = "java -jar /home/developer/backend.jar"
 env_files = [".env"]   # auto-discovered by fleet init; mounted only into the backend container
 # Uncomment for multi-repo layout where d2r2-backend/ is its own git repository:
-# worktree_template = "d2r2-backend/.worktrees/{name}"
+# path = "d2r2-backend/.worktrees/{name}"
 
 [[services]]
 name  = "frontend"
@@ -91,7 +91,7 @@ env_files = [".env.local"]   # auto-discovered by fleet init; mounted only into 
 # Optional per-service env vars; written as KEY=VALUE lines in feature.env.
 # env = { JIRA_BASE_URL = "http://127.0.0.1:8089" }
 # Uncomment for multi-repo layout where d2r2-frontend/ is its own git repository:
-# worktree_template = "d2r2-frontend/.worktrees/{name}"
+# path = "d2r2-frontend/.worktrees/{name}"
 
 # ─── Peers ────────────────────────────────────────────────────────────────────
 # Optional stub services co-located in the feature container (127.0.0.1).

@@ -25,7 +25,7 @@ usage() {
   echo "  and [[peers]] entry from .fleet/fleet.toml under supervisord."
   echo ""
   echo "  By default, requires a git worktree at the path resolved by"
-  echo "  [project].worktree_template. Create one first:"
+  echo "  [project].path. Create one first:"
   echo "    git worktree add .worktrees/<name> <branch>"
   echo ""
   echo "Examples:"
@@ -77,15 +77,15 @@ if [ "${DIRECT}" = true ]; then
   PROJECT_WORKTREE_PATH="${FLEET_PROJECT_ROOT}"
   info "Direct mode — mounting primary checkout at ${PROJECT_WORKTREE_PATH}"
 else
-  # Resolve the project-level worktree path when template is set.
+  # Resolve the project-level worktree path when path is set.
   # Only validate it as a git worktree if at least one service lacks a per-service
-  # worktree_template override (services with overrides manage their own paths).
+  # path override (services with overrides manage their own paths).
   PROJECT_WORKTREE_PATH=""
-  if [ -n "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
+  if [ -n "${FLEET_WORKTREE_PATH:-}" ]; then
     PROJECT_WORKTREE_PATH=$(fleet_resolve_worktree "${NAME}")
   fi
 
-  # Check whether ALL services have a per-service worktree_template set.
+  # Check whether ALL services have a per-service path set.
   # If any service is missing one, the project-level path is required.
   _ALL_SVC_HAVE_WT=$("${_PYBIN}" -c "
 import sys, json
@@ -93,16 +93,16 @@ services = json.loads(sys.argv[1])
 if not services:
     print('false')
 else:
-    all_have = all(bool(sv.get('worktree_template','')) for sv in services)
+    all_have = all(bool(sv.get('worktree_path','')) for sv in services)
     print('true' if all_have else 'false')
 " "${FLEET_SERVICES_JSON}")
 
   if [ "${_ALL_SVC_HAVE_WT}" = "false" ]; then
-    # Project-level template is required for at least one service.
-    if [ -z "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
-      error "fleet add: [project].worktree_template is not set in .fleet/fleet.toml.
+    # Project-level path is required for at least one service.
+    if [ -z "${FLEET_WORKTREE_PATH:-}" ]; then
+      error "fleet add: [project].path is not set in .fleet/fleet.toml.
   Add it under [project]:
-    worktree_template = \".worktrees/{name}\"
+    path = \".worktrees/{name}\"
   Then run: fleet init (to regenerate) or edit .fleet/fleet.toml manually.
   (Or pass --direct to bind-mount the primary checkout without a worktree.)"
     fi
@@ -162,17 +162,17 @@ for idx in $(seq 0 $((svc_count - 1))); do
   svc_port=$( _at port)
   svc_host_port=$(_at host_port)
 
-  svc_wt_template=$(_at worktree_template)
+  svc_wt_path=$(_at worktree_path)
 
   if [ "${DIRECT}" = true ]; then
     # --direct: bind-mount the primary checkout; skip worktree resolution and validation.
     svc_abs_path="${FLEET_PROJECT_ROOT}/${svc_dir}"
     svc_wt_root="${svc_abs_path}"
   else
-    svc_abs_path=$(fleet_resolve_service_worktree "${NAME}" "${svc_dir}" "${svc_wt_template}")
+    svc_abs_path=$(fleet_resolve_service_worktree "${NAME}" "${svc_dir}" "${svc_wt_path}")
 
     # Determine the worktree root for this service (used for branch + shared path resolution)
-    if [ -n "${svc_wt_template}" ]; then
+    if [ -n "${svc_wt_path}" ]; then
       svc_wt_root="${svc_abs_path}"   # the override IS the root
     else
       svc_wt_root="${PROJECT_WORKTREE_PATH}"
@@ -182,7 +182,7 @@ for idx in $(seq 0 $((svc_count - 1))); do
       || error "Service '${svc_name}': '${svc_abs_path}' does not exist.
 Create the worktree first:
   git -C ${FLEET_PROJECT_ROOT}/${svc_dir} worktree add ${svc_abs_path} <branch>
-Or set a project-level worktree_template and create: git worktree add ${PROJECT_WORKTREE_PATH} <branch>"
+Or set a project-level path and create: git worktree add ${PROJECT_WORKTREE_PATH} <branch>"
 
     if ! git -C "${svc_abs_path}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       error "Service '${svc_name}': '${svc_abs_path}' is not an active git worktree.
@@ -471,7 +471,7 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
   while IFS=$'\t' read -r shared_path shared_target; do
     [ -z "${shared_path}" ] && continue
     [ -n "${PROJECT_WORKTREE_PATH:-}" ] \
-      || error "[[shared]] files require [project].worktree_template to be set when no per-service override covers all services."
+      || error "[[shared]] files require [project].path to be set when no per-service override covers all services."
     src="${PROJECT_WORKTREE_PATH}/${shared_path}"
     [ -f "${src}" ] \
       || error "Shared file missing: ${src}

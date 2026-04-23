@@ -507,7 +507,7 @@ write_fleet_toml() {
     echo "[project]"
     echo "name = \"${proj_name}\""
     echo "root = \"${proj_root}\""
-    echo "worktree_template = \"${worktree_tmpl}\""
+    echo "path = \"${worktree_tmpl}\""
     echo ""
     echo "[ports]"
     echo "proxy = ${proxy_port}"
@@ -572,12 +572,12 @@ if [ -f "${FLEET_TOML}" ]; then
   PROXY_PORT="${FLEET_PORT_PROXY:-3000}"
   ADMIN_PORT="${FLEET_PORT_ADMIN:-4000}"
   DB_PORT="${FLEET_PORT_DB:-5432}"
-  # Preserve existing worktree_template if set; otherwise keep the default.
+  # Preserve existing path if set; otherwise keep the default.
   # NB: can't use ${VAR:-.worktrees/{name}} — bash parameter-expansion braces
   # don't nest, so the first `}` closes the expansion and the second `}` is
   # appended literally, corrupting the template on every re-run.
-  if [ -n "${FLEET_WORKTREE_TEMPLATE:-}" ]; then
-    WORKTREE_TEMPLATE="${FLEET_WORKTREE_TEMPLATE}"
+  if [ -n "${FLEET_WORKTREE_PATH:-}" ]; then
+    WORKTREE_TEMPLATE="${FLEET_WORKTREE_PATH}"
   else
     WORKTREE_TEMPLATE=".worktrees/{name}"
   fi

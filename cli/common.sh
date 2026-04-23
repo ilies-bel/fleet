@@ -86,7 +86,7 @@ _find_fleet_toml_upwards() {
 #   FLEET_CONFIG_ROOT       — directory containing the resolved project .fleet/
 #   FLEET_PROJECT_NAME      — project.name
 #   FLEET_PROJECT_ROOT      — project.root
-#   FLEET_WORKTREE_TEMPLATE — project.worktree_template (may be empty if key absent)
+#   FLEET_WORKTREE_PATH     — project.path (may be empty if key absent)
 #   FLEET_PORT_PROXY        — ports.proxy
 #   FLEET_PORT_ADMIN        — ports.admin
 #   FLEET_PORT_DB           — ports.db
@@ -149,6 +149,22 @@ services = data.get("services", [])
 peers    = data.get("peers", [])
 shared   = data.get("shared", [])
 
+# Detect legacy 'worktree_template' key — hard error, no alias
+legacy_keys = []
+if "worktree_template" in project:
+    legacy_keys.append("[project].worktree_template")
+for sv in services:
+    if "worktree_template" in sv:
+        legacy_keys.append(f"[[services]] name={sv.get('name','?')}: worktree_template")
+if legacy_keys:
+    print(
+        "fleet.toml uses the legacy key 'worktree_template'. It was renamed to 'path' (no alias).\n"
+        "Edit .fleet/fleet.toml to replace every 'worktree_template = ...' with 'path = ...', or regenerate with: fleet init\n"
+        "Affected keys: " + ", ".join(legacy_keys),
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
 # Validate peer types before emitting any output
 for p in peers:
     peer_type = p.get("type", "")
@@ -162,7 +178,7 @@ for p in peers:
 out = {
     "project_name":        project.get("name", ""),
     "project_root":        project.get("root", ""),
-    "worktree_template":   project.get("worktree_template", ""),
+    "worktree_path":       project.get("path", ""),
     "port_proxy":          str(ports.get("proxy", "")),
     "port_admin":          str(ports.get("admin", "")),
     "port_db":             str(ports.get("db", "")),
@@ -181,7 +197,7 @@ out = {
             "run":               sv.get("run",""),
             "env":               sv.get("env", {}),
             "env_files":         sv.get("env_files", []),
-            "worktree_template": sv.get("worktree_template",""),
+            "worktree_path":     sv.get("path",""),
         }
         for sv in services
     ]),
@@ -216,7 +232,7 @@ PYEOF
   export FLEET_CONFIG_ROOT
   FLEET_PROJECT_NAME=$(_get project_name)
   FLEET_PROJECT_ROOT=$(_get project_root)
-  FLEET_WORKTREE_TEMPLATE=$(_get worktree_template)
+  FLEET_WORKTREE_PATH=$(_get worktree_path)
   FLEET_PORT_PROXY=$(_get port_proxy)
   FLEET_PORT_ADMIN=$(_get port_admin)
   FLEET_PORT_DB=$(_get port_db)
@@ -225,7 +241,7 @@ PYEOF
   FLEET_PEERS_JSON=$(_get peers_json)
   FLEET_SHARED_JSON=$(_get shared_json)
 
-  export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT FLEET_WORKTREE_TEMPLATE \
+  export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT FLEET_WORKTREE_PATH \
          FLEET_PORT_PROXY FLEET_PORT_ADMIN FLEET_PORT_DB \
          FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON FLEET_SHARED_JSON
 }
@@ -285,21 +301,21 @@ fleet_project_root() {
   printf '%s\n' "${FLEET_PROJECT_ROOT}"
 }
 
-# fleet_resolve_worktree <name> — resolve the worktree template for a feature name.
+# fleet_resolve_worktree <name> — resolve the worktree path for a feature name.
 #
-# Substitutes {name} in FLEET_WORKTREE_TEMPLATE with the argument.
+# Substitutes {name} in FLEET_WORKTREE_PATH with the argument.
 # If the result is relative, it is resolved against FLEET_PROJECT_ROOT.
 # Echoes the absolute path.
 #
-# Requires load_fleet_toml to have been called first (exports FLEET_WORKTREE_TEMPLATE
+# Requires load_fleet_toml to have been called first (exports FLEET_WORKTREE_PATH
 # and FLEET_PROJECT_ROOT).
 fleet_resolve_worktree() {
   local name="${1:-}"
   [ -n "${name}" ] || error "fleet_resolve_worktree: feature name required"
 
-  local template="${FLEET_WORKTREE_TEMPLATE:-}"
+  local template="${FLEET_WORKTREE_PATH:-}"
   [ -n "${template}" ] \
-    || error "fleet_resolve_worktree: FLEET_WORKTREE_TEMPLATE is not set. Add 'worktree_template' under [project] in .fleet/fleet.toml."
+    || error "fleet_resolve_worktree: FLEET_WORKTREE_PATH is not set. Add 'path' under [project] in .fleet/fleet.toml."
 
   # Substitute {name} placeholder
   local resolved="${template//\{name\}/${name}}"
@@ -313,14 +329,14 @@ fleet_resolve_worktree() {
   printf '%s\n' "${resolved}"
 }
 
-# fleet_resolve_service_worktree <name> <svc_dir> <svc_wt_template>
+# fleet_resolve_service_worktree <name> <svc_dir> <svc_wt_path>
 # Returns the absolute path to this service's worktree source.
-# When svc_wt_template is non-empty: substitute {name}, resolve relative to FLEET_PROJECT_ROOT.
+# When svc_wt_path is non-empty: substitute {name}, resolve relative to FLEET_PROJECT_ROOT.
 # Otherwise: fleet_resolve_worktree(name) + "/" + svc_dir.
 fleet_resolve_service_worktree() {
-  local name="${1:-}" svc_dir="${2:-}" svc_wt_template="${3:-}"
-  if [ -n "${svc_wt_template}" ]; then
-    local resolved="${svc_wt_template//\{name\}/${name}}"
+  local name="${1:-}" svc_dir="${2:-}" svc_wt_path="${3:-}"
+  if [ -n "${svc_wt_path}" ]; then
+    local resolved="${svc_wt_path//\{name\}/${name}}"
     case "${resolved}" in
       /*) ;;
       *)  resolved="${FLEET_PROJECT_ROOT}/${resolved}" ;;
