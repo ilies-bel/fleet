@@ -30,8 +30,8 @@ export function createBackendProxy() {
     router: async (req) => {
       const resolved = await resolveTarget();
       if (!resolved.ok) return undefined;
-      req._fleetFeature = resolved.feature;
-      return `http://fleet-${resolved.feature}:80`;
+      req._fleetFeature = resolved.key;
+      return `http://fleet-${resolved.key}:80`;
     },
     changeOrigin: true,
     ejectPlugins: true,
@@ -74,7 +74,7 @@ export function createBackendProxy() {
     if (!resolved.ok) {
       return res.status(503).send(resolved.body);
     }
-    req._fleetFeature = resolved.feature;
+    req._fleetFeature = resolved.key;
     return proxy(req, res, next);
   };
 
@@ -96,7 +96,7 @@ export function createBackendProxy() {
       socket.destroy();
       return;
     }
-    req._fleetFeature = resolved.feature;
+    req._fleetFeature = resolved.key;
     // Apply the /backend path rewrite before forwarding so nginx routes correctly.
     const incoming = req.url || '/';
     req.url = '/backend' + (incoming.startsWith('/') ? incoming : '/' + incoming);
