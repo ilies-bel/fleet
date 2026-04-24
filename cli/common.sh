@@ -478,6 +478,11 @@ gateway_delete() {
 # Non-fatal: a non-2xx response is warned about but does not exit. Status drift
 # is recoverable; forcing the whole `fleet add` to fail on a PATCH race would
 # regress the intent of yn2 (fail loudly only on the initial registration).
+#
+# On 404: the gateway may have restarted between the initial POST /register-feature
+# and this PATCH (in-memory registry lost). Re-register from the caller's exported
+# variables (NAME, FLEET_PROJECT_NAME, FIRST_BRANCH, PROJECT_WORKTREE_PATH,
+# FEATURE_TITLE, FLEET_SERVICES_JSON) then retry the PATCH once.
 gateway_patch_status() {
   local name="${1:-}" status="${2:-}" error_msg="${3:-}"
   [ -n "$name" ] && [ -n "$status" ] || {
@@ -501,6 +506,28 @@ gateway_patch_status() {
   http_code=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
     "${GATEWAY_URL}/_fleet/api/features/${name}/status" \
     -H "Content-Type: application/json" -d "${body}" 2>/dev/null || echo "000")
+
+  if [ "${http_code}" = "404" ]; then
+    # Gateway restarted and lost in-memory state — re-register then retry PATCH.
+    warn "Gateway status PATCH for '${name}' → HTTP 404; gateway may have restarted. Re-registering..."
+    local _re_pybin _services_json _title_json _re_status
+    _re_pybin=$(_find_python_with_tomllib 2>/dev/null || command -v python3)
+    _services_json=$("${_re_pybin}" -c "
+import sys, json
+svcs = json.loads(sys.argv[1])
+out = [{'name': s['name'], 'port': int(s['port'])} for s in svcs if s.get('port')]
+print(json.dumps(out))
+" "${FLEET_SERVICES_JSON:-[]}" 2>/dev/null || echo "[]")
+    _title_json=$("${_re_pybin}" -c "import sys, json; print(json.dumps(sys.argv[1]))" "${FEATURE_TITLE:-${NAME:-}}" 2>/dev/null || echo '""')
+    curl -s -o /dev/null -X POST "${GATEWAY_URL}/register-feature" \
+      -H "Content-Type: application/json" \
+      -d "{\"name\":\"${NAME:-}\",\"branch\":\"${FIRST_BRANCH:-unknown}\",\"worktreePath\":\"${PROJECT_WORKTREE_PATH:-}\",\"project\":\"${FLEET_PROJECT_NAME:-}\",\"title\":${_title_json},\"services\":${_services_json},\"status\":\"${status}\"}" \
+      2>/dev/null || true
+    # Retry PATCH after re-registration
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
+      "${GATEWAY_URL}/_fleet/api/features/${name}/status" \
+      -H "Content-Type: application/json" -d "${body}" 2>/dev/null || echo "000")
+  fi
 
   case "$http_code" in
     2??) ;;
