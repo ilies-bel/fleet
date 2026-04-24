@@ -140,7 +140,7 @@ if [ -z "${FEATURE_TITLE}" ]; then
 fi
 
 # ─── Guard: duplicate feature ────────────────────────────────────────────────
-FEATURE_DIR="${FLEET_ROOT}/.fleet/${NAME}"
+FEATURE_DIR="${FLEET_CONFIG_ROOT}/.fleet/${NAME}"
 INFO_TOML="${FEATURE_DIR}/info.toml"
 
 if [ -f "${INFO_TOML}" ]; then
@@ -534,6 +534,12 @@ for svc in services:
   if [ "${_needs_sock}" = true ]; then
     echo "      - /var/run/docker.sock:/var/run/docker.sock"
   fi
+  echo "    healthcheck:"
+  echo "      test: [\"CMD\", \"curl\", \"-sf\", \"http://127.0.0.1:80/\"]"
+  echo "      interval: 10s"
+  echo "      timeout: 5s"
+  echo "      retries: 30"
+  echo "      start_period: 30s"
   echo "    networks:"
   echo "      - fleet-net"
   # Emit host port mappings for services that declare host_port
@@ -645,9 +651,10 @@ gateway_patch_status "${FLEET_PROJECT_NAME}-${NAME}" "starting"
 
 # ─── Wait for container health ───────────────────────────────────────────────
 # Uses the gateway's existing /features/:name/health endpoint (HEADs nginx on
-# port 80 inside the container). Times out after 60s → trap fires 'failed'.
+# port 80 inside the container). Times out after 180s → trap fires 'failed'.
 info "Waiting for fleet-${FLEET_PROJECT_NAME}-${NAME} to become healthy..."
-_HEALTH_MAX_WAIT=60
+# Gradle bootJar typically takes 90-120s on first run; 180s gives headroom.
+_HEALTH_MAX_WAIT=180
 _HEALTH_ELAPSED=0
 _HEALTHY=false
 while [ ${_HEALTH_ELAPSED} -lt ${_HEALTH_MAX_WAIT} ]; do
