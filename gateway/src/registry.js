@@ -147,6 +147,9 @@ export function updateStatus(key, status, error) {
   const normalised = normaliseStatus(status);
   const next = { ...entry, status: normalised };
   if (error !== undefined) next.error = error;
+  if ((normalised === 'stopped' || normalised === 'failed') && activeFeature === key) {
+    activeFeature = null;
+  }
   features.set(key, next);
 
   // Build log lifecycle: initialise fresh buffer on 'building', schedule
