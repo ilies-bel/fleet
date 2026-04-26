@@ -57,7 +57,11 @@ INFO_TOMLS=( "${FLEET_ROOT}/.fleet/"*/info.toml )
 shopt -u nullglob
 
 if [ "${#INFO_TOMLS[@]}" -eq 0 ]; then
-  info "No features. Run: fleet add <name>"
+  if [ "${JSON_MODE}" = true ]; then
+    echo "[]"
+  else
+    info "No features. Run: fleet add <name>"
+  fi
   exit 0
 fi
 
