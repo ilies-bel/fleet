@@ -46,9 +46,13 @@ remove_feature() {
 
   info "Removing feature: ${name} (container: ${container_name})"
 
-  # Deregister from gateway (best-effort)
-  curl -sf -X DELETE "${GATEWAY_URL}/register-feature/${gateway_key}" >/dev/null 2>&1 \
-    || warn "Could not notify gateway (is it running?)"
+  # Deregister from gateway (best-effort; 404 = already gone, both are fine)
+  local http_code
+  http_code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "${GATEWAY_URL}/register-feature/${gateway_key}" 2>/dev/null || echo "000")
+  case "${http_code}" in
+    2*|404) ;;  # success or already gone — both are fine
+    *)      warn "Could not notify gateway (HTTP ${http_code})" ;;
+  esac
 
   # Stop the single feature container (mono-container architecture)
   docker rm -f "${container_name}" 2>/dev/null \

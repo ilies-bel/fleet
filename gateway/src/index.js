@@ -6,7 +6,7 @@ import apiRouter from './api.js';
 import authRouter from './auth.js';
 import { createFeatureProxy } from './proxy.js';
 import { createBackendProxy } from './backend-proxy.js';
-import { reconcileFromDocker } from './reconcile.js';
+import { reconcileFromDocker, reconcileSweep } from './reconcile.js';
 import { ensureMainRunning } from './lifecycle.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,6 +14,11 @@ const __dirname = dirname(__filename);
 
 await ensureMainRunning();
 await reconcileFromDocker();
+
+const SWEEP_INTERVAL_MS = 30_000;
+setInterval(() => {
+  reconcileSweep().catch(err => console.warn('[reconcile.sweep] failed:', err.message));
+}, SWEEP_INTERVAL_MS).unref();
 
 // ── proxy port (PROXY_PORT, default 3000) — transparent proxy only ───────────
 // No body parsing, no CORS, no middleware — pass everything through verbatim.
