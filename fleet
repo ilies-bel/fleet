@@ -20,6 +20,7 @@ case "$cmd" in
     ;;
   init)            exec "$FLEET_ROOT/cli/cmd-init.sh" "$@" ;;
   add)             exec "$FLEET_ROOT/cli/cmd-add.sh" "$@" ;;
+  ls)              exec "$FLEET_ROOT/cli/cmd-ls.sh" "$@" ;;
   rm)              exec "$FLEET_ROOT/cli/cmd-rm.sh" "$@" ;;
   restart)         exec "$FLEET_ROOT/cli/cmd-restart.sh" "$@" ;;
   push)            exec "$FLEET_ROOT/cli/cmd-push.sh" "$@" ;;
@@ -36,6 +37,7 @@ case "$cmd" in
       case "$subcmd" in
         init)           exec "$FLEET_ROOT/cli/cmd-init.sh" --help ;;
         add)            exec "$FLEET_ROOT/cli/cmd-add.sh" --help ;;
+        ls)             exec "$FLEET_ROOT/cli/cmd-ls.sh" --help ;;
         rm)             exec "$FLEET_ROOT/cli/cmd-rm.sh" --help ;;
         restart)        exec "$FLEET_ROOT/cli/cmd-restart.sh" --help ;;
         push)           exec "$FLEET_ROOT/cli/cmd-push.sh" --help ;;

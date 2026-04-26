@@ -10,39 +10,6 @@ export FLEET_ROOT
 # shellcheck source=./common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-# ─── _read_info_toml_services <name> ─────────────────────────────────────────
-# Prints newline-separated list of service names from .fleet/<name>/info.toml.
-# Prints nothing (empty) if the file is absent or has no services.
-_read_info_toml_services() {
-  local feature_name="$1"
-  local info_toml="${FLEET_ROOT}/.fleet/${feature_name}/info.toml"
-
-  [ -f "${info_toml}" ] || { echo ""; return 0; }
-
-  local pybin
-  pybin=$(_find_python_with_tomllib) || {
-    warn "No python3 with tomllib/tomli found — cannot parse info.toml"
-    echo ""
-    return 0
-  }
-
-  "$pybin" - "${info_toml}" <<'PYEOF'
-import sys
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
-
-with open(sys.argv[1], "rb") as fh:
-    data = tomllib.load(fh)
-
-for svc in data.get("services", []):
-    name = svc.get("name", "")
-    if name:
-        print(name)
-PYEOF
-}
-
 # ─── remove_feature <name> ────────────────────────────────────────────────────
 remove_feature() {
   local name="$1"
@@ -53,22 +20,10 @@ remove_feature() {
   # Read project name from info.toml to build the composite container/gateway key.
   # Falls back gracefully if info.toml is absent (e.g. partial-add cleanup).
   local project=""
-  if [ -f "${info_toml}" ]; then
-    local pybin
-    pybin=$(_find_python_with_tomllib 2>/dev/null) || true
-    if [ -n "${pybin}" ]; then
-      project=$("${pybin}" - "${info_toml}" <<'PYEOF' 2>/dev/null || true
-import sys
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
-with open(sys.argv[1], "rb") as fh:
-    data = tomllib.load(fh)
-print(data.get("feature", {}).get("project", ""))
-PYEOF
-      )
-    fi
+  local _toml_row
+  _toml_row=$(_read_info_toml "${info_toml}" 2>/dev/null) || true
+  if [ -n "${_toml_row}" ]; then
+    project="${_toml_row%%|*}"
   fi
 
   # Composite container name: fleet-<project>-<name> when project is known,
