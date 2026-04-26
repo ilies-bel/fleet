@@ -537,6 +537,43 @@ print(json.dumps(out))
 }
 export -f gateway_patch_status
 
+# ─── info.toml reader ────────────────────────────────────────────────────────
+# _read_info_toml <path>
+# Echoes pipe-delimited fields: project|name|branch|title|added_at|svc1:port1,svc2:port2
+# Prints an empty string on missing file or parse failure. Never exits non-zero.
+_read_info_toml() {
+  local info_toml="$1"
+  [ -f "${info_toml}" ] || { echo ""; return 0; }
+  local pybin
+  pybin=$(_find_python_with_tomllib) || { echo ""; return 0; }
+  "$pybin" - "${info_toml}" <<'PYEOF'
+import sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+with open(sys.argv[1], "rb") as fh:
+    d = tomllib.load(fh)
+
+f = d.get("feature", {}) or {}
+svcs = ",".join(
+    "{}:{}".format(s.get("name", ""), s.get("port", ""))
+    for s in (d.get("services") or [])
+    if s.get("name")
+)
+print("|".join([
+    f.get("project", ""),
+    f.get("name", ""),
+    f.get("branch", ""),
+    f.get("title", "") or "",
+    str(f.get("added_at", "") or ""),
+    svcs,
+]))
+PYEOF
+}
+export -f _read_info_toml
+
 # ─── Stack Dockerfile templating ─────────────────────────────────────────────
 # apply_stack_template SRC DEST
 # Copy a stack Dockerfile template, substituting whitelisted fleet.conf vars.
@@ -567,6 +604,7 @@ show_help() {
   echo "Commands:"
   echo -e "  ${BLUE}init${RESET}                                 Initialize fleet for a project (no args)"
   echo -e "  ${BLUE}add${RESET}     <name> [--title <t>] [--direct]  Start a multi-service feature"
+  echo -e "  ${BLUE}ls${RESET}      [--json]                     List feature containers and status"
   echo -e "  ${BLUE}rm${RESET}      <name>|--all|--nuke          Remove feature(s) or everything"
   echo -e "  ${BLUE}restart${RESET} <name>                       Restart a feature container"
   echo -e "  ${BLUE}push${RESET}    <name>                       Push service branches to remote"
