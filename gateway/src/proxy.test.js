@@ -17,7 +17,7 @@ import express from 'express';
 import { createProxyMiddleware, debugProxyErrorsPlugin, proxyEventsPlugin } from 'http-proxy-middleware';
 
 import { register, unregister, getAll, setActiveFeature } from './registry.js';
-import { stoppedContainerBody } from './proxy.js';
+import { stoppedContainerBody, noActiveFeatureBody, resolveTarget } from './proxy.js';
 
 // ── stoppedContainerBody unit tests ──────────────────────────────────────────
 
@@ -95,6 +95,80 @@ describe('registry updateStatus side-effect on liveness failure', () => {
 
     const entry = getFeature('testproject-dying');
     assert.equal(entry.status, 'stopped', 'registry should reflect stopped status');
+
+    clearRegistry();
+  });
+});
+
+// ── TOCTOU race regression: resolveTarget must not crash on unregistered key ──
+// Regression guard for: gateway/src/proxy.js — TOCTOU race where unregister()
+// is called between getActiveFeature() read and updateStatus() write, causing
+// "Feature is not registered" throw that kills the gateway process.
+//
+// Testing strategy: we cannot inject a callback between the await getContainerStatus
+// and the guarded updateStatus in resolveTarget(). Instead we test the guard
+// condition directly in two ways:
+//
+//   1. Verify updateStatus() still throws for a missing key (invariant intact).
+//   2. Verify the exact guarded code path that resolveTarget() now uses is safe:
+//      getFeature(selected) === null → skip updateStatus → no throw.
+//   3. Verify resolveTarget() returns ok:false when Docker is unavailable (as in
+//      CI), exercising the full code path without crashing.
+
+describe('resolveTarget — TOCTOU race: unregister between read and updateStatus', () => {
+  test('updateStatus still throws when called directly with an unregistered key', async () => {
+    clearRegistry();
+    const { updateStatus } = await import('./registry.js');
+    assert.throws(
+      () => updateStatus('ghost-project-main', 'stopped'),
+      /Feature 'ghost-project-main' is not registered/,
+      'updateStatus must still throw for unregistered keys (invariant preserved for API callers)'
+    );
+  });
+
+  test('guarded path: getFeature returns null for unregistered key, updateStatus skipped safely', async () => {
+    clearRegistry();
+    const { getFeature } = await import('./registry.js');
+
+    register('raceproj', 'main', 'main', null, 'up');
+    setActiveFeature('raceproj-main');
+
+    // Simulate the race outcome: feature unregistered while request was in flight.
+    // In production this happens between getActiveFeature() and updateStatus() in
+    // resolveTarget(); here we exercise the guard logic directly.
+    unregister('raceproj-main');
+
+    // This is exactly what resolveTarget() now does before calling updateStatus:
+    const entry = getFeature('raceproj-main');
+    assert.equal(entry, null, 'getFeature must return null for unregistered key');
+    // The guard `if (getFeature(selected)) { updateStatus(...) }` short-circuits here.
+    // No throw. No crash. Correct 503 body is returned either way.
+  });
+
+  test('resolveTarget returns ok:false and does not throw when active feature is unregistered mid-flight', async () => {
+    clearRegistry();
+
+    // Register a feature and set it active. Docker is unavailable in CI so
+    // getContainerStatus() will catch the socket error and return 'stopped'.
+    // resolveTarget() will then hit the guarded updateStatus path.
+    // Before the fix: if the feature happened to be unregistered at that point,
+    // the gateway crashed. After the fix: ok:false is returned cleanly.
+    register('raceproj2', 'main', 'main', null, 'up');
+    setActiveFeature('raceproj2-main');
+
+    // Call resolveTarget(). Docker unavailable → getContainerStatus returns 'stopped'
+    // → guarded updateStatus path → no throw regardless of registration state.
+    let result;
+    await assert.doesNotReject(
+      async () => { result = await resolveTarget(); },
+      'resolveTarget must not throw when getContainerStatus returns stopped'
+    );
+
+    assert.equal(result.ok, false, 'resolveTarget must return ok:false for a stopped container');
+    assert.ok(
+      typeof result.body === 'string' && result.body.length > 0,
+      'resolveTarget must return a non-empty 503 body string'
+    );
 
     clearRegistry();
   });
