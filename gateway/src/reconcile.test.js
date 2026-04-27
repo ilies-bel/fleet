@@ -46,7 +46,13 @@ import {
   getAll,
   isRegistered,
   getActiveFeature,
+  setActiveFeature,
+  loadPersistedActive,
 } from './registry.js';
+
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -252,5 +258,105 @@ describe('reconcileOne', () => {
 
     assert.equal(added, false);
     assert.equal(isRegistered('legacy-feature'), false);
+  });
+});
+
+// ── boot-restore: simulates what index.js does after reconcileFromDocker ──────
+//
+// index.js boot-restore logic (verbatim):
+//   const persistedKey = loadPersistedActive();
+//   if (persistedKey && isRegistered(persistedKey)) {
+//     setActiveFeature(persistedKey);
+//     console.log(`[fleet] restored active feature: ${persistedKey}`);
+//   }
+//
+// We test this logic by exercising the three registry functions directly with
+// a controlled FLEET_STATE_FILE, avoiding the need to import index.js (which
+// would bind ports and issue network calls).
+
+describe('boot-restore logic', () => {
+  let tmpDir;
+  let stateFile;
+  let savedEnv;
+
+  beforeEach(() => {
+    clearRegistry();
+    tmpDir = mkdtempSync(join(tmpdir(), 'fleet-boot-test-'));
+    stateFile = join(tmpDir, 'active.json');
+    savedEnv = process.env.FLEET_STATE_FILE;
+    process.env.FLEET_STATE_FILE = stateFile;
+  });
+
+  afterEach(() => {
+    clearRegistry();
+    if (savedEnv === undefined) {
+      delete process.env.FLEET_STATE_FILE;
+    } else {
+      process.env.FLEET_STATE_FILE = savedEnv;
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
+    // Reset docker impl
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async () => null,
+      startContainer: async () => {},
+    });
+  });
+
+  test('restores persisted key when it is registered', () => {
+    // Register both features as stopped first (no auto-pick, no file write).
+    // This simulates reconcileFromDocker running with stopped containers.
+    register('proj', 'alpha', 'main', null, 'stopped');
+    register('proj', 'beta', 'main', null, 'stopped');
+
+    // Now manually set alpha as active (simulates first-up auto-pick after start).
+    setActiveFeature('proj-alpha');  // writes proj-alpha to state file
+
+    assert.equal(getActiveFeature(), 'proj-alpha', 'precondition: alpha is auto-picked');
+
+    // Write the persisted choice AFTER all registry seeding — simulates
+    // what was left on disk from the previous gateway session (user had
+    // activated beta before the gateway was restarted).
+    writeFileSync(stateFile, JSON.stringify({ key: 'proj-beta', updatedAt: new Date().toISOString() }), 'utf8');
+
+    // Simulate index.js boot-restore
+    const persistedKey = loadPersistedActive();
+    if (persistedKey && isRegistered(persistedKey)) {
+      setActiveFeature(persistedKey);
+    }
+
+    assert.equal(getActiveFeature(), 'proj-beta', 'boot-restore must reinstate the persisted choice');
+  });
+
+  test('does NOT call setActiveFeature when persisted key is not in registry', () => {
+    // Persisted key whose container was removed between restarts.
+    writeFileSync(stateFile, JSON.stringify({ key: 'proj-removed', updatedAt: new Date().toISOString() }), 'utf8');
+
+    register('proj', 'alpha', 'main', null, 'up');  // only alpha is up now
+
+    const persistedKey = loadPersistedActive();
+    // Boot-restore guard: only restore if still registered
+    if (persistedKey && isRegistered(persistedKey)) {
+      setActiveFeature(persistedKey);
+    }
+
+    // Alpha should remain as auto-pick; no crash
+    assert.equal(getActiveFeature(), 'proj-alpha', 'auto-pick should stand when persisted key is missing');
+  });
+
+  test('does nothing and does not throw when state file is absent', () => {
+    // Read BEFORE any register so the file hasn't been written yet.
+    const persistedKey = loadPersistedActive();
+    assert.equal(persistedKey, null, 'loadPersistedActive must return null when no file exists');
+
+    // Now simulate reconcileFromDocker — registers alpha, auto-picks it.
+    register('proj', 'alpha', 'main', null, 'up');
+
+    // Boot-restore is a no-op (persistedKey was null before registration).
+    if (persistedKey && isRegistered(persistedKey)) {
+      setActiveFeature(persistedKey);
+    }
+
+    assert.equal(getActiveFeature(), 'proj-alpha', 'auto-pick should stand when no state file exists');
   });
 });

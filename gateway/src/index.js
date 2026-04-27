@@ -7,11 +7,21 @@ import authRouter from './auth.js';
 import { createFeatureProxy } from './proxy.js';
 import { createBackendProxy } from './backend-proxy.js';
 import { reconcileFromDocker, reconcileSweep } from './reconcile.js';
+import { loadPersistedActive, isRegistered, setActiveFeature } from './registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 await reconcileFromDocker();
+
+// Restore the previously chosen active feature (if its container came back up).
+// This overrides the arbitrary first-up auto-pick from reconcileFromDocker so
+// the user's explicit activation survives a gateway restart.
+const persistedKey = loadPersistedActive();
+if (persistedKey && isRegistered(persistedKey)) {
+  setActiveFeature(persistedKey);
+  console.log(`[fleet] restored active feature: ${persistedKey}`);
+}
 
 const SWEEP_INTERVAL_MS = 30_000;
 setInterval(() => {
