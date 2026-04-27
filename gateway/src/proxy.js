@@ -134,8 +134,16 @@ export async function resolveTarget() {
       }
       return { ok: true, key: selected };
     }
-    // Sync registry so the dashboard reflects reality
-    updateStatus(selected, 'stopped');
+    // Sync registry so the dashboard reflects reality.
+    // Guard against the TOCTOU race: `selected` was captured at the top of
+    // this function but another handler (DELETE /register-feature, teardown)
+    // may have called unregister(selected) between that read and here, which
+    // causes updateStatus() to throw "Feature is not registered" — killing the
+    // gateway process. If the feature is already gone the container is
+    // definitively gone too; returning a 503 is correct in both cases.
+    if (getFeature(selected)) {
+      updateStatus(selected, 'stopped');
+    }
     return { ok: false, body: stoppedContainerBody(selected) };
   }
 
