@@ -1,4 +1,55 @@
 import { inspectContainer } from './docker.js';
+import { writeFileSync, renameSync, readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { mkdirSync } from 'node:fs';
+
+/**
+ * Return the path to the active-feature state file.
+ * Read on every call so that tests can override FLEET_STATE_FILE at runtime
+ * without re-importing the module.
+ * @returns {string}
+ */
+function stateFilePath() {
+  return process.env.FLEET_STATE_FILE ?? '/var/lib/fleet/active.json';
+}
+
+/**
+ * Write the active feature key to disk atomically (tmp + rename).
+ * Silently swallows errors — persistence is best-effort; the gateway must
+ * never crash because state could not be written (e.g. read-only mount).
+ * @param {string|null} key
+ */
+function persistActive(key) {
+  try {
+    const file = stateFilePath();
+    mkdirSync(dirname(file), { recursive: true });
+    const payload = JSON.stringify({ key, updatedAt: new Date().toISOString() });
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, payload, 'utf8');
+    renameSync(tmp, file);
+  } catch {
+    // Best-effort — never throw from persistence layer.
+  }
+}
+
+/**
+ * Read the persisted active feature key from disk.
+ * Returns null on missing file, unreadable file, or malformed JSON.
+ * Never throws.
+ * @returns {string|null}
+ */
+export function loadPersistedActive() {
+  try {
+    const raw = readFileSync(stateFilePath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.key === 'string' && parsed.key.length > 0) {
+      return parsed.key;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * @typedef {{ name: string, port: number }} ServiceEntry
@@ -119,7 +170,10 @@ export function register(project, name, branch, worktreePath = null, status = 'u
   const key = `${project}-${name}`;
   const normalised = normaliseStatus(status);
   features.set(key, { project, name, key, branch, worktreePath, title, addedAt: new Date(), status: normalised, error, services });
-  if (activeFeature === null && normalised === 'up') activeFeature = key;
+  if (activeFeature === null && normalised === 'up') {
+    activeFeature = key;
+    persistActive(key);
+  }
 }
 
 /**
@@ -217,6 +271,7 @@ export function getActiveFeature() {
 export function setActiveFeature(key) {
   if (!features.has(key)) throw new Error(`Feature '${key}' is not registered`);
   activeFeature = key;
+  persistActive(key);
 }
 
 /**

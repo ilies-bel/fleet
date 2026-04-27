@@ -289,6 +289,15 @@ if docker inspect fleet-gateway >/dev/null 2>&1; then
 fi
 
 # ─── Start gateway ───────────────────────────────────────────────────────────
+# Persist active-feature selection across restarts.
+# ~/.fleet is bind-mounted into the container at /var/lib/fleet.
+# chmod 0777 lets the container's non-root developer (uid 1001) write there
+# without requiring a chown step or a separate init container — the simplest
+# approach on macOS Docker Desktop where uid mapping is transparent.
+FLEET_STATE_DIR="$HOME/.fleet"
+mkdir -p "$FLEET_STATE_DIR"
+chmod 0777 "$FLEET_STATE_DIR"
+
 info "Starting gateway container..."
 docker run -d \
   --name fleet-gateway \
@@ -296,6 +305,7 @@ docker run -d \
   -p 3000:3000 \
   -p 4000:4000 \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$FLEET_STATE_DIR":/var/lib/fleet \
   --security-opt label=disable \
   --restart unless-stopped \
   fleet-gateway
