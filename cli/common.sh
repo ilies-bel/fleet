@@ -609,6 +609,7 @@ show_help() {
   echo -e "  ${BLUE}restart${RESET} <name>                       Restart a feature container"
   echo -e "  ${BLUE}push${RESET}    <name>                       Push service branches to remote"
   echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] [--rebuild]  Pull latest code and rebuild"
+  echo -e "  ${BLUE}migrate-names${RESET}                        Identify and remove pre-migration bare-named containers"
   echo -e "  ${BLUE}install-claude${RESET} [--local|--global] [--force]  Install Claude Code assets"
   echo -e "  ${BLUE}help${RESET}    [<command>]                  Show this help, or help for <command>"
   echo ""
