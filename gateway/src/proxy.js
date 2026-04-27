@@ -106,13 +106,12 @@ export function createFeatureProxy() {
 }
 
 /**
- * Resolve which feature should serve a request, applying main fallback.
+ * Resolve which feature should serve a request.
  *
  * Resolution order:
  *   1. Active feature is running → use it.
- *   2. Active feature is stopped → update registry, try main.
- *   3. No active feature → try main.
- *   4. main is not running → 503.
+ *   2. Active feature is stopped → update registry, return 503.
+ *   3. No active feature → return 503.
  *
  * The `key` in the success shape is the composite registry key (= the
  * Docker container name suffix, i.e. `fleet-${key}` is the container).
@@ -137,17 +136,25 @@ export async function resolveTarget() {
     }
     // Sync registry so the dashboard reflects reality
     updateStatus(selected, 'stopped');
+    return { ok: false, body: stoppedContainerBody(selected) };
   }
 
-  // Fallback: try main. In the composite-key world there is no project for
-  // the main container — it predates the project namespace. We keep it as the
-  // literal container name `fleet-main` for backward compatibility.
-  const mainStatus = await getContainerStatus('main');
-  if (mainStatus === 'running') {
-    return { ok: true, key: 'main' };
-  }
+  return { ok: false, body: noActiveFeatureBody() };
+}
 
-  return { ok: false, body: stoppedContainerBody('main') };
+/**
+ * Build the 503 HTML response body when no feature is active for any project.
+ * @returns {string}
+ */
+export function noActiveFeatureBody() {
+  return (
+    '<html><body style="font-family:monospace;background:#0a0a0a;color:#888;padding:2rem">' +
+    '<h2 style="color:#ff4444">// NO ACTIVE FEATURE</h2>' +
+    '<p>No feature is currently active.</p>' +
+    '<p>Pick one in the dashboard at <a href="http://localhost:4000" style="color:#00ff88">localhost:4000</a>, ' +
+    'or spin one up: <code style="color:#00ff88">fleet add &lt;name&gt;</code>.</p>' +
+    '</body></html>'
+  );
 }
 
 /**

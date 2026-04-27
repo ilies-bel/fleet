@@ -4,7 +4,6 @@ import fs from 'fs';
 import express, { Router } from 'express';
 import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
 import { dockerExec, dockerLogs, stopContainer, startContainer, removeContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
-import { ensureMainRunning } from './lifecycle.js';
 
 const router = Router();
 const startedAt = Date.now();
@@ -189,25 +188,6 @@ router.get('/features/:key/logs', async (req, res) => {
         : err.message;
       return res.status(status).json({ error: msg });
     }
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * POST /_fleet/api/main/ensure
- * Ensure fleet-main is running — idempotent; safe to call at any time.
- * 404 if the container does not exist (fleet add main --direct first).
- */
-router.post('/main/ensure', async (_req, res) => {
-  try {
-    const info = await inspectContainer('fleet-main');
-    if (!info) {
-      return res.status(404).json({ error: 'fleet-main container not found — run `fleet add main --direct` first' });
-    }
-    await ensureMainRunning();
-    res.json({ ok: true });
-  } catch (err) {
-    if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
