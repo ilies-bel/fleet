@@ -11,7 +11,7 @@ import { resolveTarget, stoppedContainerBody } from './proxy.js';
  * /backend → Spring sees /api/tickets.
  *
  * Target resolution is delegated to proxy.js#resolveTarget so both :3000 and
- * :8080 share the same "selected feature, else main, else 503" semantics.
+ * :8080 share the same "selected feature, else 503" semantics.
  *
  * The returned function also carries an `.upgrade` property so the caller can
  * wire it to the http.Server 'upgrade' event for WebSocket support:
