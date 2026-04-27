@@ -490,18 +490,17 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
     fi
   done
   # [[shared]] files from fleet.toml: bind-mount read-only into every container.
-  # Always mount from PROJECT_WORKTREE_PATH — hard fail if the file is missing.
-  # Worktrees must be fully set up before fleet add.
+  # Always mount from FLEET_PROJECT_ROOT (primary checkout) so a single source
+  # of truth is shared across all feature containers without copying into worktrees.
   while IFS=$'\t' read -r shared_path shared_target; do
     [ -z "${shared_path}" ] && continue
-    [ -n "${PROJECT_WORKTREE_PATH:-}" ] \
-      || error "[[shared]] files require [project].path to be set when no per-service override covers all services."
-    src="${PROJECT_WORKTREE_PATH}/${shared_path}"
+    [ -n "${FLEET_PROJECT_ROOT:-}" ] \
+      || error "[[shared]] files require [project].root to be set in fleet.toml."
+    src="${FLEET_PROJECT_ROOT}/${shared_path}"
     [ -f "${src}" ] \
       || error "Shared file missing: ${src}
-The worktree must contain all [[shared]] files declared in fleet.toml.
-Copy it from the primary checkout or generate it:
-  cp ${FLEET_PROJECT_ROOT}/${shared_path} ${src}"
+Create the file in the primary checkout and re-run fleet add:
+  touch ${FLEET_PROJECT_ROOT}/${shared_path}"
     tgt="${shared_target:-/app/${shared_path}}"
     echo "      - ${src}:${tgt}:ro"
   done < <("${_PYBIN}" -c "
