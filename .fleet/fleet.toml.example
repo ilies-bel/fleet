@@ -148,3 +148,34 @@ env_files = [".env.local"]   # auto-discovered by fleet init; mounted only into 
 # [[shared]]
 # path   = ".env.local"
 # target = "/app/.env.local"
+
+# ─── Lifecycle hooks ──────────────────────────────────────────────────────────
+# Optional. Inline POSIX shell commands run at key points during fleet add / rm.
+# Fleet executes each value with `sh -c "<string>"` (POSIX sh, not bash).
+# Working directory for every hook: project.root (the directory containing fleet.toml).
+#
+# Variable interpolation — substitute these placeholders before the string is
+# handed to sh (use {var} syntax in the value OR the FLEET_* env var equivalents):
+#
+#   {name}           / FLEET_FEATURE_NAME   — feature name (e.g. bd-foo)
+#   {project}        / FLEET_PROJECT_NAME   — project.name from [project]
+#   {worktree_path}  / FLEET_WORKTREE_PATH  — absolute worktree path (or project root in --direct)
+#   {branch}         / FLEET_BRANCH         — git branch the worktree is on
+#   {direct}         / FLEET_DIRECT         — "true" or "false"
+#
+# Failure semantics:
+#   pre_add / pre_rm  — non-zero exit aborts the operation; fleet exits non-zero.
+#   post_add / post_rm — non-zero exit is a warning only; fleet continues.
+#
+# For complex hooks, call an external script:
+#   pre_add = "bash scripts/seed-worktree.sh"
+#
+# [hooks]
+# # Seed node_modules from the primary checkout to avoid a full npm install per worktree.
+# pre_add  = "cp -R frontend/node_modules frontend/.worktrees/{name}/node_modules"
+# # Notify a Slack webhook after the container comes up.
+# post_add = "curl -s -X POST https://hooks.slack.com/... -d 'feature {name} started'"
+# # Log which feature is being torn down.
+# pre_rm   = "echo 'tearing down {name} (branch: {branch})' >&2"
+# # Post-removal notification; non-zero exit is a warning, not a hard failure.
+# post_rm  = "curl -s -X POST https://hooks.slack.com/... -d 'feature {name} removed'"

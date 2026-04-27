@@ -386,3 +386,59 @@ btoa(JSON.stringify({ feature: "login-fix" }))
 **`.fleet-config` not found**
 
 Every command except `init` reads `APP_ROOT` from `.fleet-config` at the fleet root. Run `fleet init` first to create it.
+
+## Lifecycle hooks
+
+Fleet can run inline shell commands at four points in the `fleet add` / `fleet rm` lifecycle. Add a `[hooks]` table to `.fleet/fleet.toml`:
+
+```toml
+[hooks]
+pre_add  = "cp -R frontend/node_modules frontend/.worktrees/{name}/node_modules"
+post_add = "./bin/seed-db --feature {name}"
+pre_rm   = "echo 'tearing down {name} (branch: {branch})' >&2"
+post_rm  = "curl -s -X POST https://hooks.slack.com/... -d 'feature {name} removed'"
+```
+
+### Hook points
+
+| Hook | When it runs |
+|------|-------------|
+| `pre_add` | After the worktree is validated, **before** the container starts |
+| `post_add` | After the container is healthy |
+| `pre_rm` | Before any container teardown |
+| `post_rm` | After the container and feature directory are fully removed |
+
+### Inline string contract
+
+- Each value is a single string. Fleet runs it with `sh -c "<string>"` (POSIX sh, not bash).
+- Working directory: `project.root` (the directory containing `.fleet/fleet.toml`).
+- For multi-step hooks, call an external script: `pre_add = "bash scripts/seed-worktree.sh"`.
+- Omit a key entirely (or leave it out of the table) to disable that hook — no silent default.
+
+### Variable substitution
+
+Fleet substitutes `{var}` placeholders in the string before passing it to `sh`. The same values are also exported as environment variables so hook scripts can use either style:
+
+| Placeholder | Env var | Value |
+|-------------|---------|-------|
+| `{name}` | `FLEET_FEATURE_NAME` | Feature name (e.g. `bd-foo`) |
+| `{project}` | `FLEET_PROJECT_NAME` | `project.name` from fleet.toml |
+| `{worktree_path}` | `FLEET_WORKTREE_PATH` | Absolute worktree path (or project root in `--direct` mode) |
+| `{branch}` | `FLEET_BRANCH` | Git branch the worktree is on |
+| `{direct}` | `FLEET_DIRECT` | `"true"` or `"false"` |
+
+### Failure semantics
+
+- **`pre_add`, `pre_rm`** — non-zero exit **aborts** the operation. Fleet prints `hook failed: <name> (exit <code>)` to stderr and exits non-zero.
+- **`post_add`, `post_rm`** — non-zero exit is a **warning** only. Fleet prints `warning: post-hook <name> exited <code>` to stderr and continues normally (the container is already up or already removed).
+
+### Example: seeding node_modules
+
+The canonical motivating use case — seed each new worktree's `node_modules` from the primary checkout so `npm install` becomes a fast no-op inside the container:
+
+```toml
+[hooks]
+pre_add = "cp -R frontend/node_modules frontend/.worktrees/{name}/node_modules"
+```
+
+`fleet add my-feature` runs the copy (cwd = project root) before the container starts. The worktree already has `node_modules` by the time supervisord launches the frontend process.

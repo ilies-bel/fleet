@@ -252,6 +252,17 @@ done
 # SVC_BRANCHES[0] already reflects the worktree's real branch (set above).
 FIRST_BRANCH="${SVC_BRANCHES[0]}"
 
+# ─── Export hook context vars (used by run_hook and available to hook scripts) ─
+export FLEET_FEATURE_NAME="${NAME}"
+export FLEET_BRANCH="${FIRST_BRANCH}"
+export FLEET_DIRECT="${DIRECT}"
+# FLEET_PROJECT_NAME and FLEET_WORKTREE_PATH already exported by load_fleet_toml.
+# Override FLEET_WORKTREE_PATH with the resolved value for this invocation.
+export FLEET_WORKTREE_PATH="${PROJECT_WORKTREE_PATH}"
+
+# ─── pre_add hook ─────────────────────────────────────────────────────────────
+run_hook pre_add
+
 # ─── Compute gateway registration payload early ──────────────────────────────
 # We register BEFORE docker compose up so the dashboard can show a 'building'
 # chip during the slowest phase of the add flow (image build + compose up).
@@ -685,6 +696,11 @@ gateway_patch_status "${FLEET_PROJECT_NAME}-${NAME}" "running"
 # re-trigger 'failed' if, say, the terminal close causes a SIGPIPE.
 trap - ERR
 rm -f "${_FLEET_FAIL_LOG}"
+
+# ─── post_add hook ────────────────────────────────────────────────────────────
+# Runs after container is healthy. Non-zero exit is a warning only (container
+# is already up; run_hook handles the soft-fail semantics for post_* hooks).
+run_hook post_add
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo ""
