@@ -7,12 +7,10 @@ import authRouter from './auth.js';
 import { createFeatureProxy } from './proxy.js';
 import { createBackendProxy } from './backend-proxy.js';
 import { reconcileFromDocker, reconcileSweep } from './reconcile.js';
-import { ensureMainRunning } from './lifecycle.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-await ensureMainRunning();
 await reconcileFromDocker();
 
 const SWEEP_INTERVAL_MS = 30_000;
@@ -35,7 +33,7 @@ proxyServer.on('upgrade', featureProxy.upgrade);
 
 // ── backend port (BACKEND_PORT, default 8080) — mirrors proxy routing but ──
 // prepends /backend so nginx-in-container routes to the Spring backend.
-// Same selected-feature + main-fallback semantics as :3000.
+// Same selected-feature semantics as :3000.
 const backendProxy = createBackendProxy();
 const backendApp = express();
 backendApp.use(backendProxy);
