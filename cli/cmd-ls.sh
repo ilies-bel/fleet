@@ -51,9 +51,12 @@ for arg in "$@"; do
   esac
 done
 
+# Resolve per-project .fleet/ root
+load_fleet_toml
+
 # ─── Collect filesystem entries ───────────────────────────────────────────────
 shopt -s nullglob
-INFO_TOMLS=( "${FLEET_ROOT}/.fleet/"*/info.toml )
+INFO_TOMLS=( "${FLEET_CONFIG_ROOT}/.fleet/"*/info.toml )
 shopt -u nullglob
 
 if [ "${#INFO_TOMLS[@]}" -eq 0 ]; then
