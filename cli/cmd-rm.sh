@@ -152,6 +152,33 @@ case "$MODE" in
       error "Feature '${NAME}' not found (.fleet/${NAME}/info.toml missing). Run: fleet ls"
     fi
 
+    # Load fleet.toml to get hook configuration (best-effort; skip if absent).
+    load_fleet_toml 2>/dev/null || true
+
+    # Export hook context vars so run_hook can interpolate {var} placeholders.
+    # Read branch from info.toml via _read_info_toml (project|name|branch|...).
+    _RM_INFO_ROW=$(_read_info_toml "${INFO_TOML}" 2>/dev/null) || _RM_INFO_ROW=""
+    _RM_BRANCH=""
+    if [ -n "${_RM_INFO_ROW}" ]; then
+      # Format: project|name|branch|title|added_at|svcs
+      _RM_BRANCH=$(echo "${_RM_INFO_ROW}" | cut -d'|' -f3)
+    fi
+    _RM_WORKTREE_PATH=$(fleet_resolve_worktree "${NAME}" 2>/dev/null) || _RM_WORKTREE_PATH="${FLEET_PROJECT_ROOT:-}"
+
+    export FLEET_FEATURE_NAME="${NAME}"
+    export FLEET_BRANCH="${_RM_BRANCH}"
+    export FLEET_DIRECT="false"
+    export FLEET_WORKTREE_PATH="${_RM_WORKTREE_PATH}"
+    # FLEET_PROJECT_NAME already exported by load_fleet_toml.
+
+    # ─── pre_rm hook ─────────────────────────────────────────────────────────
+    # Hard-fail: a non-zero exit aborts the removal (set -e propagates).
+    run_hook pre_rm
+
     remove_feature "${NAME}"
+
+    # ─── post_rm hook ────────────────────────────────────────────────────────
+    # Soft-fail: run_hook handles warning + returns 0 for post_* hooks.
+    run_hook post_rm
     ;;
 esac

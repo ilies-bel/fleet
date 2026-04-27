@@ -148,6 +148,7 @@ stacks   = data.get("stacks", [])
 services = data.get("services", [])
 peers    = data.get("peers", [])
 shared   = data.get("shared", [])
+hooks    = data.get("hooks", {})
 
 # Detect legacy 'worktree_template' key — hard error, no alias
 legacy_keys = []
@@ -220,6 +221,10 @@ out = {
         for s in shared
         if s.get("path")
     ]),
+    "hook_pre_add":   hooks.get("pre_add", ""),
+    "hook_post_add":  hooks.get("post_add", ""),
+    "hook_pre_rm":    hooks.get("pre_rm", ""),
+    "hook_post_rm":   hooks.get("post_rm", ""),
 }
 print(json.dumps(out))
 PYEOF
@@ -240,10 +245,15 @@ PYEOF
   FLEET_SERVICES_JSON=$(_get services_json)
   FLEET_PEERS_JSON=$(_get peers_json)
   FLEET_SHARED_JSON=$(_get shared_json)
+  FLEET_HOOK_PRE_ADD=$(_get hook_pre_add)
+  FLEET_HOOK_POST_ADD=$(_get hook_post_add)
+  FLEET_HOOK_PRE_RM=$(_get hook_pre_rm)
+  FLEET_HOOK_POST_RM=$(_get hook_post_rm)
 
   export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT FLEET_WORKTREE_PATH \
          FLEET_PORT_PROXY FLEET_PORT_ADMIN FLEET_PORT_DB \
-         FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON FLEET_SHARED_JSON
+         FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON FLEET_SHARED_JSON \
+         FLEET_HOOK_PRE_ADD FLEET_HOOK_POST_ADD FLEET_HOOK_PRE_RM FLEET_HOOK_POST_RM
 }
 
 # fleet_services_json — print FLEET_SERVICES_JSON
@@ -348,6 +358,95 @@ fleet_resolve_service_worktree() {
 }
 
 export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_stack_for_service fleet_stack_shared_paths fleet_project_root fleet_resolve_worktree fleet_resolve_service_worktree
+
+# ─── Lifecycle hooks ─────────────────────────────────────────────────────────
+# run_hook <hook_name>
+#
+# Reads the inline shell string from the corresponding FLEET_HOOK_* var (set by
+# load_fleet_toml).  If the var is empty, returns 0 immediately — no hook.
+#
+# Variable interpolation performed BEFORE handing the string to sh(1):
+#   {name}           → FLEET_FEATURE_NAME  (feature name, e.g. bd-foo)
+#   {project}        → FLEET_PROJECT_NAME  (project.name from fleet.toml)
+#   {worktree_path}  → FLEET_WORKTREE_PATH (absolute worktree path, or project root in --direct)
+#   {branch}         → FLEET_BRANCH        (git branch the worktree is on)
+#   {direct}         → FLEET_DIRECT        ("true" or "false")
+#
+# The same five values are also exported as env vars into the hook's environment
+# so users who prefer env-style have the option.
+#
+# Execution:
+#   - cwd = FLEET_PROJECT_ROOT (the directory containing fleet.toml)
+#   - interpreter: sh -c (POSIX sh, not bash)
+#   - stdout/stderr streamed to the user's terminal in real time
+#
+# Exit behaviour:
+#   pre_*  — non-zero exit: print "hook failed: <name> (exit <code>)" to stderr,
+#             return that exit code (caller must abort).
+#   post_* — non-zero exit: print "warning: post-hook <name> exited <code>" to
+#             stderr, return 0 (the container is already up; caller continues).
+run_hook() {
+  local hook_name="${1:-}"
+  [ -n "${hook_name}" ] || { echo "[fleet] run_hook: hook name required" >&2; return 1; }
+
+  # Map hook name → env var
+  local hook_str
+  case "${hook_name}" in
+    pre_add)  hook_str="${FLEET_HOOK_PRE_ADD:-}"  ;;
+    post_add) hook_str="${FLEET_HOOK_POST_ADD:-}" ;;
+    pre_rm)   hook_str="${FLEET_HOOK_PRE_RM:-}"   ;;
+    post_rm)  hook_str="${FLEET_HOOK_POST_RM:-}"  ;;
+    *)
+      echo "[fleet] run_hook: unknown hook '${hook_name}' (expected: pre_add, post_add, pre_rm, post_rm)" >&2
+      return 1
+      ;;
+  esac
+
+  # Empty string → no hook configured; silent no-op
+  [ -n "${hook_str}" ] || return 0
+
+  # {var} interpolation — substitute known placeholders before handing to sh
+  local _name="${FLEET_FEATURE_NAME:-}"
+  local _project="${FLEET_PROJECT_NAME:-}"
+  local _wt_path="${FLEET_WORKTREE_PATH:-}"
+  local _branch="${FLEET_BRANCH:-}"
+  local _direct="${FLEET_DIRECT:-false}"
+
+  local interpolated="${hook_str}"
+  interpolated="${interpolated//\{name\}/${_name}}"
+  interpolated="${interpolated//\{project\}/${_project}}"
+  interpolated="${interpolated//\{worktree_path\}/${_wt_path}}"
+  interpolated="${interpolated//\{branch\}/${_branch}}"
+  interpolated="${interpolated//\{direct\}/${_direct}}"
+
+  # Run hook: cwd = FLEET_PROJECT_ROOT, env vars exported for the hook process
+  local _rc=0
+  (
+    cd "${FLEET_PROJECT_ROOT:-${PWD}}"
+    export FLEET_FEATURE_NAME="${_name}"
+    export FLEET_PROJECT_NAME="${_project}"
+    export FLEET_WORKTREE_PATH="${_wt_path}"
+    export FLEET_BRANCH="${_branch}"
+    export FLEET_DIRECT="${_direct}"
+    sh -c "${interpolated}"
+  ) || _rc=$?
+
+  if [ "${_rc}" -ne 0 ]; then
+    case "${hook_name}" in
+      pre_*)
+        echo "hook failed: ${hook_name} (exit ${_rc})" >&2
+        return "${_rc}"
+        ;;
+      post_*)
+        echo "warning: post-hook ${hook_name} exited ${_rc}" >&2
+        return 0
+        ;;
+    esac
+  fi
+
+  return 0
+}
+export -f run_hook
 
 # ─── Config loaders (legacy shims) ───────────────────────────────────────────
 # These kept for backward compatibility while cmd-*.sh scripts are migrated.
