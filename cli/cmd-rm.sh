@@ -13,7 +13,7 @@ source "${SCRIPT_DIR}/common.sh"
 # ─── remove_feature <name> ────────────────────────────────────────────────────
 remove_feature() {
   local name="$1"
-  local feature_dir="${FLEET_ROOT}/.fleet/${name}"
+  local feature_dir="${FLEET_CONFIG_ROOT}/.fleet/${name}"
   local compose_file="${feature_dir}/docker-compose.yml"
   local info_toml="${feature_dir}/info.toml"
 
@@ -103,11 +103,14 @@ if [ -z "$MODE" ]; then
   _rm_help 1
 fi
 
+# Resolve per-project .fleet/ root (best-effort: --nuke must still work without fleet.toml)
+load_fleet_toml 2>/dev/null || true
+
 case "$MODE" in
   --all)
     info "Removing all feature containers..."
     shopt -s nullglob
-    for info_toml in "${FLEET_ROOT}/.fleet/"*/info.toml; do
+    for info_toml in "${FLEET_CONFIG_ROOT}/.fleet/"*/info.toml; do
       local_name=$(basename "$(dirname "${info_toml}")")
       remove_feature "${local_name}"
     done
@@ -119,7 +122,7 @@ case "$MODE" in
     info "Nuking everything..."
 
     shopt -s nullglob
-    for info_toml in "${FLEET_ROOT}/.fleet/"*/info.toml; do
+    for info_toml in "${FLEET_CONFIG_ROOT}/.fleet/"*/info.toml; do
       local_name=$(basename "$(dirname "${info_toml}")")
       remove_feature "${local_name}" 2>/dev/null || true
     done
@@ -143,7 +146,7 @@ case "$MODE" in
   *)
     NAME="$MODE"
     validate_feature_name "${NAME}"
-    INFO_TOML="${FLEET_ROOT}/.fleet/${NAME}/info.toml"
+    INFO_TOML="${FLEET_CONFIG_ROOT}/.fleet/${NAME}/info.toml"
 
     # Without info.toml we cannot know the composite container name, so we can
     # only check for the info.toml itself. If it is missing, the feature was
@@ -151,9 +154,6 @@ case "$MODE" in
     if [ ! -f "${INFO_TOML}" ]; then
       error "Feature '${NAME}' not found (.fleet/${NAME}/info.toml missing). Run: fleet ls"
     fi
-
-    # Load fleet.toml to get hook configuration (best-effort; skip if absent).
-    load_fleet_toml 2>/dev/null || true
 
     # Export hook context vars so run_hook can interpolate {var} placeholders.
     # Read branch from info.toml via _read_info_toml (project|name|branch|...).

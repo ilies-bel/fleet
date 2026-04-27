@@ -36,7 +36,10 @@ fi
 
 validate_feature_name "${NAME}"
 
-INFO_TOML="${FLEET_ROOT}/.fleet/${NAME}/info.toml"
+# Resolve per-project .fleet/ root
+load_fleet_toml
+
+INFO_TOML="${FLEET_CONFIG_ROOT}/.fleet/${NAME}/info.toml"
 [ -f "${INFO_TOML}" ] || error "Feature '${NAME}' not found (no .fleet/${NAME}/info.toml). Run: fleet add ${NAME}"
 
 # ─── Parse services from info.toml ───────────────────────────────────────────
