@@ -25,6 +25,7 @@ case "$cmd" in
   restart)         exec "$FLEET_ROOT/cli/cmd-restart.sh" "$@" ;;
   push)            exec "$FLEET_ROOT/cli/cmd-push.sh" "$@" ;;
   sync)            exec "$FLEET_ROOT/cli/cmd-sync.sh" "$@" ;;
+  migrate-names)   exec "$FLEET_ROOT/cli/cmd-migrate-names.sh" "$@" ;;
   install-claude)
     command -v node >/dev/null 2>&1 || { echo "[fleet] ERROR: node is required for 'install-claude'" >&2; exit 1; }
     exec node "$FLEET_ROOT/bin/fleet.js" install-claude "$@"
@@ -42,6 +43,7 @@ case "$cmd" in
         restart)        exec "$FLEET_ROOT/cli/cmd-restart.sh" --help ;;
         push)           exec "$FLEET_ROOT/cli/cmd-push.sh" --help ;;
         sync)           exec "$FLEET_ROOT/cli/cmd-sync.sh" --help ;;
+        migrate-names)  exec "$FLEET_ROOT/cli/cmd-migrate-names.sh" --help ;;
         install-claude)
           command -v node >/dev/null 2>&1 || { echo "[fleet] ERROR: node is required for 'install-claude'" >&2; exit 1; }
           exec node "$FLEET_ROOT/bin/fleet.js" install-claude --help
