@@ -296,8 +296,6 @@ Per project standards: files 200–400 lines typical, 800 lines maximum. Current
 | `gateway/src/docker.js` | ~280 |
 | `gateway/src/api.js` | ~220 |
 | `config/entrypoint.sh` | ~108 |
-| `scripts/fleet-add.sh` | ~166 |
 | `scripts/fleet-init.sh` | ~147 |
-| `scripts/fleet-teardown.sh` | ~128 |
 
 If a file approaches 800 lines, split by concern (e.g., extract Docker stat parsing from `docker.js` into `docker-stats.js`).
