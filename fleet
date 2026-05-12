@@ -23,6 +23,8 @@ case "$cmd" in
   ls)              exec "$FLEET_ROOT/cli/cmd-ls.sh" "$@" ;;
   rm)              exec "$FLEET_ROOT/cli/cmd-rm.sh" "$@" ;;
   restart)         exec "$FLEET_ROOT/cli/cmd-restart.sh" "$@" ;;
+  stop)            exec "$FLEET_ROOT/cli/cmd-stop.sh" "$@" ;;
+  start)           exec "$FLEET_ROOT/cli/cmd-start.sh" "$@" ;;
   push)            exec "$FLEET_ROOT/cli/cmd-push.sh" "$@" ;;
   sync)            exec "$FLEET_ROOT/cli/cmd-sync.sh" "$@" ;;
   migrate-names)   exec "$FLEET_ROOT/cli/cmd-migrate-names.sh" "$@" ;;
@@ -41,6 +43,8 @@ case "$cmd" in
         ls)             exec "$FLEET_ROOT/cli/cmd-ls.sh" --help ;;
         rm)             exec "$FLEET_ROOT/cli/cmd-rm.sh" --help ;;
         restart)        exec "$FLEET_ROOT/cli/cmd-restart.sh" --help ;;
+        stop)           exec "$FLEET_ROOT/cli/cmd-stop.sh" --help ;;
+        start)          exec "$FLEET_ROOT/cli/cmd-start.sh" --help ;;
         push)           exec "$FLEET_ROOT/cli/cmd-push.sh" --help ;;
         sync)           exec "$FLEET_ROOT/cli/cmd-sync.sh" --help ;;
         migrate-names)  exec "$FLEET_ROOT/cli/cmd-migrate-names.sh" --help ;;

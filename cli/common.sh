@@ -706,6 +706,8 @@ show_help() {
   echo -e "  ${BLUE}ls${RESET}      [--json]                     List feature containers and status"
   echo -e "  ${BLUE}rm${RESET}      <name>|--all|--nuke          Remove feature(s) or everything"
   echo -e "  ${BLUE}restart${RESET} <name>                       Restart a feature container"
+  echo -e "  ${BLUE}stop${RESET}    <name>|--all                 Stop feature container(s) without destroying them"
+  echo -e "  ${BLUE}start${RESET}   <name>|--all                 Resume stopped feature container(s)"
   echo -e "  ${BLUE}push${RESET}    <name>                       Push service branches to remote"
   echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] [--rebuild]  Pull latest code and rebuild"
   echo -e "  ${BLUE}migrate-names${RESET}                        Identify and remove pre-migration bare-named containers"
