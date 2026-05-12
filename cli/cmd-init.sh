@@ -10,19 +10,30 @@ export FLEET_ROOT
 # shellcheck source=./common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-# Guard: no positional arguments accepted
-if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-  echo "Usage: fleet init"
-  echo ""
-  echo "  Initialize fleet for the project in the current directory."
-  echo "  Reads .fleet/fleet.toml if present; otherwise starts an interactive wizard."
-  echo ""
-  exit 0
-fi
-
-if [ $# -gt 0 ]; then
-  error "fleet init takes no arguments. See: fleet init --help"
-fi
+OVERRIDE=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --help|-h)
+      echo "Usage: fleet init [--override]"
+      echo ""
+      echo "  Initialize fleet for the project in the current directory."
+      echo "  Reads .fleet/fleet.toml if present; otherwise starts an interactive wizard."
+      echo ""
+      echo "Options:"
+      echo "  --override    Regenerate .fleet/fleet.toml, .fleet/Dockerfile.feature-base,"
+      echo "                and .fleet/.gitignore even if they already exist."
+      echo ""
+      exit 0
+      ;;
+    --override)
+      OVERRIDE=1
+      shift
+      ;;
+    *)
+      error "Unknown argument: $1. See: fleet init --help"
+      ;;
+  esac
+done
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 # fleet init is a per-project bootstrap: write .fleet/ into the project working
@@ -580,6 +591,9 @@ ADMIN_PORT="4000"
 DB_PORT="5432"
 WORKTREE_TEMPLATE=".worktrees/{name}"
 
+FLEET_TOML_EXISTED=0
+[ -f "${FLEET_TOML}" ] && FLEET_TOML_EXISTED=1
+
 if [ -f "${FLEET_TOML}" ]; then
   info "Found existing ${FLEET_TOML} — reconfiguring idempotently"
   load_fleet_toml
@@ -671,10 +685,18 @@ while [ "${idx}" -lt "${#SVC_NAMES[@]}" ]; do
 done
 
 # ─── Re-emit canonical fleet.toml (normalize format on idempotent runs) ──────
-write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}" "${WORKTREE_TEMPLATE}"
+if [ "${FLEET_TOML_EXISTED}" -eq 0 ] || [ "${OVERRIDE}" -eq 1 ]; then
+  write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}" "${WORKTREE_TEMPLATE}"
+else
+  info "Keeping existing .fleet/fleet.toml (pass --override to regenerate)"
+fi
 
 # ─── Seed .fleet/.gitignore (idempotent) ─────────────────────────────────────
-write_fleet_gitignore
+if [ ! -f "${FLEET_DIR}/.gitignore" ] || [ "${OVERRIDE}" -eq 1 ]; then
+  write_fleet_gitignore
+else
+  info "Keeping existing .fleet/.gitignore (pass --override to regenerate)"
+fi
 
 # ─── Discover .env files → .fleet/shared.env ─────────────────────────────────
 discover_env_files "${PROJECT_ROOT}"
@@ -682,19 +704,8 @@ discover_env_files "${PROJECT_ROOT}"
 # ─── Generate and build project-scoped base image ────────────────────────────
 PROJECT_LOCAL_DOCKERFILE="${PWD}/.fleet/Dockerfile.feature-base"
 
-if [ -f "${PROJECT_LOCAL_DOCKERFILE}" ]; then
-  ans=""
-  printf "  Overwrite existing .fleet/Dockerfile.feature-base? [y/N]: "
-  if [ -t 0 ]; then
-    read -r ans </dev/tty
-  else
-    ans="n"
-    echo "n (no tty)"
-  fi
-  case "${ans:-n}" in
-    [Yy]*) generate_feature_base_dockerfile SVC_STACKS "${PROJECT_LOCAL_DOCKERFILE}" ;;
-    *)     info "Keeping existing .fleet/Dockerfile.feature-base" ;;
-  esac
+if [ -f "${PROJECT_LOCAL_DOCKERFILE}" ] && [ "${OVERRIDE}" -ne 1 ]; then
+  info "Keeping existing .fleet/Dockerfile.feature-base (pass --override to regenerate)"
 else
   generate_feature_base_dockerfile SVC_STACKS "${PROJECT_LOCAL_DOCKERFILE}"
 fi
