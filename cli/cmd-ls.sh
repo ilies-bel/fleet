@@ -283,10 +283,11 @@ for i in "${!ROWS[@]}"; do
 
   # Colour status (only when writing to a tty)
   case "${r_status}" in
-    up)       status_display="${GREEN}${r_status}${RESET}" ;;
-    down)     status_display="${RED}${r_status}${RESET}" ;;
-    building|starting) status_display="${YELLOW}${r_status}${RESET}" ;;
-    *)        status_display="${r_status}" ;;
+    up)                            status_display="${GREEN}${r_status}${RESET}" ;;
+    down|failed)                   status_display="${RED}${r_status}${RESET}" ;;
+    building|starting|restarting|unhealthy) status_display="${YELLOW}${r_status}${RESET}" ;;
+    stopped)                       status_display="${BLUE}${r_status}${RESET}" ;;
+    *)                             status_display="${r_status}" ;;
   esac
 
   # The status column has colour escapes which inflate the byte length.
