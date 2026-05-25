@@ -35,6 +35,9 @@ dashboard/dist/
 .beads/
 .mcp.json
 
+# Mars runtime state (queue/state dbs, watcher pid/socket — per-machine)
+.mars/
+
 
 test/project
 test/reference
