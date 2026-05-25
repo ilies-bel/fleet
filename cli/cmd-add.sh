@@ -81,6 +81,162 @@ load_fleet_toml
 _PYBIN=$(_find_python_with_tomllib) \
   || error "No python3 with tomllib/tomli found. Install python >=3.11 or: pip3 install tomli"
 
+# ─── Start sidecars (lazy; project-scope idempotent, feature-scope per-add) ──
+# Sidecars run on fleet-net alongside feature containers. Project-scope sidecars
+# are reused across features (no-op if already running); feature-scope sidecars
+# get a fresh container bound to this feature. Must run BEFORE feature compose
+# so network aliases are resolvable when the feature container starts.
+_SIDECAR_COUNT=$("${_PYBIN}" -c "import sys,json; print(len(json.loads(sys.argv[1])))" "${FLEET_SIDECARS_JSON:-[]}")
+if [ "${_SIDECAR_COUNT}" -gt 0 ]; then
+  # Topological order — Python computes it from the validated graph.
+  _SIDECARS_ORDERED=$("${_PYBIN}" - "${FLEET_SIDECARS_JSON}" <<'PYEOF'
+import sys, json
+sidecars = json.loads(sys.argv[1])
+by_name  = {sc["name"]: sc for sc in sidecars}
+order, seen = [], set()
+def visit(n):
+    if n in seen: return
+    for dep in by_name[n].get("depends_on", []) or []:
+        visit(dep)
+    seen.add(n)
+    order.append(n)
+for sc in sidecars:
+    visit(sc["name"])
+print(json.dumps(order))
+PYEOF
+)
+
+  # Ensure fleet-net exists (init usually creates it, but be defensive).
+  docker network inspect fleet-net >/dev/null 2>&1 \
+    || docker network create fleet-net >/dev/null \
+    || error "Failed to create network 'fleet-net'."
+
+  # Iterate over the ordered list and (re)start each sidecar.
+  _SIDECAR_NAMES_ORDER=$("${_PYBIN}" -c "import sys,json; print(' '.join(json.loads(sys.argv[1])))" "${_SIDECARS_ORDERED}")
+  for _sc_name in ${_SIDECAR_NAMES_ORDER}; do
+    # Pull all fields for this sidecar in one shot.
+    _sc_blob=$("${_PYBIN}" -c "
+import sys, json
+sidecars = json.loads(sys.argv[1])
+name     = sys.argv[2]
+sc = next((s for s in sidecars if s['name'] == name), None)
+if not sc:
+    sys.exit(1)
+print(json.dumps(sc))
+" "${FLEET_SIDECARS_JSON}" "${_sc_name}")
+    _sc_image=$("${_PYBIN}" -c "import sys,json; print(json.loads(sys.argv[1])['image'])" "${_sc_blob}")
+    _sc_scope=$("${_PYBIN}" -c "import sys,json; print(json.loads(sys.argv[1])['scope'])" "${_sc_blob}")
+
+    # Compute container name + network alias per scope.
+    if [ "${_sc_scope}" = "feature" ]; then
+      _sc_container="fleet-sidecar-${FLEET_PROJECT_NAME}-${NAME}-${_sc_name}"
+      _sc_alias="fleet-${NAME}-${_sc_name}"
+    else
+      _sc_container="fleet-sidecar-${FLEET_PROJECT_NAME}-${_sc_name}"
+      _sc_alias="fleet-${_sc_name}"
+    fi
+
+    # Project-scope: idempotent. If the container exists, leave it alone
+    # (start if stopped). No image-drift detection in v1.
+    if [ "${_sc_scope}" = "project" ]; then
+      if docker container inspect "${_sc_container}" >/dev/null 2>&1; then
+        _sc_running=$(docker container inspect -f '{{.State.Running}}' "${_sc_container}" 2>/dev/null || echo false)
+        if [ "${_sc_running}" = "true" ]; then
+          info "Sidecar '${_sc_name}' (scope=project): already running as ${_sc_container}"
+          continue
+        fi
+        docker start "${_sc_container}" >/dev/null \
+          || error "Sidecar '${_sc_name}': failed to start existing container ${_sc_container}"
+        info "Sidecar '${_sc_name}' (scope=project): resumed stopped container ${_sc_container}"
+        continue
+      fi
+    else
+      # Feature-scope: always a fresh container. A stale one from a partial
+      # previous add would clash on name — force-remove first.
+      docker rm -f "${_sc_container}" >/dev/null 2>&1 || true
+    fi
+
+    # Build docker run args. -e from env (sorted for determinism), -v from volumes.
+    _sc_run_args=()
+    while IFS=$'\t' read -r _ek _ev; do
+      [ -z "${_ek}" ] && continue
+      _sc_run_args+=(-e "${_ek}=${_ev}")
+    done < <("${_PYBIN}" -c "
+import sys, json
+sc = json.loads(sys.argv[1])
+for k, v in sorted((sc.get('env') or {}).items()):
+    print(str(k) + '\t' + str(v))
+" "${_sc_blob}")
+
+    # Volumes: mode=volume → docker volume (created on demand); mode=bind →
+    # host path (relative → resolved against FLEET_PROJECT_ROOT, absolute used
+    # as-is). copy is rejected at parse time.
+    while IFS=$'\t' read -r _vmode _vpath _vtarget; do
+      [ -z "${_vpath}" ] && continue
+      _vt="${_vtarget:-/${_vpath}}"
+      case "${_vmode}" in
+        volume)
+          # Slug the path to keep volume names predictable + filesystem-safe.
+          _vslug=$(printf '%s' "${_vpath}" | tr -c 'A-Za-z0-9' '-')
+          if [ "${_sc_scope}" = "feature" ]; then
+            _vname="fleet-sidecar-${FLEET_PROJECT_NAME}-${NAME}-${_sc_name}-${_vslug}"
+          else
+            _vname="fleet-sidecar-${FLEET_PROJECT_NAME}-${_sc_name}-${_vslug}"
+          fi
+          docker volume inspect "${_vname}" >/dev/null 2>&1 \
+            || docker volume create "${_vname}" >/dev/null \
+            || error "Sidecar '${_sc_name}': failed to create volume ${_vname}"
+          _sc_run_args+=(-v "${_vname}:${_vt}")
+          ;;
+        bind)
+          # Expand leading '~'; absolute paths used as-is.
+          [ "${_vpath#\~}" != "${_vpath}" ] && _vpath="${HOME}${_vpath#\~}"
+          if [ "${_vpath#/}" = "${_vpath}" ]; then
+            _src="${FLEET_PROJECT_ROOT}/${_vpath}"
+          else
+            _src="${_vpath}"
+          fi
+          [ -e "${_src}" ] \
+            || error "Sidecar '${_sc_name}': bind source missing on host: ${_src}"
+          _sc_run_args+=(-v "${_src}:${_vt}")
+          ;;
+        *)
+          error "Internal: sidecar '${_sc_name}' has unexpected volume mode '${_vmode}' (parser should have rejected this)."
+          ;;
+      esac
+    done < <("${_PYBIN}" -c "
+import sys, json
+sc = json.loads(sys.argv[1])
+for v in sc.get('volumes', []) or []:
+    print(v.get('mode','') + '\t' + v.get('path','') + '\t' + v.get('target',''))
+" "${_sc_blob}")
+
+    # Optional cmd override (image CMD if empty).
+    _sc_cmd_args=()
+    while IFS= read -r _cmd_arg; do
+      [ -z "${_cmd_arg}" ] && continue
+      _sc_cmd_args+=("${_cmd_arg}")
+    done < <("${_PYBIN}" -c "
+import sys, json
+sc = json.loads(sys.argv[1])
+for a in sc.get('cmd', []) or []:
+    print(a)
+" "${_sc_blob}")
+
+    docker run -d \
+      --name "${_sc_container}" \
+      --network fleet-net \
+      --network-alias "${_sc_alias}" \
+      --restart unless-stopped \
+      "${_sc_run_args[@]}" \
+      "${_sc_image}" \
+      "${_sc_cmd_args[@]}" >/dev/null \
+      || error "Sidecar '${_sc_name}': docker run failed (image=${_sc_image})"
+
+    info "Sidecar '${_sc_name}' (scope=${_sc_scope}): started as ${_sc_container} (alias ${_sc_alias})"
+  done
+fi
+
 # ─── Resolve source path (worktree by default, project root in --direct mode) ─
 # In --direct mode, skip worktree and bind-mount the primary checkout live.
 if [ "${DIRECT}" = true ]; then
@@ -450,18 +606,39 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
     svc_stack_type="${SVC_STACKS[$i]}"
     # Per-service root dir in the primary checkout (source of truth for bind/copy).
     svc_root_dir="${FLEET_PROJECT_ROOT}/${SVC_DIRS[$i]}"
-    while IFS=$'\t' read -r mode path_part target_part; do
+    while IFS= read -r _shared_line; do
+      [ -z "${_shared_line}" ] && continue
+      # Split on tab WITHOUT IFS-whitespace collapse: a bare `IFS=$'\t' read`
+      # merges consecutive tabs, eating empty interior fields (e.g. an empty
+      # target between path and scope), which would shift scope into target.
+      # Parse positionally instead so empty fields are preserved.
+      mode="${_shared_line%%$'\t'*}"
+      _rest="${_shared_line#*$'\t'}"
+      path_part="${_rest%%$'\t'*}"
+      _rest="${_rest#*$'\t'}"
+      target_part="${_rest%%$'\t'*}"
+      scope_part="${_rest#*$'\t'}"
       [ -z "${path_part}" ] && continue
+      # scope: project (default, shared across features) | feature (per-instance).
+      [ -z "${scope_part}" ] && scope_part="project"
       case "${mode}" in
         volume)
-          # Named volume: fleet-nodemod-<project>-<service>-<arch> for node_modules,
-          # else a stable per-(project,service,path) volume name.
+          # Named volume name. Project scope → one volume reused across all
+          # features (e.g. node_modules installed once). Feature scope → a
+          # per-feature volume (suffixed with the feature NAME) so a branch
+          # that mutates the volume (dependency add/removal) does not fight
+          # other running features over a shared tree.
+          if [ "${scope_part}" = "feature" ]; then
+            _scope_suffix="-${NAME}"
+          else
+            _scope_suffix=""
+          fi
           TARGET="${target_part:-/app/${SVC_NAMES[$i]}/${path_part}}"
           if [ "${path_part}" = "node_modules" ]; then
-            vol_name="fleet-nodemod-${FLEET_PROJECT_NAME}-${SVC_NAMES[$i]}-${CONTAINER_ARCH}"
+            vol_name="fleet-nodemod-${FLEET_PROJECT_NAME}-${SVC_NAMES[$i]}${_scope_suffix}-${CONTAINER_ARCH}"
           else
             _vol_slug=$(printf '%s' "${path_part}" | tr -c 'A-Za-z0-9' '-')
-            vol_name="fleet-vol-${FLEET_PROJECT_NAME}-${SVC_NAMES[$i]}-${_vol_slug}-${CONTAINER_ARCH}"
+            vol_name="fleet-vol-${FLEET_PROJECT_NAME}-${SVC_NAMES[$i]}-${_vol_slug}${_scope_suffix}-${CONTAINER_ARCH}"
           fi
           docker volume inspect "${vol_name}" >/dev/null 2>&1 \
             || docker volume create "${vol_name}" >/dev/null \

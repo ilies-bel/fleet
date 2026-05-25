@@ -93,6 +93,7 @@ _find_fleet_toml_upwards() {
 #   FLEET_STACKS_JSON       — [[stacks]] as a JSON array of {type,dockerfile,shared_paths}
 #   FLEET_SERVICES_JSON     — [[services]] as a JSON array of {name,dir,stack,port,host_port,build,run,env,env_files}
 #   FLEET_PEERS_JSON        — [[peers]] as a JSON array of {name,type,port,mappings,files}
+#   FLEET_SIDECARS_JSON     — [[sidecars]] as a JSON array of {name,image,port,scope,env,volumes,cmd,depends_on}
 #
 # Peer type whitelist: wiremock, static-http, shell.
 # Unknown peer type → error "Unknown peer type 'X'. Allowed: wiremock, static-http, shell"
@@ -147,6 +148,7 @@ ports    = data.get("ports", {})
 stacks   = data.get("stacks", [])
 services = data.get("services", [])
 peers    = data.get("peers", [])
+sidecars = data.get("sidecars", [])
 shared   = data.get("shared", [])
 hooks    = data.get("hooks", {})
 
@@ -182,7 +184,15 @@ for p in peers:
 # - volume : named docker volume (e.g. node_modules — avoids macOS bind-mount perf hit).
 # - copy   : materialize a real copy from the primary checkout into the worktree at add-time.
 # An optional 'path:target' form inside path sets an explicit container target.
+# For mode=volume, an optional 'scope' selects the named-volume sharing:
+#   - project (default): one volume shared across all features of the project
+#                        (e.g. node_modules — installed once, reused).
+#   - feature          : a per-feature volume, isolated from other instances.
+#                        Use when a branch may change the volume's contents
+#                        (e.g. a dependency add/removal) and must not fight
+#                        other running features over a shared tree.
 ALLOWED_MOUNT_MODES = {"bind", "volume", "copy"}
+ALLOWED_MOUNT_SCOPES = {"project", "feature"}
 
 def _normalize_mounts(entries, where):
     norm = []
@@ -208,13 +218,158 @@ def _normalize_mounts(entries, where):
                 file=sys.stderr,
             )
             sys.exit(2)
+        # 'scope' only applies to volume mounts; default to project-shared.
+        scope = e.get("scope", "project")
+        if scope not in ALLOWED_MOUNT_SCOPES:
+            print(
+                f"fleet.toml: {where} entry path={path!r} has invalid scope={scope!r}. "
+                f"Allowed: project, feature.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if scope == "feature" and mode != "volume":
+            print(
+                f"fleet.toml: {where} entry path={path!r} sets scope=\"feature\" but "
+                f"mode={mode!r}; scope only applies to mode=\"volume\".",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         # Split optional explicit container target on the first ':'
         if ":" in path:
             src, target = path.split(":", 1)
         else:
             src, target = path, e.get("target", "")
-        norm.append({"path": src, "target": target, "mode": mode})
+        norm.append({"path": src, "target": target, "mode": mode, "scope": scope})
     return norm
+
+# ─── [[sidecars]] validation ─────────────────────────────────────────────────
+# Sibling containers that run alongside feature containers on fleet-net.
+# - scope="project" (default): one shared container per project, reused across features
+# - scope="feature":           a fresh container per feature, torn down on rm
+# Volumes reuse the shared_paths shape but mode="copy" is rejected — sidecars
+# are not feature checkouts; copy semantics don't apply.
+import re as _re
+SIDECAR_NAME_RE = _re.compile(r"^[a-z0-9]([a-z0-9-]*)?$")
+ALLOWED_SIDECAR_SCOPES = {"project", "feature"}
+
+_service_names = {sv.get("name", "") for sv in services if sv.get("name")}
+_peer_names    = {p.get("name", "") for p in peers if p.get("name")}
+_sidecar_names = []
+
+for sc in sidecars:
+    if not isinstance(sc, dict):
+        print(f"fleet.toml: [[sidecars]] entry must be a table. Offending value: {sc!r}", file=sys.stderr)
+        sys.exit(2)
+    sc_name = sc.get("name", "")
+    if not sc_name or not SIDECAR_NAME_RE.match(sc_name):
+        print(
+            f"fleet.toml: [[sidecars]] entry has invalid or missing 'name' "
+            f"(got {sc_name!r}). Must match ^[a-z0-9]([a-z0-9-]*)?$.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if sc_name in _service_names:
+        print(
+            f"fleet.toml: [[sidecars]] name {sc_name!r} collides with a [[services]] entry.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if sc_name in _peer_names:
+        print(
+            f"fleet.toml: [[sidecars]] name {sc_name!r} collides with a [[peers]] entry.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if sc_name in _sidecar_names:
+        print(
+            f"fleet.toml: duplicate [[sidecars]] name {sc_name!r}.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    _sidecar_names.append(sc_name)
+    if not sc.get("image"):
+        print(
+            f"fleet.toml: [[sidecars]] name={sc_name!r} is missing required field 'image'.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    sc_scope = sc.get("scope", "project")
+    if sc_scope not in ALLOWED_SIDECAR_SCOPES:
+        print(
+            f"fleet.toml: [[sidecars]] name={sc_name!r} has invalid scope={sc_scope!r}. "
+            f"Allowed: project, feature.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    sc_env = sc.get("env", {}) or {}
+    if not isinstance(sc_env, dict):
+        print(
+            f"fleet.toml: [[sidecars]] name={sc_name!r} 'env' must be a table.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    sc_volumes = sc.get("volumes", []) or []
+    # Reuse _normalize_mounts for shape parity with shared_paths, then reject copy.
+    sc_volumes_norm = _normalize_mounts(
+        sc_volumes,
+        f"[[sidecars]] name={sc_name!r} volumes",
+    )
+    for v in sc_volumes_norm:
+        if v["mode"] == "copy":
+            print(
+                f"fleet.toml: [[sidecars]] name={sc_name!r} volume path={v['path']!r}: "
+                "mode=\"copy\" is not supported for [[sidecars]] volumes — use \"bind\" or \"volume\".",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    sc_cmd = sc.get("cmd", []) or []
+    if sc_cmd and not isinstance(sc_cmd, list):
+        print(
+            f"fleet.toml: [[sidecars]] name={sc_name!r} 'cmd' must be an array of strings.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    sc_deps = sc.get("depends_on", []) or []
+    if sc_deps and not isinstance(sc_deps, list):
+        print(
+            f"fleet.toml: [[sidecars]] name={sc_name!r} 'depends_on' must be an array of strings.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    # Stash normalized volumes back so the output uses the validated shape.
+    sc["_volumes_norm"] = sc_volumes_norm
+
+# Second pass: validate depends_on references + detect cycles (Kahn-style DFS).
+_sc_by_name = {sc.get("name"): sc for sc in sidecars}
+for sc in sidecars:
+    for dep in sc.get("depends_on", []) or []:
+        if dep not in _sc_by_name:
+            print(
+                f"fleet.toml: [[sidecars]] name={sc.get('name')!r} depends_on "
+                f"references unknown sidecar {dep!r}.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+_WHITE, _GRAY, _BLACK = 0, 1, 2
+_color = {sc.get("name"): _WHITE for sc in sidecars}
+def _visit(n, stack):
+    if _color[n] == _GRAY:
+        cycle = " -> ".join(stack + [n])
+        print(
+            f"fleet.toml: [[sidecars]] dependency cycle detected: {cycle}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if _color[n] == _BLACK:
+        return
+    _color[n] = _GRAY
+    for dep in _sc_by_name[n].get("depends_on", []) or []:
+        _visit(dep, stack + [n])
+    _color[n] = _BLACK
+
+for sc in sidecars:
+    _visit(sc.get("name"), [])
 
 out = {
     "project_name":        project.get("name", ""),
@@ -263,6 +418,19 @@ out = {
         }
         for p in peers
     ]),
+    "sidecars_json":  json.dumps([
+        {
+            "name":       sc.get("name",""),
+            "image":      sc.get("image",""),
+            "port":       str(sc.get("port","")),
+            "scope":      sc.get("scope","project"),
+            "env":        sc.get("env", {}) or {},
+            "volumes":    sc.get("_volumes_norm", []),
+            "cmd":        sc.get("cmd", []) or [],
+            "depends_on": sc.get("depends_on", []) or [],
+        }
+        for sc in sidecars
+    ]),
     "shared_json":    json.dumps([
         {
             "path":   s.get("path",""),
@@ -294,6 +462,7 @@ PYEOF
   FLEET_STACKS_JSON=$(_get stacks_json)
   FLEET_SERVICES_JSON=$(_get services_json)
   FLEET_PEERS_JSON=$(_get peers_json)
+  FLEET_SIDECARS_JSON=$(_get sidecars_json)
   FLEET_SHARED_JSON=$(_get shared_json)
   FLEET_HOOK_PRE_ADD=$(_get hook_pre_add)
   FLEET_HOOK_POST_ADD=$(_get hook_post_add)
@@ -302,7 +471,7 @@ PYEOF
 
   export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT FLEET_WORKTREE_PATH \
          FLEET_PORT_PROXY FLEET_PORT_ADMIN FLEET_PORT_DB \
-         FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON FLEET_SHARED_JSON \
+         FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON FLEET_SIDECARS_JSON FLEET_SHARED_JSON \
          FLEET_HOOK_PRE_ADD FLEET_HOOK_POST_ADD FLEET_HOOK_PRE_RM FLEET_HOOK_POST_RM
 }
 
@@ -314,6 +483,11 @@ fleet_services_json() {
 # fleet_peers_json — print FLEET_PEERS_JSON
 fleet_peers_json() {
   printf '%s\n' "${FLEET_PEERS_JSON}"
+}
+
+# fleet_sidecars_json — print FLEET_SIDECARS_JSON
+fleet_sidecars_json() {
+  printf '%s\n' "${FLEET_SIDECARS_JSON}"
 }
 
 # fleet_stack_for_service <svc_name> — print the stack type for a named service
@@ -337,7 +511,8 @@ sys.exit(1)
 }
 
 # fleet_stack_shared_paths <stack_type> — print shared_paths for a stack, one per line.
-# Each line is tab-separated: mode<TAB>path<TAB>target  (target may be empty).
+# Each line is tab-separated: mode<TAB>path<TAB>target<TAB>scope  (target may be empty;
+# scope is project|feature, defaulting to project — only meaningful for mode=volume).
 # Prints nothing if the stack is not found or has no shared_paths declared.
 fleet_stack_shared_paths() {
   local stack_type="${1:-}"
@@ -352,7 +527,7 @@ stack_type = sys.argv[2]
 for s in stacks:
     if s.get('type') == stack_type:
         for p in s.get('shared_paths', []):
-            print(p.get('mode','') + '\t' + p.get('path','') + '\t' + p.get('target',''))
+            print(p.get('mode','') + '\t' + p.get('path','') + '\t' + p.get('target','') + '\t' + p.get('scope','project'))
         sys.exit(0)
 " "${FLEET_STACKS_JSON}" "$stack_type"
 }
@@ -408,7 +583,7 @@ fleet_resolve_service_worktree() {
   fi
 }
 
-export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_stack_for_service fleet_stack_shared_paths fleet_project_root fleet_resolve_worktree fleet_resolve_service_worktree
+export -f load_fleet_toml fleet_services_json fleet_peers_json fleet_sidecars_json fleet_stack_for_service fleet_stack_shared_paths fleet_project_root fleet_resolve_worktree fleet_resolve_service_worktree
 
 # ─── Lifecycle hooks ─────────────────────────────────────────────────────────
 # run_hook <hook_name>

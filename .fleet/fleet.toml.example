@@ -132,6 +132,66 @@ env_files = [{ path = ".env.local", mode = "bind" }]   # auto-discovered by flee
 # port = 7070
 # cmd  = "node /app/custom-stub/server.js"
 
+# ─── Sidecars ─────────────────────────────────────────────────────────────────
+# Optional sibling containers (Postgres, MinIO, Redis, ...) that run alongside
+# feature containers on the internal `fleet-net` network. Sidecars are NOT
+# exposed on host ports — your services reach them via Docker DNS using the
+# network alias documented below.
+#
+# `name`       — required; ^[a-z0-9]([a-z0-9-]*)?$ — used in container + alias names
+# `image`      — required; any docker image reference (postgres:16, redis:7, …)
+# `port`       — informational only; sidecars are NOT host-exposed
+# `scope`      — "project" (default) or "feature"
+#                  project : one shared container per project, lazily started by the
+#                            first `fleet add` and reused across all features. Survives
+#                            `fleet rm <feature>` and `fleet rm --all`. Removed only by
+#                            `fleet rm --nuke` (which also removes its named volumes).
+#                  feature : a fresh container per feature, named after the feature and
+#                            torn down by `fleet rm <feature>`.
+# `env`        — table of KEY = "value" pairs passed via -e
+# `volumes`    — list of TABLES { path, target, mode } using the same shape as
+#                shared_paths. mode = "volume" creates a named docker volume;
+#                mode = "bind" mounts a path from the project root (or an absolute
+#                host path). mode = "copy" is NOT supported for sidecars.
+# `cmd`        — optional array of strings overriding the image's CMD
+# `depends_on` — optional list of other sidecar names; sidecars are started in
+#                topological order. Cycles and unknown references are rejected.
+#
+# DNS / aliases on fleet-net:
+#   scope = "project" → alias  fleet-<name>           (e.g. fleet-rag-postgres)
+#   scope = "feature" → alias  fleet-<feature>-<name> (e.g. fleet-login-fix-redis)
+#   Container name carries the project (and feature, when scoped) for uniqueness:
+#     fleet-sidecar-<project>-<name>
+#     fleet-sidecar-<project>-<feature>-<name>
+#
+# Caveats (v1):
+#   - Image-tag drift is NOT detected. If you change `image = "postgres:16"` to
+#     "postgres:17", lazy-start still finds the running container and does
+#     nothing. Run `fleet rm --nuke` to pick up the new image, or manage
+#     project-scope sidecars manually via `docker rm`.
+#   - For per-feature provisioning (run migrations, seed data, …) use the
+#     [hooks].post_add lifecycle hook — it runs after the container is healthy
+#     and can shell into the sidecar via its DNS alias.
+#
+# [[sidecars]]
+# name    = "rag-postgres"
+# image   = "postgres:16"
+# port    = 5432              # informational only — not exposed to host
+# scope   = "project"         # shared across all features of this project
+# env     = { POSTGRES_PASSWORD = "dev", POSTGRES_USER = "rag", POSTGRES_DB = "rag" }
+# volumes = [{ path = "pgdata", target = "/var/lib/postgresql/data", mode = "volume" }]
+# cmd     = ["postgres", "-c", "max_connections=200"]
+#
+# # Your service code reaches this sidecar at: postgres://fleet-rag-postgres:5432/rag
+#
+# [[sidecars]]
+# name       = "scratch-redis"
+# image      = "redis:7"
+# scope      = "feature"      # a fresh redis per feature, torn down on `fleet rm`
+# depends_on = ["rag-postgres"]
+#
+# # Reached at: fleet-<feature-name>-scratch-redis:6379
+
 # ─── Shared files ─────────────────────────────────────────────────────────────
 # Optional. Non-tracked env files to bind-mount READ-ONLY into EVERY feature
 # container and source automatically before any service process starts.
