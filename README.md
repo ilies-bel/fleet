@@ -35,34 +35,57 @@ If you were using v0.1, see [MIGRATION.md](./MIGRATION.md) for a full rename ref
 - bash
 - Node 20+ (only for local dashboard development)
 
-## Install via npx
+## Install
 
-Install the `fleet` CLI and Claude Code assets into any project with a single command:
+There are two ways to install fleet, depending on whether you just want to *use*
+it or also *work on it*.
+
+### For users — install from npm
+
+Install the `fleet` CLI globally from the public npm registry:
 
 ```bash
-# Install Claude Code assets globally (~/.claude — available in all projects)
-npx @ilies-bel/fleet install-claude --global
-
-# Install locally (./.claude — scoped to current project only)
-npx @ilies-bel/fleet install-claude --local
-
-# Overwrite existing files
-npx @ilies-bel/fleet install-claude --global --force
+npm install -g @ilies-bel/fleet
 ```
 
-What gets installed:
+Or run it without a global install:
 
-| Asset | Destination |
-|-------|-------------|
-| `/fleet:init` slash command | `<target>/commands/fleet/init.md` |
-| All 10 agent definitions | `<target>/agents/*.md` |
-| All skills (react-best-practices, subagents-discipline) | `<target>/skills/` |
+```bash
+npx @ilies-bel/fleet <command>
+```
 
-After installing, open Claude Code in your project and run `/fleet:init` to start the guided setup.
+Then, in any project you want to manage:
 
-If neither `--global` nor `--local` is passed, the installer prompts interactively.
+```bash
+cd <your-project>
+fleet init        # interactive setup wizard
+```
 
-The `fleet` bash CLI itself is available as a bin after `npm install -g @ilies-bel/fleet` — or use `npx @ilies-bel/fleet <command>` to run without installing globally.
+To upgrade later:
+
+```bash
+npm install -g @ilies-bel/fleet@latest
+```
+
+### For contributors — dev mode (live symlink)
+
+If you're hacking on fleet itself and want your local changes to take effect
+immediately, clone the repo and link it. `npm link` registers a global `fleet`
+that points at your working copy, so edits are picked up with no reinstall:
+
+```bash
+git clone https://github.com/ilies-bel/fleet.git
+cd fleet
+npm link          # symlinks global `fleet` -> this checkout
+```
+
+Now `fleet` anywhere on your machine runs your local source. To switch back to
+the published release, unlink and reinstall:
+
+```bash
+npm rm -g @ilies-bel/fleet   # remove the symlink
+npm install -g @ilies-bel/fleet
+```
 
 ## The `fleet` CLI
 
@@ -72,14 +95,16 @@ All operations go through a single `fleet` dispatcher. `fleet init` symlinks it 
 fleet <command> [options]
 
 Commands:
-  init    <app-root> <branch>          Initialize fleet for a project
-  add     <name> <branch> [--direct]   Start a QA feature container
+  init                                 Initialize fleet for the current project (no args)
+  add     <name> [--title <t>] [--direct]  Start a multi-service feature
+  ls      [--json]                     List feature containers and status
   rm      <name>|--all|--nuke          Remove feature(s) or everything
   restart <name>                       Restart a feature container
-  feature -c <name> [<branch>]         Create worktree+compose without starting
-  push    <name>                       Push worktree branch(es) to remote
-  sync    <name> [--regenerate-sources] Pull latest code and rebuild
-  help                                 Show help
+  stop    <name>|--all                 Stop feature container(s) without destroying them
+  start   <name>|--all                 Resume stopped feature container(s)
+  push    <name>                       Push service branches to remote
+  sync    <name> [--regenerate-sources] [--rebuild]  Pull latest code and rebuild
+  help    [<command>]                  Show help, or help for a command
 
 Environment:
   FLEET_GATEWAY   Gateway base URL (default: http://localhost:4000)
@@ -87,31 +112,34 @@ Environment:
 
 ## One-time setup
 
+Run `fleet init` from the root of the project you want to manage — it takes no
+arguments:
+
 ```bash
-fleet init <app-root-folder> <branch>
+cd /path/to/my-project
+fleet init
 ```
 
-- `app-root-folder` — path to the project root
-- `branch` — first feature branch to spin up automatically
-
-If `fleet.conf` does not exist in the project root, init walks you through an interactive wizard that **auto-detects your stack** (Spring Boot, Go, Next.js, Vite, Node) and writes the file for you. Otherwise it reads the existing config.
-
-Example:
-```bash
-fleet init /path/to/my-project feature/my-branch
-```
+If `.fleet/fleet.toml` does not exist, init walks you through an interactive
+wizard that **auto-detects your stack** (Spring Boot, Go, Next.js, Vite, Node)
+and writes the config for you. If the file already exists, init reads it and
+reconfigures idempotently (use `fleet init --override` to regenerate it).
 
 `init` will:
-1. Create/load `fleet.conf` in the project root
-2. Save `APP_ROOT` to `.fleet-config`
-3. Create the `fleet-net` Docker network
-4. Build the `fleet-gateway` image (includes the dashboard)
-5. Copy the matching stack `Dockerfile.*` from `cli/stacks/` to `FLEET_ROOT/Dockerfile.feature-base` and build it
-6. Symlink `fleet` into `/usr/local/bin`
-7. Start the gateway on ports 3000 and 4000
-8. Spin up the first feature container from the given branch
+1. Create/load `.fleet/fleet.toml` in the project root
+2. Create the `fleet-net` Docker network
+3. Build the `fleet-gateway` image (includes the dashboard)
+4. Generate `.fleet/Dockerfile.feature-base` for the detected stack and build it
+5. Start the gateway on ports 3000 and 4000
 
-Safe to run again — idempotent. Interactive prompts default to `n` when no tty is attached.
+Safe to run again — idempotent. Interactive prompts default to `n` when no tty
+is attached, so it degrades gracefully in CI.
+
+Start your first feature once init completes:
+
+```bash
+fleet add my-feature
+```
 
 ### Supported stacks
 

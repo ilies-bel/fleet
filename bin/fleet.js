@@ -2,10 +2,7 @@
 'use strict';
 
 const path = require('path');
-const fs = require('fs');
 const { execFileSync, spawnSync } = require('child_process');
-const os = require('os');
-const readline = require('readline');
 
 const PKG_ROOT = path.resolve(__dirname, '..');
 
@@ -23,175 +20,27 @@ function onPath(bin) {
   return result.status === 0;
 }
 
-function ask(question) {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase());
-    });
-  });
-}
-
 // ── Routing ──────────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
 const subcmd = args[0];
 
 if (subcmd === 'install-claude') {
-  const installerArgs = args.slice(1);
-  if (installerArgs.includes('--help') || installerArgs.includes('-h')) {
-    console.log('');
-    console.log('fleet install-claude — install Claude Code assets (agents, skills, commands)');
-    console.log('');
-    console.log('Usage: fleet install-claude [--local|--global] [--force]');
-    console.log('');
-    console.log('Flags:');
-    console.log('  --local   Install into ./.claude/ (current project)');
-    console.log('  --global  Install into ~/.claude/ (all projects)');
-    console.log('  --force   Overwrite existing files');
-    console.log('');
-    console.log('  Without --local or --global, prompts interactively for scope.');
-    console.log('');
-    console.log('Examples:');
-    console.log('  fleet install-claude --local');
-    console.log('  fleet install-claude --global --force');
-    console.log('  fleet install-claude            # interactive scope prompt');
-    console.log('');
-    process.exit(0);
-  }
-  runInstaller(installerArgs).catch((err) => {
-    console.error('error:', err.message);
-    process.exit(1);
-  });
-} else {
-  // Pass-through to bash fleet entrypoint
-  if (!onPath('bash')) {
-    console.warn('warning: bash not found on PATH — fleet CLI requires bash');
-  }
-  const fleetBin = path.join(PKG_ROOT, 'fleet');
-  try {
-    execFileSync('bash', [fleetBin, ...args], { stdio: 'inherit' });
-  } catch (err) {
-    process.exit(typeof err.status === 'number' ? err.status : 1);
-  }
+  // Removed in v1.0.0: the Claude Code assets it copied were dropped from the
+  // package, so the command no longer has anything to install. It will be
+  // reintroduced once the agent/skill assets are restored.
+  console.error('error: `fleet install-claude` was removed in v1.0.0.');
+  console.error('       Run `fleet init` in your project to set fleet up.');
+  process.exit(1);
 }
 
-// ── Installer ────────────────────────────────────────────────────────────────
-
-async function runInstaller(installerArgs) {
-  const flags = parseInstallerFlags(installerArgs);
-
-  let targetDir;
-  if (flags.global) {
-    targetDir = path.join(os.homedir(), '.claude');
-  } else if (flags.local) {
-    targetDir = path.join(process.cwd(), '.claude');
-  } else {
-    targetDir = await promptScope();
-  }
-
-  console.log(`\nInstalling Claude Code assets to: ${targetDir}\n`);
-
-  const srcClaudeDir = path.join(PKG_ROOT, '.claude');
-  const results = [];
-
-  // commands/fleet/init.md
-  results.push(...copyFile(
-    path.join(srcClaudeDir, 'commands', 'fleet', 'init.md'),
-    path.join(targetDir, 'commands', 'fleet', 'init.md'),
-    flags.force
-  ));
-
-  // agents/*.md — all agents
-  const agentsDir = path.join(srcClaudeDir, 'agents');
-  const agentFiles = fs.readdirSync(agentsDir)
-    .filter((f) => f.endsWith('.md') && fs.statSync(path.join(agentsDir, f)).isFile());
-  for (const f of agentFiles) {
-    results.push(...copyFile(
-      path.join(agentsDir, f),
-      path.join(targetDir, 'agents', f),
-      flags.force
-    ));
-  }
-
-  // skills/* — all skill directories (copy recursively)
-  const skillsDir = path.join(srcClaudeDir, 'skills');
-  const skillDirs = fs.readdirSync(skillsDir)
-    .filter((f) => fs.statSync(path.join(skillsDir, f)).isDirectory());
-  for (const d of skillDirs) {
-    const skillResults = copyDirRecursive(
-      path.join(skillsDir, d),
-      path.join(targetDir, 'skills', d),
-      flags.force
-    );
-    results.push(...skillResults);
-  }
-
-  // Print results
-  for (const r of results) {
-    const label = r.action === 'installed'   ? 'installed'
-                : r.action === 'overwritten' ? 'overwritten'
-                : 'skipped (exists)';
-    console.log(`  ${label.padEnd(18)} ${r.dest}`);
-  }
-
-  console.log(`\n${results.filter((r) => r.action !== 'skipped').length} file(s) installed, ` +
-              `${results.filter((r) => r.action === 'skipped').length} skipped.\n`);
-
-  // Docker check
-  if (!onPath('docker')) {
-    console.warn('warning: docker not found on PATH — fleet requires Docker to run containers.');
-  }
-
-  // Post-install tip
-  console.log('Done! Open Claude Code in your project and run:\n');
-  console.log('  /fleet:init\n');
-  console.log('This will walk you through setting up fleet for your project.\n');
+// Pass-through to the bash fleet entrypoint
+if (!onPath('bash')) {
+  console.warn('warning: bash not found on PATH — fleet CLI requires bash');
 }
-
-function parseInstallerFlags(args) {
-  return {
-    global: args.includes('--global'),
-    local:  args.includes('--local'),
-    force:  args.includes('--force'),
-  };
-}
-
-async function promptScope() {
-  const answer = await ask(
-    'Install Claude Code assets globally (~/.claude) or locally (./.claude)?\n' +
-    'Enter "global" or "local" [local]: '
-  );
-  if (answer === 'global') {
-    return path.join(os.homedir(), '.claude');
-  }
-  return path.join(process.cwd(), '.claude');
-}
-
-function copyFile(src, dest, force) {
-  if (!fs.existsSync(src)) return [];
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  if (fs.existsSync(dest) && !force) {
-    return [{ action: 'skipped', dest }];
-  }
-  const action = fs.existsSync(dest) ? 'overwritten' : 'installed';
-  fs.copyFileSync(src, dest);
-  return [{ action, dest }];
-}
-
-function copyDirRecursive(srcDir, destDir, force) {
-  if (!fs.existsSync(srcDir)) return [];
-  const results = [];
-  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(srcDir, entry.name);
-    const destPath = path.join(destDir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...copyDirRecursive(srcPath, destPath, force));
-    } else {
-      results.push(...copyFile(srcPath, destPath, force));
-    }
-  }
-  return results;
+const fleetBin = path.join(PKG_ROOT, 'fleet');
+try {
+  execFileSync('bash', [fleetBin, ...args], { stdio: 'inherit' });
+} catch (err) {
+  process.exit(typeof err.status === 'number' ? err.status : 1);
 }
