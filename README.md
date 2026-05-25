@@ -287,6 +287,21 @@ cmd  = "node /app/custom-stub/server.js"
 - `static-http` — Minimal static HTTP server for test fixtures
 - `shell` — Arbitrary shell command (e.g. Node.js stub server)
 
+### Sidecars (Sibling Containers)
+
+Sidecars are full sibling containers (Postgres, Redis, MinIO, …) declared in `[[sidecars]]` that run alongside feature containers on `fleet-net`. Unlike peers, they live in their own containers and can be **shared across features** (`scope = "project"`) or **isolated per feature** (`scope = "feature"`):
+
+```toml
+[[sidecars]]
+name    = "rag-postgres"
+image   = "postgres:16"
+scope   = "project"                                  # shared across all features
+env     = { POSTGRES_PASSWORD = "dev", POSTGRES_DB = "rag" }
+volumes = [{ path = "pgdata", target = "/var/lib/postgresql/data", mode = "volume" }]
+```
+
+Reached via Docker DNS — `postgres://fleet-rag-postgres:5432` (project-scope) or `fleet-<feature>-<name>` (feature-scope). Lazily started by `fleet add`, removed by `fleet rm --nuke`. See `docs/ARCHITECTURE.md` for the full lifecycle.
+
 Multi-repo projects (frontend and backend in separate git roots) are detected automatically — `fleet add` creates a worktree per repo.
 
 ## OAuth setup
