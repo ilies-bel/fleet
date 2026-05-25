@@ -1,11 +1,23 @@
 {
   "name": "@ilies-bel/fleet",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Local QA environment manager — spin up isolated Docker containers per feature branch",
   "license": "MIT",
+  "keywords": [
+    "docker",
+    "qa",
+    "feature-branch",
+    "preview",
+    "cli",
+    "dev-environment"
+  ],
+  "homepage": "https://github.com/ilies-bel/fleet#readme",
+  "bugs": {
+    "url": "https://github.com/ilies-bel/fleet/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ilies-bel/fleet.git"
+    "url": "git+https://github.com/ilies-bel/fleet.git"
   },
   "engines": {
     "node": ">=18"
@@ -17,14 +29,22 @@
   "bin": {
     "fleet": "bin/fleet.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "fleet",
+    "bin/",
     "cli/",
     "config/",
-    "dashboard/",
-    "gateway/",
-    ".claude/",
-    "bin/",
+    "gateway/src/",
+    "gateway/public/",
+    "gateway/package.json",
+    "gateway/Dockerfile",
+    "dashboard/src/",
+    "dashboard/index.html",
+    "dashboard/vite.config.js",
+    "dashboard/package.json",
     "fleet.conf.example",
     "README.md"
   ]

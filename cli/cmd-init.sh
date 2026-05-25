@@ -99,9 +99,13 @@ pick_port() {
 # Assembles .fleet/fragments into a single Dockerfile at OUTPUT_PATH.
 # STACKS_ARRAY_NAME is the name of a bash array variable (passed by name).
 generate_feature_base_dockerfile() {
-  local -n _stacks="$1"
+  local _stacks_name="$1"
   local output="$2"
   local fragments_dir="${FLEET_ROOT}/.fleet/fragments"
+
+  # Bash 3.2-compatible array-by-name expansion (replaces `local -n`, bash 4.3+).
+  local _stacks=()
+  eval "_stacks=( \"\${${_stacks_name}[@]}\" )"
 
   # Deduplicate stacks
   local unique_stacks=()
