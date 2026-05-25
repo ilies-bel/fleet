@@ -156,6 +156,7 @@ fi
 declare -a SVC_NAMES=()
 declare -a SVC_ABS_PATHS=()
 declare -a SVC_WT_ROOTS=()
+declare -a SVC_DIRS=()       # configured relative dir from fleet.toml (e.g. "frontend")
 declare -a SVC_STACKS=()
 declare -a SVC_RUNS=()
 declare -a SVC_PORTS=()
@@ -208,6 +209,7 @@ Run: git -C ${FLEET_PROJECT_ROOT}/${svc_dir} worktree add ${svc_abs_path} <branc
   SVC_NAMES+=("${svc_name}")
   SVC_ABS_PATHS+=("${svc_abs_path}")
   SVC_WT_ROOTS+=("${svc_wt_root}")
+  SVC_DIRS+=("${svc_dir}")
   SVC_STACKS+=("${svc_stack}")
   SVC_RUNS+=("${svc_run}")
   SVC_PORTS+=("${svc_port}")
@@ -354,12 +356,11 @@ for s in shared:
     if not p:
         continue
     out.append(s.get('target') or '/app/' + p)
-# services[].env_files entries
+# services[].env_files entries — each ef is {path, mode, target}
 for svc in services:
     name = svc.get('name','')
-    svc_dir = svc.get('dir','')
     for ef in svc.get('env_files', []):
-        out.append('/app/' + name + '/' + ef)
+        out.append(ef.get('target') or ('/app/' + name + '/' + ef.get('path','')))
 print(':'.join(out))
 " "${FLEET_SHARED_JSON:-[]}" "${FLEET_SERVICES_JSON}")
   [ -n "${_SHARED_TARGETS}" ] && printf 'FLEET_SHARED_ENV_FILES=%s\n' "${_SHARED_TARGETS}"
@@ -429,49 +430,84 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
   echo "    env_file:"
   echo "      - feature.env"
   echo "    volumes:"
-  # Each service source tree → /app/<svc_name>
-  # For shared_paths: node_modules gets a per-(project,service,arch) named docker
-  # volume (arch-correct native binaries, shared across features, survives rm/add).
-  # Other shared_paths keep the legacy host bind-mount.
+  # Each service source tree → /app/<svc_name> (worktree is bind-mounted live, so any
+  # file committed in the worktree is already visible — shared_paths/env_files only
+  # handle things NOT in the worktree: gitignored files + node_modules).
+  #
+  # Mount mode per shared_paths entry (declared in fleet.toml, validated by the parser):
+  #   volume : per-(project,service,arch) named docker volume (e.g. node_modules — arch-
+  #            correct native binaries, shared across features, survives rm/add, no
+  #            macOS bind-mount perf hit).
+  #   bind   : bind-mount from the primary checkout (FLEET_PROJECT_ROOT). Single source
+  #            of truth; relative paths resolve under the service's root dir, absolute /
+  #            '~' paths are host paths used as-is (npm cache, ~/.npmrc).
+  #   copy   : materialize a real copy from the primary checkout into this worktree at
+  #            add-time, then bind-mount the worktree copy (true per-feature isolation).
   CONTAINER_ARCH=$(docker version -f '{{.Server.Arch}}' 2>/dev/null || echo unknown)
   declare -a NODEMOD_VOLS=()   # named volumes we need to declare at the bottom
   for i in "${!SVC_NAMES[@]}"; do
     echo "      - ${SVC_ABS_PATHS[$i]}:/app/${SVC_NAMES[$i]}:cached"
     svc_stack_type="${SVC_STACKS[$i]}"
-    svc_dir_rel="${SVC_ABS_PATHS[$i]#${SVC_WT_ROOTS[$i]}/}"  # strip worktree root prefix → relative dir
-    while IFS= read -r shared_path; do
-      [ -z "${shared_path}" ] && continue
-      TARGET="/app/${SVC_NAMES[$i]}/${shared_path}"
-      if [ "${shared_path}" = "node_modules" ]; then
-        # Named volume: fleet-nodemod-<project>-<service>-<arch>
-        vol_name="fleet-nodemod-${FLEET_PROJECT_NAME}-${SVC_NAMES[$i]}-${CONTAINER_ARCH}"
-        docker volume inspect "${vol_name}" >/dev/null 2>&1 \
-          || docker volume create "${vol_name}" >/dev/null \
-          || error "Failed to create named volume '${vol_name}'."
-        echo "      - ${vol_name}:${TARGET}"
-        NODEMOD_VOLS+=("${vol_name}")
-      else
-        # Split on first ':' to separate optional explicit container target
-        path_part="${shared_path%%:*}"
-        target_part="${shared_path#*:}"
-        [ "${target_part}" = "${shared_path}" ] && target_part=""  # no ':' present → empty
-        # Expand leading '~' to $HOME
-        [ "${path_part#\~}" != "${path_part}" ] && path_part="${HOME}${path_part#\~}"
-        if [ "${path_part#/}" != "${path_part}" ]; then
-          # Absolute path
-          SOURCE="${path_part}"
-          TARGET="${target_part:-/app/${SVC_NAMES[$i]}/$(basename "${path_part}")}"
-          [ -e "${SOURCE}" ] \
-            || error "Shared path '${SOURCE}' does not exist on the host."
-        else
-          # Relative path — existing behaviour
-          SOURCE="${SVC_WT_ROOTS[$i]}/${svc_dir_rel}/${path_part}"
+    # Per-service root dir in the primary checkout (source of truth for bind/copy).
+    svc_root_dir="${FLEET_PROJECT_ROOT}/${SVC_DIRS[$i]}"
+    while IFS=$'\t' read -r mode path_part target_part; do
+      [ -z "${path_part}" ] && continue
+      case "${mode}" in
+        volume)
+          # Named volume: fleet-nodemod-<project>-<service>-<arch> for node_modules,
+          # else a stable per-(project,service,path) volume name.
           TARGET="${target_part:-/app/${SVC_NAMES[$i]}/${path_part}}"
-          [ -d "${SOURCE}" ] \
-            || error "Shared path source missing: ${SOURCE}. Populate it first."
-        fi
-        echo "      - ${SOURCE}:${TARGET}:cached"
-      fi
+          if [ "${path_part}" = "node_modules" ]; then
+            vol_name="fleet-nodemod-${FLEET_PROJECT_NAME}-${SVC_NAMES[$i]}-${CONTAINER_ARCH}"
+          else
+            _vol_slug=$(printf '%s' "${path_part}" | tr -c 'A-Za-z0-9' '-')
+            vol_name="fleet-vol-${FLEET_PROJECT_NAME}-${SVC_NAMES[$i]}-${_vol_slug}-${CONTAINER_ARCH}"
+          fi
+          docker volume inspect "${vol_name}" >/dev/null 2>&1 \
+            || docker volume create "${vol_name}" >/dev/null \
+            || error "Failed to create named volume '${vol_name}'."
+          echo "      - ${vol_name}:${TARGET}"
+          NODEMOD_VOLS+=("${vol_name}")
+          ;;
+        bind)
+          # Expand leading '~' to $HOME
+          [ "${path_part#\~}" != "${path_part}" ] && path_part="${HOME}${path_part#\~}"
+          if [ "${path_part#/}" != "${path_part}" ]; then
+            # Absolute / host path (npm cache, ~/.npmrc) — used as-is.
+            SOURCE="${path_part}"
+            TARGET="${target_part:-/app/${SVC_NAMES[$i]}/$(basename "${path_part}")}"
+            [ -e "${SOURCE}" ] \
+              || error "Shared path '${SOURCE}' does not exist on the host."
+          else
+            # Relative path — bind from the PRIMARY CHECKOUT (source of truth).
+            SOURCE="${svc_root_dir}/${path_part}"
+            TARGET="${target_part:-/app/${SVC_NAMES[$i]}/${path_part}}"
+            [ -e "${SOURCE}" ] \
+              || error "Shared path source missing in primary checkout: ${SOURCE}
+Create it in ${FLEET_PROJECT_ROOT}/${SVC_DIRS[$i]} and re-run fleet add."
+          fi
+          echo "      - ${SOURCE}:${TARGET}:cached"
+          ;;
+        copy)
+          # Materialize a copy from the primary checkout into THIS worktree, then mount it.
+          SOURCE_ROOT="${svc_root_dir}/${path_part}"
+          DEST="${SVC_ABS_PATHS[$i]}/${path_part}"
+          TARGET="${target_part:-/app/${SVC_NAMES[$i]}/${path_part}}"
+          if [ ! -e "${DEST}" ]; then
+            [ -e "${SOURCE_ROOT}" ] \
+              || error "copy mode: source missing in primary checkout: ${SOURCE_ROOT}
+Create it in ${FLEET_PROJECT_ROOT}/${SVC_DIRS[$i]} and re-run fleet add."
+            mkdir -p "$(dirname "${DEST}")"
+            cp -R "${SOURCE_ROOT}" "${DEST}" \
+              || error "copy mode: failed to copy ${SOURCE_ROOT} → ${DEST}"
+            info "Copied ${path_part} into worktree for service '${SVC_NAMES[$i]}'"
+          fi
+          echo "      - ${DEST}:${TARGET}:cached"
+          ;;
+        *)
+          error "Internal: unknown mount mode '${mode}' for shared path '${path_part}' (service '${SVC_NAMES[$i]}'). The parser should have rejected this."
+          ;;
+      esac
     done < <(fleet_stack_shared_paths "${svc_stack_type}" 2>/dev/null || true)
   done
   # Wiremock peers: bind mappings → /app/<peer_name>/mappings
@@ -511,30 +547,55 @@ for s in json.loads(sys.argv[1] or '[]'):
         continue
     print(p + '\t' + (s.get('target') or ''))
 " "${FLEET_SHARED_JSON:-[]}")
-  # services[].env_files: bind-mount read-only into the matching service only.
-  # Source path is relative to the service's resolved abs path (handles per-service worktrees).
-  while IFS=$'\t' read -r svc_name svc_dir env_file_rel; do
+  # services[].env_files: mounted read-only into the matching service only.
+  # env_files (e.g. .env) are gitignored and therefore NOT in the worktree, so the
+  # primary checkout (FLEET_PROJECT_ROOT) is always the source of truth:
+  #   bind : bind-mount the file from the primary checkout (single source of truth).
+  #   copy : copy it from the primary checkout into this worktree, then mount the copy.
+  # (volume is not meaningful for a single env file and is rejected here.)
+  while IFS=$'\t' read -r svc_name mode env_file_rel env_target; do
     [ -z "${svc_name}" ] && continue
-    # Find the index for this service name to look up its abs path
+    # Find the index for this service name to look up its abs path + relative dir
     svc_idx=0
     for _si in "${!SVC_NAMES[@]}"; do
       [ "${SVC_NAMES[$_si]}" = "${svc_name}" ] && { svc_idx=$_si; break; }
     done
-    src="${SVC_ABS_PATHS[$svc_idx]}/${env_file_rel}"
-    [ -f "${src}" ] \
-      || error "Service env file missing: ${src}
-The worktree must contain all env_files declared in fleet.toml for service '${svc_name}'.
-Copy it: cp ${FLEET_PROJECT_ROOT}/${svc_dir}/${env_file_rel} ${src}"
-    tgt="/app/${svc_name}/${env_file_rel}"
-    echo "      - ${src}:${tgt}:ro"
+    root_src="${FLEET_PROJECT_ROOT}/${SVC_DIRS[$svc_idx]}/${env_file_rel}"
+    tgt="${env_target:-/app/${svc_name}/${env_file_rel}}"
+    case "${mode}" in
+      bind)
+        [ -f "${root_src}" ] \
+          || error "Service env file missing in primary checkout: ${root_src}
+Create it (env files are gitignored, so they live only in the primary checkout):
+  cp ${root_src}.example ${root_src}   # then fill in real values"
+        echo "      - ${root_src}:${tgt}:ro"
+        ;;
+      copy)
+        wt_dest="${SVC_ABS_PATHS[$svc_idx]}/${env_file_rel}"
+        if [ ! -f "${wt_dest}" ]; then
+          [ -f "${root_src}" ] \
+            || error "copy mode: env file missing in primary checkout: ${root_src}"
+          mkdir -p "$(dirname "${wt_dest}")"
+          cp "${root_src}" "${wt_dest}" \
+            || error "copy mode: failed to copy ${root_src} → ${wt_dest}"
+          info "Copied env file ${env_file_rel} into worktree for service '${svc_name}'"
+        fi
+        echo "      - ${wt_dest}:${tgt}:ro"
+        ;;
+      volume)
+        error "env_files do not support mode='volume' (service '${svc_name}', path '${env_file_rel}'). Use 'bind' or 'copy'."
+        ;;
+      *)
+        error "Internal: unknown env_file mode '${mode}' (service '${svc_name}'). The parser should have rejected this."
+        ;;
+    esac
   done < <("${_PYBIN}" -c "
 import sys, json
 services = json.loads(sys.argv[1])
 for svc in services:
-    name    = svc.get('name','')
-    svc_dir = svc.get('dir','')
+    name = svc.get('name','')
     for ef in svc.get('env_files', []):
-        print(name + '\t' + svc_dir + '\t' + ef)
+        print(name + '\t' + ef.get('mode','') + '\t' + ef.get('path','') + '\t' + ef.get('target',''))
 " "${FLEET_SERVICES_JSON}")
   # Docker socket for Testcontainers (spring/gradle stacks only)
   _needs_sock=false

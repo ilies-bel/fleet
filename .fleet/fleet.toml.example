@@ -21,23 +21,25 @@ db    = 5432    # host-mapped database port (optional; 0 = disabled)
 # Optional. Define custom build stacks used by [[services]].
 # `type`         — identifier referenced by services[].stack
 # `dockerfile`   — path to the Dockerfile template, relative to project.root
-# `shared_paths` — (optional) list of paths, relative to each service's dir,
-#                  to bind-mount READ-ONLY from the PRIMARY checkout into every
-#                  feature container. Use this to share gitignored build output
-#                  (e.g. node_modules) without reinstalling per worktree.
-#                  fleet add auto-runs `npm install` in the primary checkout if
-#                  node_modules is missing; for other stacks it errors and asks
-#                  you to populate the directory manually.
-#                  Absolute host paths and explicit container targets are also supported:
-#                    "/abs/path"              → source=/abs/path, target=/app/<svc>/<basename>
-#                    "/abs/path:/ctr/target"  → source=/abs/path, target=/ctr/target
-#                    "~/foo"                  → ~ expanded to $HOME
-#                  Relative paths remain relative to each service's checkout directory.
+# `shared_paths` — (optional) list of TABLES { path = "...", mode = "bind|volume|copy" }
+#                  describing host/primary-checkout state to surface into every feature
+#                  container. The worktree source tree is already bind-mounted, so this
+#                  is only for things NOT in the worktree (gitignored files, node_modules).
+#                  Each entry MUST declare a mode (hard cut — bare strings are rejected):
+#                    bind   — bind-mount from the PRIMARY checkout (single source of truth).
+#                             Relative paths resolve under the service's root dir; absolute
+#                             or "~"-prefixed paths are host paths used as-is.
+#                    volume — named docker volume (use for node_modules: arch-correct,
+#                             shared across features, avoids the macOS bind-mount perf hit).
+#                    copy   — copy from the primary checkout into THIS worktree at add-time,
+#                             then bind-mount the copy (true per-feature isolation).
+#                  An explicit container target may be given as "src:target" in path:
+#                    { path = "~/.npmrc:/root/.npmrc", mode = "bind" }
 #
 # [[stacks]]
 # type         = "vite"
 # dockerfile   = ".fleet/Dockerfile.feature-base.vite"
-# shared_paths = ["node_modules"]   # RO-mounted from primary checkout; worktrees share it
+# shared_paths = [{ path = "node_modules", mode = "volume" }]
 
 # ─── Services ─────────────────────────────────────────────────────────────────
 # One [[services]] entry per deployable unit.
@@ -47,10 +49,17 @@ db    = 5432    # host-mapped database port (optional; 0 = disabled)
 # `port`               — container-internal port the service listens on
 # `build`              — command that produces the deployable artefact (run inside the container)
 # `run`                — command that starts the service (run inside the container)
-# `env_files`          — (optional) list of non-tracked env files, relative to this service's `dir`,
-#                        to bind-mount READ-ONLY into THIS service's container only and source
-#                        automatically before the service process starts.
-#                        fleet init auto-discovers .env files under a service dir and writes them here.
+# `env_files`          — (optional) list of TABLES { path = "...", mode = "bind|copy" } for
+#                        non-tracked (gitignored) env files relative to this service's `dir`,
+#                        mounted READ-ONLY into THIS service's container only and sourced
+#                        automatically before the service process starts. Because env files
+#                        are gitignored they live only in the PRIMARY checkout, which is always
+#                        the source of truth:
+#                          bind — bind-mount the file straight from the primary checkout.
+#                          copy — copy it into the worktree at add-time, then mount the copy.
+#                        (mode = "volume" is not valid for a single env file.)
+#                        fleet init auto-discovers .env files under a service dir and writes them
+#                        here as { path = ".env", mode = "bind" }.
 #                        For files that must reach ALL containers use [[shared]] instead.
 # `path`              — (optional) per-service worktree path template for multi-repo layouts.
 #                        Overrides [project].path for THIS service only.
@@ -76,7 +85,7 @@ port  = 8081
 build = "mvn package -DskipTests -q"
 # uses /home/developer/<service-name>.jar — fleet copies the built jar there per-service.
 run       = "java -jar /home/developer/backend.jar"
-env_files = [".env"]   # auto-discovered by fleet init; mounted only into the backend container
+env_files = [{ path = ".env", mode = "bind" }]   # auto-discovered by fleet init; mounted only into the backend container
 # Uncomment for multi-repo layout where d2r2-backend/ is its own git repository:
 # path = "d2r2-backend/.worktrees/{name}"
 
@@ -87,7 +96,7 @@ stack = "next"
 port  = 3000
 build = "npm run build"
 run       = "npm run dev"
-env_files = [".env.local"]   # auto-discovered by fleet init; mounted only into the frontend container
+env_files = [{ path = ".env.local", mode = "bind" }]   # auto-discovered by fleet init; mounted only into the frontend container
 # Optional per-service env vars; written as KEY=VALUE lines in feature.env.
 # env = { JIRA_BASE_URL = "http://127.0.0.1:8089" }
 # Uncomment for multi-repo layout where d2r2-frontend/ is its own git repository:

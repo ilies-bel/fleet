@@ -363,8 +363,10 @@ while i < len(lines):
                 break
         if svc_dir and svc_dir in svc_env_map:
             env_files = svc_env_map[svc_dir]
+            # Hard-cut schema: each env_file is a table { path = "...", mode = "bind" }.
+            # bind = single source of truth in the primary checkout (env files are gitignored).
             env_files_toml = "env_files = [{}]\n".format(
-                ", ".join('"{}"'.format(p) for p in env_files)
+                ", ".join('{{ path = "{}", mode = "bind" }}'.format(p) for p in env_files)
             )
             # Remove any existing env_files line
             block_lines = [bl for bl in block_lines

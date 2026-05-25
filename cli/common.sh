@@ -176,6 +176,46 @@ for p in peers:
         )
         sys.exit(2)
 
+# Mount-mode schema (hard cut — no plain-string aliases).
+# Every shared_paths / env_files entry MUST be a table: { path = "...", mode = "bind|volume|copy" }
+# - bind   : bind-mount from the primary checkout (FLEET_PROJECT_ROOT). Single source of truth.
+# - volume : named docker volume (e.g. node_modules — avoids macOS bind-mount perf hit).
+# - copy   : materialize a real copy from the primary checkout into the worktree at add-time.
+# An optional 'path:target' form inside path sets an explicit container target.
+ALLOWED_MOUNT_MODES = {"bind", "volume", "copy"}
+
+def _normalize_mounts(entries, where):
+    norm = []
+    for e in (entries or []):
+        if not isinstance(e, dict):
+            print(
+                f"fleet.toml: {where} entry must be a table with 'path' and 'mode' "
+                f"(hard cut — plain strings are no longer accepted). Offending value: {e!r}\n"
+                "Migrate to e.g.  { path = \".env\", mode = \"bind\" }  or  "
+                "{ path = \"node_modules\", mode = \"volume\" }.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        path = e.get("path", "")
+        mode = e.get("mode", "")
+        if not path:
+            print(f"fleet.toml: {where} entry is missing 'path': {e!r}", file=sys.stderr)
+            sys.exit(2)
+        if mode not in ALLOWED_MOUNT_MODES:
+            print(
+                f"fleet.toml: {where} entry path={path!r} has invalid mode={mode!r}. "
+                f"Allowed: bind, volume, copy.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        # Split optional explicit container target on the first ':'
+        if ":" in path:
+            src, target = path.split(":", 1)
+        else:
+            src, target = path, e.get("target", "")
+        norm.append({"path": src, "target": target, "mode": mode})
+    return norm
+
 out = {
     "project_name":        project.get("name", ""),
     "project_root":        project.get("root", ""),
@@ -184,7 +224,14 @@ out = {
     "port_admin":          str(ports.get("admin", "")),
     "port_db":             str(ports.get("db", "")),
     "stacks_json":    json.dumps([
-        {"type": s.get("type",""), "dockerfile": s.get("dockerfile",""), "shared_paths": s.get("shared_paths", [])}
+        {
+            "type": s.get("type",""),
+            "dockerfile": s.get("dockerfile",""),
+            "shared_paths": _normalize_mounts(
+                s.get("shared_paths", []),
+                f"[[stacks]] type={s.get('type','?')!r} shared_paths",
+            ),
+        }
         for s in stacks
     ]),
     "services_json":  json.dumps([
@@ -197,7 +244,10 @@ out = {
             "build":             sv.get("build",""),
             "run":               sv.get("run",""),
             "env":               sv.get("env", {}),
-            "env_files":         sv.get("env_files", []),
+            "env_files":         _normalize_mounts(
+                sv.get("env_files", []),
+                f"[[services]] name={sv.get('name','?')!r} env_files",
+            ),
             "worktree_path":     sv.get("path",""),
         }
         for sv in services
@@ -286,7 +336,8 @@ sys.exit(1)
     || error "fleet_stack_for_service: no service named '${svc_name}' in FLEET_SERVICES_JSON"
 }
 
-# fleet_stack_shared_paths <stack_type> — print newline-separated shared_paths for a stack.
+# fleet_stack_shared_paths <stack_type> — print shared_paths for a stack, one per line.
+# Each line is tab-separated: mode<TAB>path<TAB>target  (target may be empty).
 # Prints nothing if the stack is not found or has no shared_paths declared.
 fleet_stack_shared_paths() {
   local stack_type="${1:-}"
@@ -301,7 +352,7 @@ stack_type = sys.argv[2]
 for s in stacks:
     if s.get('type') == stack_type:
         for p in s.get('shared_paths', []):
-            print(p)
+            print(p.get('mode','') + '\t' + p.get('path','') + '\t' + p.get('target',''))
         sys.exit(0)
 " "${FLEET_STACKS_JSON}" "$stack_type"
 }
