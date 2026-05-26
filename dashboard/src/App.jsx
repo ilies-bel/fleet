@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { getFeatures, activateFeature } from './api.js';
 import StatusBar from './components/StatusBar.jsx';
@@ -46,15 +46,28 @@ function FeaturesPage() {
   const [logFeature, setLogFeature] = useState(null);
   const [startingFeatures, setStartingFeatures] = useState(new Set());
 
+  // Key the user just clicked [ACTIVATE] on; suppresses poll-driven
+  // reconciliation until the gateway confirms this is the active feature.
+  const pendingActivateRef = useRef(null);
+
   const fetchFeatures = useCallback(async () => {
     try {
       const data = await getFeatures();
       setFeatures(data);
-      setActivePreview(prev => {
-        if (prev !== null) return prev;
-        const gwActive = data.find(f => f.isActive);
-        return gwActive ? gwActive.key : null;
-      });
+
+      // The gateway is the single source of truth for which feature is active.
+      const gwActive = data.find(f => f.isActive)?.key ?? null;
+      const pending = pendingActivateRef.current;
+
+      if (pending !== null) {
+        // Gateway has confirmed our just-clicked activation — stop overriding.
+        if (gwActive === pending) pendingActivateRef.current = null;
+        // While unconfirmed, keep the optimistic selection so a racing poll
+        // can't snap us back to the previously active feature.
+        else return;
+      }
+
+      setActivePreview(gwActive);
     } catch {
       // Gateway might be starting up — stay silent, keep polling
     }
@@ -67,17 +80,20 @@ function FeaturesPage() {
   }, [fetchFeatures]);
 
   function handleRemoved(key) {
+    if (pendingActivateRef.current === key) pendingActivateRef.current = null;
     setFeatures(prev => prev.filter(f => f.key !== key));
     if (activePreview === key) setActivePreview(null);
   }
 
   async function handleActivate(key) {
     try {
+      pendingActivateRef.current = key;   // protect this selection from racing polls
       await activateFeature(key);
-      setActivePreview(key);
-      setPreviewKey(k => k + 1);
-      await fetchFeatures();
+      setActivePreview(key);              // instant, optimistic highlight
+      setPreviewKey(k => k + 1);          // force iframe reload
+      await fetchFeatures();              // confirm against gateway (clears pending when matched)
     } catch (err) {
+      pendingActivateRef.current = null;  // activation failed — let gateway truth resume
       console.error('Activate failed:', err);
       throw err;
     }

@@ -35,13 +35,13 @@ export default function StatusBar() {
   }, []);
 
   const gwLabel = status === null
-    ? '● GATEWAY ...'
+    ? '● GATEWAY · CONNECTING'
     : status.up
       ? '● GATEWAY UP'
       : '● GATEWAY UNREACHABLE';
 
   const gwColor = status === null
-    ? 'var(--color-warning)'
+    ? 'var(--color-muted)'
     : status.up
       ? 'var(--color-accent)'
       : 'var(--color-danger)';
