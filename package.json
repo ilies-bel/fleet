@@ -46,6 +46,8 @@
     "dashboard/vite.config.js",
     "dashboard/package.json",
     ".fleet/fleet.toml.example",
+    ".fleet/shared.env.example",
+    ".fleet/fragments/",
     "README.md",
     "!**/*.test.js",
     "!**/*.test.jsx",
