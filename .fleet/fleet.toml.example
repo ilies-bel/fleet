@@ -8,7 +8,7 @@
 # ─── Project ──────────────────────────────────────────────────────────────────
 [project]
 name = "d2r2"
-root = "/Users/x/projects/d2r2"   # absolute path to the project root on this host
+root = "."                         # project root, relative to this file's parent directory
 path = ".worktrees/{name}"  # path template for git worktrees; {name} expands to the feature name
 
 # ─── Ports ────────────────────────────────────────────────────────────────────

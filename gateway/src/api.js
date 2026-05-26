@@ -377,7 +377,7 @@ router.post('/features/:key/rebuild', async (req, res) => {
  * Sequence:
  *   1. PATCH status → 'building'
  *   2. docker stop fleet-<key>        (ignore "already stopped")
- *   3. docker build --load -t <image> -f <dockerfile> <FLEET_ROOT>
+ *   3. docker build -t <image> -f <dockerfile> <FLEET_ROOT>
  *   4. docker compose -f <composefile> up -d
  *   5. PATCH status → 'starting'
  *   6. Poll /_fleet/api/features/:key/health every 2s, up to 60s
@@ -479,7 +479,7 @@ async function runRebuild(key) {
     // Step 4 — rebuild the image
     log(`[rebuild] Building image ${imageName}...`);
     await runCommand('docker', [
-      'build', '--load', '--no-cache',
+      'build', '--no-cache',
       '-t', imageName,
       '-f', dockerfile,
       FLEET_ROOT,

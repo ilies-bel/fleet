@@ -286,7 +286,13 @@ PYEOF
 
   export FLEET_CONFIG_ROOT
   FLEET_PROJECT_NAME=$(_get project_name)
-  FLEET_PROJECT_ROOT=$(_get project_root)
+  local _raw_root
+  _raw_root=$(_get project_root)
+  if [ -n "${_raw_root}" ] && [ "${_raw_root#/}" = "${_raw_root}" ]; then
+    FLEET_PROJECT_ROOT="$(cd "${FLEET_CONFIG_ROOT}/${_raw_root}" && pwd)"
+  else
+    FLEET_PROJECT_ROOT="${_raw_root:-${FLEET_CONFIG_ROOT}}"
+  fi
   FLEET_WORKTREE_PATH=$(_get worktree_path)
   FLEET_PORT_PROXY=$(_get port_proxy)
   FLEET_PORT_ADMIN=$(_get port_admin)

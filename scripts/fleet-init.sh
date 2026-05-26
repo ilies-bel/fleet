@@ -269,7 +269,6 @@ fi
 # ─── Build gateway image ─────────────────────────────────────────────────────
 info "Building gateway image (includes dashboard)..."
 docker build \
-  --load \
   -f gateway/Dockerfile \
   -t fleet-gateway \
   .
@@ -277,7 +276,6 @@ docker build \
 # ─── Build feature base image ─────────────────────────────────────────────────
 info "Building fleet-feature-base image (done once, reused for all features)..."
 docker build \
-  --load \
   -f Dockerfile.feature-base \
   -t fleet-feature-base \
   .

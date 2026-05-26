@@ -523,7 +523,7 @@ write_fleet_toml() {
     echo ""
     echo "[project]"
     echo "name = \"${proj_name}\""
-    echo "root = \"${proj_root}\""
+    echo "root = \".\""
     echo "path = \"${worktree_tmpl}\""
     echo ""
     echo "[ports]"
@@ -604,7 +604,7 @@ if [ -f "${FLEET_TOML}" ]; then
   info "Found existing ${FLEET_TOML} — reconfiguring idempotently"
   load_fleet_toml
 
-  PROJECT_ROOT="${FLEET_PROJECT_ROOT}"
+  PROJECT_ROOT="${FLEET_CONFIG_ROOT}"
   PROJECT_NAME="${FLEET_PROJECT_NAME}"
   PROXY_PORT="${FLEET_PORT_PROXY:-3000}"
   ADMIN_PORT="${FLEET_PORT_ADMIN:-4000}"
@@ -711,7 +711,12 @@ discover_env_files "${PROJECT_ROOT}"
 PROJECT_LOCAL_DOCKERFILE="${PWD}/.fleet/Dockerfile.feature-base"
 
 if [ -f "${PROJECT_LOCAL_DOCKERFILE}" ] && [ "${OVERRIDE}" -ne 1 ]; then
-  info "Keeping existing .fleet/Dockerfile.feature-base (pass --override to regenerate)"
+  if [ ! -s "${PROJECT_LOCAL_DOCKERFILE}" ] || ! grep -q '^FROM ' "${PROJECT_LOCAL_DOCKERFILE}"; then
+    warn ".fleet/Dockerfile.feature-base exists but has no FROM stage — regenerating"
+    generate_feature_base_dockerfile SVC_STACKS "${PROJECT_LOCAL_DOCKERFILE}"
+  else
+    info "Keeping existing .fleet/Dockerfile.feature-base (pass --override to regenerate)"
+  fi
 else
   generate_feature_base_dockerfile SVC_STACKS "${PROJECT_LOCAL_DOCKERFILE}"
 fi
@@ -724,11 +729,11 @@ for _s in "${SVC_STACKS[@]}"; do
   UNIQUE_STACKS+=("${_s}")
   _seen="${_seen} ${_s}"
 done
-info "Generated .fleet/Dockerfile.feature-base from stacks: ${UNIQUE_STACKS[*]}"
+info "Using .fleet/Dockerfile.feature-base — stacks: ${UNIQUE_STACKS[*]}"
 
 FEATURE_BASE_IMAGE="fleet-feature-base-${PROJECT_NAME}"
 info "Building project base image ${FEATURE_BASE_IMAGE}..."
-docker build --load -t "${FEATURE_BASE_IMAGE}" -f "${PROJECT_LOCAL_DOCKERFILE}" "${FLEET_ROOT}"
+docker build -t "${FEATURE_BASE_IMAGE}" -f "${PROJECT_LOCAL_DOCKERFILE}" "${FLEET_ROOT}"
 
 # ─── Infra bootstrap ─────────────────────────────────────────────────────────
 
@@ -747,7 +752,6 @@ else
   # Build gateway image
   info "Building gateway image..."
   docker build \
-    --load \
     -f "${FLEET_ROOT}/gateway/Dockerfile" \
     -t fleet-gateway \
     "${FLEET_ROOT}"

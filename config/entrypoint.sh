@@ -151,8 +151,9 @@ if [ -n \"\$JAR\" ]; then cp \"\$JAR\" /home/developer/''' + name + '''.jar; fi
         # Node/Vite services: reconcile node_modules against package.json on every
         # start. Fast on a warm named volume; installs arch-correct native deps
         # the first time (or after package-lock changes).
+        # Skip when FLEET_SKIP_NPM_INSTALL is set (e.g. --direct with host node_modules).
         if stack in ('vite', 'next', 'webpack') or (stack == '' and os.path.isfile(svc_dir + '/package.json')):
-            f.write('if [ -f package.json ]; then\n')
+            f.write('if [ -f package.json ] && [ -z "${FLEET_SKIP_NPM_INSTALL:-}" ]; then\n')
             f.write('  echo \"[fleet] Reconciling ' + name + ' node_modules (arch=$(uname -m))...\"\n')
             f.write('  npm install --no-audit --no-fund --loglevel=error\n')
             f.write('fi\n')
