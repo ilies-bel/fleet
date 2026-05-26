@@ -172,7 +172,7 @@ Print the diff of the change you are about to apply and describe it in one sente
 ### 3.C — Rebuild the project base image
 
 ```bash
-docker build --load \
+docker build \
   -t "fleet-feature-base-${PROJECT_NAME}" \
   -f ".fleet/Dockerfile.feature-base" \
   "${FLEET_ROOT}"

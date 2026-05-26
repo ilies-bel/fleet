@@ -728,7 +728,7 @@ info "Generated .fleet/Dockerfile.feature-base from stacks: ${UNIQUE_STACKS[*]}"
 
 FEATURE_BASE_IMAGE="fleet-feature-base-${PROJECT_NAME}"
 info "Building project base image ${FEATURE_BASE_IMAGE}..."
-docker build --load -t "${FEATURE_BASE_IMAGE}" -f "${PROJECT_LOCAL_DOCKERFILE}" "${FLEET_ROOT}"
+docker build -t "${FEATURE_BASE_IMAGE}" -f "${PROJECT_LOCAL_DOCKERFILE}" "${FLEET_ROOT}"
 
 # ─── Infra bootstrap ─────────────────────────────────────────────────────────
 
@@ -747,7 +747,6 @@ else
   # Build gateway image
   info "Building gateway image..."
   docker build \
-    --load \
     -f "${FLEET_ROOT}/gateway/Dockerfile" \
     -t fleet-gateway \
     "${FLEET_ROOT}"
