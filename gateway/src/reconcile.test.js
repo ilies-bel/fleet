@@ -48,6 +48,9 @@ import {
   getActiveFeature,
   setActiveFeature,
   loadPersistedActive,
+  probeContainerState,
+  commitProbedStatus,
+  _clearPendingFlips,
 } from './registry.js';
 
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -69,18 +72,20 @@ function makeContainer(name, state = 'running') {
 
 /**
  * Build a minimal inspectContainer response.
+ * @param {object} [opts]  extra { state, envExtra, mounts } to enrich the payload.
  */
-function makeInspect(containerName, project, featureName, branch = 'main', running = true) {
+function makeInspect(containerName, project, featureName, branch = 'main', running = true, opts = {}) {
   return {
     Config: {
       Env: [
         `PROJECT_NAME=${project}`,
         `FEATURE_NAME=${featureName}`,
         `BRANCH=${branch}`,
+        ...(opts.envExtra ?? []),
       ],
     },
-    Mounts: [],
-    State: { Running: running },
+    Mounts: opts.mounts ?? [],
+    State: opts.state ?? { Running: running },
   };
 }
 
@@ -358,5 +363,284 @@ describe('boot-restore logic', () => {
     }
 
     assert.equal(getActiveFeature(), 'proj-alpha', 'auto-pick should stand when no state file exists');
+  });
+});
+
+// ── probeContainerState — Docker state → status classification ────────────────
+
+describe('probeContainerState', () => {
+  const probe = (state) => probeContainerState('c', async () => ({ State: state }));
+
+  test("running container → 'up'", async () => {
+    assert.equal(await probe({ Running: true }), 'up');
+  });
+
+  test("clean exit (ExitCode 0) → 'stopped'", async () => {
+    assert.equal(await probe({ Running: false, ExitCode: 0 }), 'stopped');
+  });
+
+  test("non-zero exit → 'failed'", async () => {
+    assert.equal(await probe({ Running: false, ExitCode: 137 }), 'failed');
+  });
+
+  test("OOMKilled → 'failed' even with ExitCode 0", async () => {
+    assert.equal(await probe({ Running: false, ExitCode: 0, OOMKilled: true }), 'failed');
+  });
+
+  test("Dead → 'failed'", async () => {
+    assert.equal(await probe({ Running: false, ExitCode: 0, Dead: true }), 'failed');
+  });
+
+  test("Restarting → 'restarting' (don't decide yet)", async () => {
+    assert.equal(await probe({ Running: false, Restarting: true }), 'restarting');
+  });
+
+  test("healthcheck 'starting' → 'starting'", async () => {
+    assert.equal(await probe({ Running: true, Health: { Status: 'starting' } }), 'starting');
+  });
+
+  test("unhealthy with FailingStreak >= 2 → 'unhealthy'", async () => {
+    assert.equal(
+      await probe({ Running: true, Health: { Status: 'unhealthy', FailingStreak: 2 } }),
+      'unhealthy'
+    );
+  });
+
+  test("unhealthy with a single failure (streak 1) is NOT yet unhealthy → 'up'", async () => {
+    assert.equal(
+      await probe({ Running: true, Health: { Status: 'unhealthy', FailingStreak: 1 } }),
+      'up'
+    );
+  });
+
+  test("inspect returns null (404) → 'missing'", async () => {
+    assert.equal(await probeContainerState('c', async () => null), 'missing');
+  });
+
+  test("inspect throws (socket error) → 'unknown' (do not change state)", async () => {
+    assert.equal(
+      await probeContainerState('c', async () => { throw new Error('EAGAIN'); }),
+      'unknown'
+    );
+  });
+});
+
+// ── commitProbedStatus — debounced status transitions ─────────────────────────
+
+describe('commitProbedStatus', () => {
+  beforeEach(() => {
+    clearRegistry();
+    _clearPendingFlips();
+  });
+
+  test('flip up → stopped requires 2 consecutive reads', () => {
+    register('p', 'a', 'main', null, 'up');
+
+    const first = commitProbedStatus('p-a', 'stopped');
+    assert.equal(first.changed, false, 'one observation must not flip');
+    assert.equal(getAll().find((f) => f.key === 'p-a').status, 'up');
+
+    const second = commitProbedStatus('p-a', 'stopped');
+    assert.equal(second.changed, true, 'second consecutive observation commits');
+    assert.equal(getAll().find((f) => f.key === 'p-a').status, 'stopped');
+  });
+
+  test('a transient unknown between two stopped reads resets the debounce', () => {
+    register('p', 'b', 'main', null, 'up');
+
+    commitProbedStatus('p-b', 'stopped');         // count = 1
+    commitProbedStatus('p-b', 'unknown');         // resets pending, no-op
+    const r = commitProbedStatus('p-b', 'stopped'); // count = 1 again, not 2
+
+    assert.equal(r.changed, false, 'unknown must reset the streak so no flip yet');
+    assert.equal(getAll().find((f) => f.key === 'p-b').status, 'up');
+  });
+
+  test("recovery to 'up' commits immediately (no debounce)", () => {
+    register('p', 'c', 'main', null, 'stopped');
+    const r = commitProbedStatus('p-c', 'up');
+    assert.equal(r.changed, true);
+    assert.equal(getAll().find((f) => f.key === 'p-c').status, 'up');
+  });
+
+  test('changing target mid-streak restarts the count', () => {
+    register('p', 'd', 'main', null, 'up');
+    commitProbedStatus('p-d', 'stopped');          // streak: stopped=1
+    const r = commitProbedStatus('p-d', 'failed');  // different target → failed=1
+    assert.equal(r.changed, false);
+    const r2 = commitProbedStatus('p-d', 'failed'); // failed=2 → commit
+    assert.equal(r2.changed, true);
+    assert.equal(getAll().find((f) => f.key === 'p-d').status, 'failed');
+  });
+
+  test('probed === current status is a no-op', () => {
+    register('p', 'e', 'main', null, 'up');
+    const r = commitProbedStatus('p-e', 'up');
+    assert.equal(r.changed, false);
+  });
+});
+
+// ── reconcileSweep — status reconciliation for already-registered containers ──
+
+describe('reconcileSweep — status drift correction', () => {
+  beforeEach(() => {
+    clearRegistry();
+    _clearPendingFlips();
+  });
+
+  afterEach(() => {
+    clearRegistry();
+    _clearPendingFlips();
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async () => null,
+      startContainer: async () => {},
+    });
+  });
+
+  test('flips a registered up→failed after 2 sweeps when the container crashed', async () => {
+    register('proj', 'crashed', 'main', null, 'up');
+    const containerName = 'fleet-proj-crashed';
+
+    _setDockerImpl({
+      listRunningContainers: async () => [makeContainer(containerName, 'exited')],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'crashed', 'main', false, {
+              state: { Running: false, ExitCode: 137 },
+            })
+          : null,
+      startContainer: async () => {},
+    });
+
+    await reconcileSweep();
+    assert.equal(getAll().find((f) => f.key === 'proj-crashed').status, 'up', 'one sweep must not flip');
+
+    await reconcileSweep();
+    assert.equal(getAll().find((f) => f.key === 'proj-crashed').status, 'failed', 'second sweep flips to failed');
+  });
+
+  test('flips a registered up→stopped after 2 sweeps for a clean exit', async () => {
+    register('proj', 'clean', 'main', null, 'up');
+    const containerName = 'fleet-proj-clean';
+
+    _setDockerImpl({
+      listRunningContainers: async () => [makeContainer(containerName, 'exited')],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'clean', 'main', false, {
+              state: { Running: false, ExitCode: 0 },
+            })
+          : null,
+      startContainer: async () => {},
+    });
+
+    await reconcileSweep();
+    await reconcileSweep();
+    assert.equal(getAll().find((f) => f.key === 'proj-clean').status, 'stopped');
+  });
+
+  test('leaves a healthy registered container at up', async () => {
+    register('proj', 'alive', 'main', null, 'up');
+    const containerName = 'fleet-proj-alive';
+
+    _setDockerImpl({
+      listRunningContainers: async () => [makeContainer(containerName, 'running')],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'alive', 'main', true)
+          : null,
+      startContainer: async () => {},
+    });
+
+    await reconcileSweep();
+    await reconcileSweep();
+    assert.equal(getAll().find((f) => f.key === 'proj-alive').status, 'up');
+  });
+});
+
+// ── reconcileOne — recovers services + worktree from the container ────────────
+
+describe('reconcileOne — full entry recovery', () => {
+  beforeEach(() => clearRegistry());
+  afterEach(() => {
+    clearRegistry();
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async () => null,
+      startContainer: async () => {},
+    });
+  });
+
+  test('populates services from FLEET_SERVICES_JSON env', async () => {
+    const containerName = 'fleet-proj-svc';
+    const servicesJson = JSON.stringify([
+      { name: 'backend', port: '8081' },
+      { name: 'frontend', port: '3000' },
+      { name: 'garbage' }, // malformed — must be dropped
+    ]);
+
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'svc', 'main', true, {
+              envExtra: [`FLEET_SERVICES_JSON=${servicesJson}`],
+            })
+          : null,
+      startContainer: async () => {},
+    });
+
+    await reconcileOne(makeContainer(containerName, 'running'), { autoStart: false });
+
+    const entry = getAll().find((f) => f.key === 'proj-svc');
+    assert.deepEqual(entry.services, [
+      { name: 'backend', port: 8081 },
+      { name: 'frontend', port: 3000 },
+    ]);
+  });
+
+  test('recovers worktreePath from a /app/<dir> bind mount (split layout)', async () => {
+    const containerName = 'fleet-proj-wt';
+    const worktree = '/Users/x/app/.worktrees/bd-proj-wt';
+
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'wt', 'main', true, {
+              mounts: [
+                { Type: 'bind', Destination: '/app/backend', Source: `${worktree}/backend` },
+                { Type: 'bind', Destination: '/app/frontend', Source: `${worktree}/frontend` },
+                { Type: 'bind', Destination: '/root/.npmrc', Source: '/Users/x/.npmrc' },
+              ],
+            })
+          : null,
+      startContainer: async () => {},
+    });
+
+    await reconcileOne(makeContainer(containerName, 'running'), { autoStart: false });
+
+    const entry = getAll().find((f) => f.key === 'proj-wt');
+    assert.equal(entry.worktreePath, worktree);
+  });
+
+  test('restores a crashed container as failed, not stopped', async () => {
+    const containerName = 'fleet-proj-boom';
+
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'boom', 'main', false, {
+              state: { Running: false, ExitCode: 1 },
+            })
+          : null,
+      startContainer: async () => {},
+    });
+
+    await reconcileOne(makeContainer(containerName, 'exited'), { autoStart: false });
+
+    assert.equal(getAll().find((f) => f.key === 'proj-boom').status, 'failed');
   });
 });

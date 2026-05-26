@@ -1,6 +1,6 @@
 {
   "name": "@ilies-bel/fleet",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Local QA environment manager — spin up isolated Docker containers per feature branch",
   "license": "MIT",
   "keywords": [
@@ -46,6 +46,8 @@
     "dashboard/vite.config.js",
     "dashboard/package.json",
     ".fleet/fleet.toml.example",
+    ".fleet/shared.env.example",
+    ".fleet/fragments/",
     "README.md",
     "!**/*.test.js",
     "!**/*.test.jsx",

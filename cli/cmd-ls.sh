@@ -54,6 +54,55 @@ done
 # Resolve per-project .fleet/ root
 load_fleet_toml
 
+# ─── Collect project-scope sidecars (status from docker, config from toml) ───
+# Only project-scope sidecars are listed — feature-scope sidecars belong to a
+# specific feature and aren't useful to surface separately.
+collect_sidecars_json() {
+  local pybin
+  pybin=$(_find_python_with_tomllib 2>/dev/null) || pybin=$(command -v python3) || { echo "[]"; return; }
+  # Build name → {image, scope} map from FLEET_SIDECARS_JSON; ignore feature-scope.
+  local cfg_map
+  cfg_map=$("${pybin}" -c "
+import sys, json
+sidecars = json.loads(sys.argv[1] or '[]')
+out = {sc['name']: {'image': sc.get('image',''), 'scope': sc.get('scope','project')}
+       for sc in sidecars if sc.get('scope','project') == 'project'}
+print(json.dumps(out))
+" "${FLEET_SIDECARS_JSON:-[]}")
+  # Pull container status for any container named fleet-sidecar-<project>-<name>
+  local docker_rows=""
+  if [ -n "${FLEET_PROJECT_NAME:-}" ]; then
+    docker_rows=$(docker ps -a \
+      --filter "name=^fleet-sidecar-${FLEET_PROJECT_NAME}-" \
+      --format '{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null || true)
+  fi
+  "${pybin}" -c "
+import sys, json
+cfg = json.loads(sys.argv[1])
+project = sys.argv[2]
+prefix = f'fleet-sidecar-{project}-'
+running = {}
+for line in sys.argv[3].splitlines():
+    if not line: continue
+    parts = line.split('|', 2)
+    if len(parts) < 3: continue
+    cname, image, status = parts
+    if not cname.startswith(prefix): continue
+    suffix = cname[len(prefix):]
+    # Only project-scope containers have no extra '-' after project (feature-scope
+    # names are prefix + feature + '-' + sidecar_name). We disambiguate by config.
+    if suffix in cfg:
+        running[suffix] = (image, status)
+out = []
+for name, meta in sorted(cfg.items()):
+    image_state, status = running.get(name, ('-', 'not started'))
+    out.append({'name': name, 'image': meta['image'], 'scope': 'project', 'status': status})
+print(json.dumps(out))
+" "${cfg_map}" "${FLEET_PROJECT_NAME:-}" "${docker_rows}"
+}
+
+SIDECARS_LIST_JSON=$(collect_sidecars_json)
+
 # ─── Collect filesystem entries ───────────────────────────────────────────────
 shopt -s nullglob
 INFO_TOMLS=( "${FLEET_CONFIG_ROOT}/.fleet/"*/info.toml )
@@ -61,9 +110,23 @@ shopt -u nullglob
 
 if [ "${#INFO_TOMLS[@]}" -eq 0 ]; then
   if [ "${JSON_MODE}" = true ]; then
-    echo "[]"
+    python3 -c "
+import json
+print(json.dumps({'features': [], 'sidecars': json.loads('''${SIDECARS_LIST_JSON}''')}, indent=2))
+"
   else
     info "No features. Run: fleet add <name>"
+    # Still print sidecars if any are configured.
+    _has_sc=$(python3 -c "import sys, json; print(len(json.loads(sys.argv[1])))" "${SIDECARS_LIST_JSON}")
+    if [ "${_has_sc}" -gt 0 ]; then
+      echo ""
+      echo "Sidecars (project-scope):"
+      python3 -c "
+import sys, json
+for sc in json.loads(sys.argv[1]):
+    print('  {name:<30} {image:<30} {status}'.format(**sc))
+" "${SIDECARS_LIST_JSON}"
+    fi
   fi
   exit 0
 fi
@@ -113,10 +176,11 @@ done
 
 # ─── JSON output ─────────────────────────────────────────────────────────────
 if [ "${JSON_MODE}" = true ]; then
-  python3 - "${ROWS[@]}" <<'PYEOF'
+  python3 - "${SIDECARS_LIST_JSON}" "${ROWS[@]}" <<'PYEOF'
 import sys, json
 
-rows = sys.argv[1:]
+sidecars_json = sys.argv[1]
+rows = sys.argv[2:]
 out = []
 for r in rows:
     parts = r.split("|", 5)
@@ -139,7 +203,7 @@ for r in rows:
         "services": svcs,
         "added_at": added_at,
     })
-print(json.dumps(out, indent=2))
+print(json.dumps({"features": out, "sidecars": json.loads(sidecars_json)}, indent=2))
 PYEOF
   exit 0
 fi
@@ -219,10 +283,11 @@ for i in "${!ROWS[@]}"; do
 
   # Colour status (only when writing to a tty)
   case "${r_status}" in
-    up)       status_display="${GREEN}${r_status}${RESET}" ;;
-    down)     status_display="${RED}${r_status}${RESET}" ;;
-    building|starting) status_display="${YELLOW}${r_status}${RESET}" ;;
-    *)        status_display="${r_status}" ;;
+    up)                            status_display="${GREEN}${r_status}${RESET}" ;;
+    down|failed)                   status_display="${RED}${r_status}${RESET}" ;;
+    building|starting|restarting|unhealthy) status_display="${YELLOW}${r_status}${RESET}" ;;
+    stopped)                       status_display="${BLUE}${r_status}${RESET}" ;;
+    *)                             status_display="${r_status}" ;;
   esac
 
   # The status column has colour escapes which inflate the byte length.
@@ -238,5 +303,17 @@ for i in "${!ROWS[@]}"; do
   fi
   printf "  %-${W_SERVICES}s  %s\n" "${t_svcs}" "${r_added}"
 done
+
+# Sidecars (project-scope) — appended after the feature table.
+_HAS_SC=$(python3 -c "import sys, json; print(len(json.loads(sys.argv[1])))" "${SIDECARS_LIST_JSON}")
+if [ "${_HAS_SC}" -gt 0 ]; then
+  echo ""
+  echo "Sidecars (project-scope):"
+  python3 -c "
+import sys, json
+for sc in json.loads(sys.argv[1]):
+    print('  {name:<30} {image:<30} {status}'.format(**sc))
+" "${SIDECARS_LIST_JSON}"
+fi
 
 echo ""

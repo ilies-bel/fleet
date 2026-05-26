@@ -34,7 +34,7 @@ Developer Browser
                                     peers: wiremock:8080, static-http:9090, etc.
 ```
 
-All feature containers run exclusively on the internal `fleet-net` Docker network — they are never exposed on host ports. Each container is a self-contained unit with supervisord managing all processes (services and optional peers).
+All feature containers run exclusively on the internal `fleet-net` Docker network — they are never exposed on host ports. Each container is self-contained for its own services and peers, but may share Fleet-managed sidecars (Postgres, Redis, MinIO, …) that also live on `fleet-net` and are reached via Docker DNS aliases.
 
 ---
 
@@ -105,6 +105,41 @@ Peers are useful for:
 - Decoupling service tests from external APIs (mock third-party services)
 - Testing error paths and edge cases (stateful request matching)
 - Isolating feature-branch behavior (each feature gets its own peer instances)
+
+## Sidecars
+
+Sidecars are sibling containers (Postgres, Redis, MinIO, …) declared in `fleet.toml` under `[[sidecars]]` that run alongside feature containers on `fleet-net`. They differ from peers in two important ways:
+
+- **They live in their own containers** (not inside the feature container under supervisord). Use them for real third-party services your code talks to over the network.
+- **They can be shared across features.** A `scope = "project"` sidecar is started lazily on the first `fleet add` and reused by every other feature — ideal for an expensive Postgres or vector store that doesn't need per-branch isolation. A `scope = "feature"` sidecar gets a fresh container per feature.
+
+Container naming and DNS aliases on `fleet-net`:
+
+| Scope | Container name | Network alias |
+|-------|----------------|---------------|
+| `project` | `fleet-sidecar-<project>-<name>` | `fleet-<name>` |
+| `feature` | `fleet-sidecar-<project>-<feature>-<name>` | `fleet-<feature>-<name>` |
+
+Your service code reaches a project-scope `rag-postgres` sidecar at `postgres://fleet-rag-postgres:5432`. No host port is exposed.
+
+### Lifecycle
+
+| Action | Project-scope | Feature-scope |
+|--------|---------------|---------------|
+| `fleet init` | No-op (only creates the network) | No-op |
+| `fleet add` | Lazy: start if not running, otherwise no-op | Always start a fresh container |
+| `fleet rm <feature>` | **Untouched** — survives single-feature removal | `docker rm -f` the sidecar |
+| `fleet rm --all` | **Untouched** | Removed with their features |
+| `fleet rm --nuke` | Removed; named volumes also removed | Removed |
+
+Sidecars declared with `depends_on` are started in topological order. Cycles and unknown references are rejected at config-load time.
+
+### v1 limitations
+
+- **No image-tag drift detection.** Changing `image = "postgres:16"` → `"postgres:17"` does not re-create an already-running project-scope sidecar. Use `fleet rm --nuke` (or remove the container manually) to pick up a new image.
+- **No env-var injection.** Fleet does not auto-export `FLEET_SIDECAR_*_HOST` style variables into your services — rely on Docker DNS aliases.
+- **No `fleet sidecar` subcommand.** Sidecar lifecycle is fully implicit via `fleet add` / `fleet rm`.
+- **Per-feature provisioning** (migrations, seed data) belongs in `[hooks].post_add`, which can shell into the sidecar via its DNS alias.
 
 ### nginx Path Fanout
 
