@@ -63,6 +63,22 @@ remove_feature() {
     docker compose -f "${compose_file}" down -v 2>/dev/null || true
   fi
 
+  # Tear down feature-scope sidecars for THIS feature only. Project-scope
+  # sidecars are reused across features and must survive single-feature rm.
+  if [ -n "${project}" ]; then
+    local _sc_prefix="fleet-sidecar-${project}-${name}-"
+    local _sc_list
+    _sc_list=$(docker ps -a --filter "name=^${_sc_prefix}" --format '{{.Names}}' 2>/dev/null || true)
+    if [ -n "${_sc_list}" ]; then
+      while IFS= read -r _sc; do
+        [ -z "${_sc}" ] && continue
+        docker rm -f "${_sc}" >/dev/null 2>&1 \
+          && info "Removed feature-scope sidecar: ${_sc}" \
+          || warn "Could not remove sidecar '${_sc}'"
+      done <<< "${_sc_list}"
+    fi
+  fi
+
   # Remove .fleet/<name>/ directory
   rm -rf "${feature_dir}"
 
@@ -127,6 +143,31 @@ case "$MODE" in
       remove_feature "${local_name}" 2>/dev/null || true
     done
     shopt -u nullglob
+
+    # Tear down ALL sidecars for this project (project-scope survived per-feature
+    # rm; nuke is the only path that touches them). Also remove their named
+    # volumes — compose down -v only handles compose-managed volumes.
+    if [ -n "${FLEET_PROJECT_NAME:-}" ]; then
+      _nuke_prefix="fleet-sidecar-${FLEET_PROJECT_NAME}-"
+      _nuke_list=$(docker ps -a --filter "name=^${_nuke_prefix}" --format '{{.Names}}' 2>/dev/null || true)
+      if [ -n "${_nuke_list}" ]; then
+        while IFS= read -r _sc; do
+          [ -z "${_sc}" ] && continue
+          docker rm -f "${_sc}" >/dev/null 2>&1 \
+            && info "Removed sidecar container: ${_sc}" \
+            || warn "Could not remove sidecar container '${_sc}'"
+        done <<< "${_nuke_list}"
+      fi
+      _vol_list=$(docker volume ls --filter "name=^${_nuke_prefix}" --format '{{.Name}}' 2>/dev/null || true)
+      if [ -n "${_vol_list}" ]; then
+        while IFS= read -r _vol; do
+          [ -z "${_vol}" ] && continue
+          docker volume rm "${_vol}" >/dev/null 2>&1 \
+            && info "Removed sidecar volume: ${_vol}" \
+            || warn "Could not remove sidecar volume '${_vol}'"
+        done <<< "${_vol_list}"
+      fi
+    fi
 
     docker rm -f fleet-gateway 2>/dev/null && info "Gateway removed" \
       || warn "Gateway not found"

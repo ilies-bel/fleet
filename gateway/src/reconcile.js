@@ -1,5 +1,5 @@
 import * as _dockerDefault from './docker.js';
-import { register, isRegistered, getAll, unregister } from './registry.js';
+import { register, isRegistered, getAll, unregister, probeContainerState, commitProbedStatus } from './registry.js';
 
 const GATEWAY_NAME = 'fleet-gateway';
 
@@ -66,6 +66,57 @@ function parseEnv(envArray) {
 }
 
 /**
+ * Recover the {name, port}[] services list from a container's FLEET_SERVICES_JSON
+ * env var (written by `fleet add`). Mirrors the normalisation done by the
+ * /register-feature endpoint so a reconciled entry is shaped identically to a
+ * freshly-added one. Malformed or missing data yields an empty list.
+ * @param {Record<string, string>} env
+ * @returns {{ name: string, port: number }[]}
+ */
+function servicesFromEnv(env) {
+  const raw = env.FLEET_SERVICES_JSON;
+  if (!raw) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((s) => s && typeof s === 'object' && typeof s.name === 'string' && Number.isFinite(Number(s.port)))
+    .map((s) => ({ name: s.name, port: Number(s.port) }));
+}
+
+/**
+ * Recover the host worktree path from the container's bind mounts.
+ *
+ * A fleet feature container mounts each service dir at `/app/<dir>` from
+ * `<worktree>/<dir>` (e.g. /app/backend ← .../.worktrees/bd-x/backend). There
+ * is no single `/app` mount in the split-subproject layout, so we take any
+ * `/app/<dir>` bind mount and strip the trailing `/<dir>` to recover the
+ * worktree root. Falls back to a legacy single `/app` mount if present.
+ *
+ * @param {Array<{ Type: string, Destination: string, Source: string }>} mounts
+ * @returns {string|null}
+ */
+function worktreeFromMounts(mounts) {
+  const binds = (mounts ?? []).filter((m) => m.Type === 'bind');
+  // Legacy: a single /app mount maps straight to the worktree root.
+  const appRoot = binds.find((m) => m.Destination === '/app');
+  if (appRoot?.Source) return appRoot.Source;
+  // Split layout: /app/<dir> ← <worktree>/<dir>. Strip the last path segment.
+  const sub = binds.find(
+    (m) => m.Destination.startsWith('/app/') && m.Destination.slice('/app/'.length).indexOf('/') === -1
+  );
+  if (sub?.Source) {
+    const idx = sub.Source.replace(/\/+$/, '').lastIndexOf('/');
+    return idx > 0 ? sub.Source.slice(0, idx) : sub.Source;
+  }
+  return null;
+}
+
+/**
  * Filter a raw container list down to valid feature containers only.
  * @param {Array<{ Names: string[] }>} containers
  * @returns {Array<{ Names: string[] }>}
@@ -117,20 +168,23 @@ export async function reconcileOne(container, { autoStart }) {
   if (isRegistered(key)) return false;
 
   const branch = env.BRANCH ?? 'unknown';
-  const appMount = (info.Mounts ?? []).find(
-    (m) => m.Type === 'bind' && m.Destination === '/app'
-  );
-  const worktreePath = appMount?.Source ?? null;
+  const worktreePath = worktreeFromMounts(info.Mounts);
+  const services = servicesFromEnv(env);
 
-  const isRunning = info.State?.Running === true;
-  const status = isRunning ? 'up' : 'stopped';
+  // Classify the live container state rather than a bare Running boolean so a
+  // crashed (non-zero exit / OOM) container is restored as 'failed', not
+  // 'stopped'. probeContainerState reuses the inspect we already have.
+  const probed = await probeContainerState(containerName, async () => info);
+  const status = probed === 'unknown' || probed === 'missing' ? 'stopped' : probed;
 
   const featureName =
     env.FEATURE_NAME ??
     containerName.replace(/^fleet-/, '').replace(new RegExp(`^${project}-`), '');
 
-  register(project, featureName, branch, worktreePath, status);
-  console.log(`[reconcile] restored: ${key} (branch: ${branch}, status: ${status})`);
+  register(project, featureName, branch, worktreePath, status, services);
+  console.log(
+    `[reconcile] restored: ${key} (branch: ${branch}, status: ${status}, services: ${services.length})`
+  );
   return true;
 }
 
@@ -164,8 +218,15 @@ export async function reconcileFromDocker() {
 }
 
 /**
- * Periodic sweep: removes phantom registry entries (whose Docker container is
- * gone) and registers newly-appearing containers that aren't yet in the registry.
+ * Periodic sweep. Three responsibilities each cycle:
+ *   1. Prune registry entries whose Docker container is gone (phantoms).
+ *   2. Register newly-appearing containers not yet known (no auto-start).
+ *   3. Reconcile the status of already-registered containers against Docker —
+ *      so a container that exited/crashed out-of-band (Docker Desktop restart,
+ *      OS sleep, OOM) is reflected as 'stopped'/'failed'/'unhealthy' instead of
+ *      drifting at a stale 'up'. Flips away from 'up' are debounced (see
+ *      commitProbedStatus) so a transient blip can't cause flapping.
+ *
  * Never auto-starts stopped containers — that is the boot path's job.
  */
 export async function reconcileSweep() {
@@ -179,9 +240,10 @@ export async function reconcileSweep() {
 
   const qaContainers = filterFeatureContainers(containers);
 
-  // Build a Set of composite keys that Docker actually knows about.
-  // Inspect each container to read PROJECT_NAME / FEATURE_NAME from env.
-  const dockerKeys = new Set();
+  // Single inspect pass: map composite key → { containerName, info }. Reused for
+  // phantom-pruning, new-container registration, and status reconciliation so we
+  // hit the Docker socket at most once per container per sweep.
+  const seen = new Map();
   for (const container of qaContainers) {
     const containerName = bareContainerName(container);
     try {
@@ -189,32 +251,35 @@ export async function reconcileSweep() {
       if (!info) continue;
       const env = parseEnv(info.Config?.Env);
       const key = deriveKey(containerName, env);
-      if (key) dockerKeys.add(key);
+      if (key) seen.set(key, { containerName, info, container });
     } catch {
       // Transient inspect failure — leave the registry entry intact this sweep.
     }
   }
 
-  // Prune registry entries whose container is gone.
+  // 1. Prune registry entries whose container is gone.
   for (const entry of getAll()) {
-    if (!dockerKeys.has(entry.key)) {
+    if (!seen.has(entry.key)) {
       unregister(entry.key);
       console.log(`[reconcile.sweep] unregistered phantom: ${entry.key}`);
     }
   }
 
-  // Register containers not yet in the registry (no auto-start).
-  for (const container of qaContainers) {
-    const containerName = bareContainerName(container);
-    try {
-      const info = await _docker.inspectContainer(containerName);
-      if (!info) continue;
-      const env = parseEnv(info.Config?.Env);
-      const key = deriveKey(containerName, env);
-      if (!key || isRegistered(key)) continue;
-      await reconcileOne(container, { autoStart: false });
-    } catch {
-      // Transient error — skip this container this sweep cycle.
+  // 2 & 3. For each live container: register if new, else reconcile its status.
+  for (const [key, { containerName, info, container }] of seen) {
+    if (!isRegistered(key)) {
+      try {
+        await reconcileOne(container, { autoStart: false });
+      } catch {
+        // Transient error — skip this container this sweep cycle.
+      }
+      continue;
+    }
+    // Already registered — reconcile status from the inspect we already have.
+    const probed = await probeContainerState(containerName, async () => info);
+    const result = commitProbedStatus(key, probed);
+    if (result.changed) {
+      console.log(`[reconcile.sweep] ${key}: status → ${result.status}`);
     }
   }
 }

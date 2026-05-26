@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getHealth, removeFeature, stopFeature, startFeature, syncFeature } from '../api.js';
+import { describeFeature } from './featurePresentation.js';
 
 export default function FeatureCard({ feature, isActive, isPreview, isStarting, onActivate, onRemoved, onLogs }) {
   const { key, name, branch, title, project } = feature;
@@ -85,35 +86,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   }
 
   const isNotStarted = feature.status === 'not_started';
-  const isCreated = feature.status === 'created';
-  const isBuilding = feature.status === 'building';
-  const isRegistryStarting = feature.status === 'starting';
-  const isFailed = feature.status === 'failed';
-  const isUp = feature.status === 'up' || feature.status === 'running';
-  const isLifecycleBusy = isBuilding || isRegistryStarting || isFailed;
-  // When the registry reports building/starting/failed, surface those directly.
-  // The client-side health sentinel (isStarting+health) only applies to
-  // 'running' features to refine the UP/STARTING distinction on port 80.
-  const effectiveHealth = isStarting && health !== 'up' ? 'starting' : health;
-  const healthDot = isNotStarted
-    ? { color: '#555', label: '● NOT STARTED' }
-    : isCreated
-      ? { color: '#888', label: '● CREATED' }
-      : isBuilding
-        ? { color: '#ffaa00', label: '● BUILDING' }
-        : isRegistryStarting
-          ? { color: '#00aaff', label: '● STARTING' }
-          : isFailed
-            ? { color: '#ff4444', label: '● FAILED' }
-            : isUp && effectiveHealth !== 'down'
-              ? { color: 'var(--color-accent)', label: '● UP' }
-              : effectiveHealth === 'up'
-                ? { color: 'var(--color-accent)', label: '● UP' }
-                : effectiveHealth === 'starting'
-                  ? { color: 'var(--color-warning)', label: '● STARTING' }
-                  : effectiveHealth === 'down'
-                    ? { color: 'var(--color-danger)', label: '● DOWN' }
-                    : { color: 'var(--color-warning)', label: '● ...' };
+  const presentation = describeFeature(feature, health, isStarting);
 
   return (
     <div
@@ -123,7 +96,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
         borderLeft: isActive ? '3px solid var(--color-accent)' : '3px solid transparent',
         borderBottom: '1px solid #222',
         transition: 'background 0.1s',
-        opacity: isNotStarted ? 0.7 : 1,
+        opacity: presentation.dimmed ? 0.7 : 1,
       }}
       onMouseEnter={e => { if (!isActive && !isPreview) e.currentTarget.style.background = '#161616'; }}
       onMouseLeave={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'transparent'; }}
@@ -176,16 +149,14 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
 
       <div style={{ marginBottom: '0.5rem' }}>
         <span style={{
-          color: healthDot.color,
+          color: presentation.dotColor,
           fontFamily: 'var(--font-mono)',
           fontSize: '0.68rem',
-          animation: (isBuilding || isRegistryStarting) || (!isLifecycleBusy && !isNotStarted && (health === 'checking' || effectiveHealth === 'starting'))
-            ? 'blink 1s step-start infinite'
-            : 'none',
+          animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
         }}>
-          {healthDot.label}
+          {presentation.dotLabel}
         </span>
-        {isFailed && feature.error && (
+        {presentation.showError && feature.error && (
           <div
             role="alert"
             title={feature.error}
