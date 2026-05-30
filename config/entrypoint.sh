@@ -66,8 +66,14 @@ if [ "${NEEDS_DB}" = "true" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   su -s /bin/bash postgres -c \
     "/usr/lib/postgresql/16/bin/pg_ctl start -D ${PG_DATA} -w -t 30 -o '-k /tmp'"
 
-  su -s /bin/bash postgres -c "psql -h /tmp -c \"CREATE DATABASE ${DB_NAME};\""
-  su -s /bin/bash postgres -c "psql -h /tmp -c \"CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';\""
+  # Idempotent: DB_NAME/DB_USER may already exist (e.g. the built-in `postgres`
+  # superuser when DB_USER=postgres, or a re-provision). Guard so `set -e` does
+  # not abort the whole entrypoint on a benign "already exists".
+  su -s /bin/bash postgres -c "psql -h /tmp -tc \"SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';\" | grep -q 1 || psql -h /tmp -c \"CREATE DATABASE ${DB_NAME};\""
+  su -s /bin/bash postgres -c "psql -h /tmp -c \"DO \\\$\\\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}') THEN ALTER ROLE ${DB_USER} WITH PASSWORD '${DB_PASSWORD}'; ELSE CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASSWORD}'; END IF; END \\\$\\\$;\""
+  # CREATEDB so build-time tooling (e.g. jOOQ codegen with -PjooqUseLocalDb) can
+  # create/drop its own throwaway databases without needing the postgres superuser.
+  su -s /bin/bash postgres -c "psql -h /tmp -c \"ALTER ROLE ${DB_USER} CREATEDB;\""
   su -s /bin/bash postgres -c "psql -h /tmp -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};\""
   su -s /bin/bash postgres -c "psql -h /tmp -c \"ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};\""
   su -s /bin/bash postgres -c \

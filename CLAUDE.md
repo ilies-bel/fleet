@@ -1,131 +1,274 @@
-# Fleet
+# CLAUDE.md
 
-## Project Overview
+## Mars Framework
 
-- Fleet is a local environment manager that spins up isolated Docker containers per feature branch, wiring together a reverse proxy (nginx), process manager (supervisord), and a React dashboard for visibility and control
-- It provides a CLI (`fleet`) for initialising, adding, syncing, and tearing down feature environments, and a gateway service that proxies traffic and manages the feature registry via Docker socket
+TypeScript CLI (`mars`) + orchestrator running Claude Code in parallel
+git worktrees, read-only frontend (`ui/`), design drafts (`design/`).
 
-## Tech Stack
+## Project status
 
-- **Frontend:** React 19, react-router-dom 7, Vite 6, JSX (no TypeScript)
-- **Backend:** Node.js 20, Express 4, ES modules, zero-dep Docker socket client
-- **Infrastructure:** Docker, multi-stage Dockerfiles per stack (go/next/node/spring/vite), nginx, supervisord, bash
-- **Stacks supported:** Go, Next.js, Node.js, Spring Boot, Vite/React
-- **Runtime:** Non-root container user `developer` (uid 1001)
+Mars is an ongoing project with no external users yet. **Every change is
+a hard cut.** No backwards-compat shims, no deprecation aliases, no
+"keep both for now" — rename, move, or delete in one step and update
+every call site in the same change. No feature flags or migration
+windows for internal API churn. If a name, signature, or schema is
+wrong, fix it everywhere now; do not leave the old form behind.
 
-## Your Identity
+## Routing
 
-**You are an orchestrator, delegator, and constructive skeptic architect co-pilot.**
+Route silently between two actions: enqueue (`mars task add "..."`) or
+grill conversationally. Never name the routes, narrate the decision, or
+ask the user to pick. Reads and searches are always direct.
 
-- **Prefer delegating over writing code yourself** — use Glob, Grep, Read to investigate, design the approach, then delegate execution. Small, low-risk edits on a feature branch you may make directly.
-- **Constructive skeptic** — present alternatives and trade-offs, flag risks, but don't block progress
-- **Co-pilot** — discuss before acting. Summarize your proposed plan. Wait for user confirmation before dispatching
-- **Living documentation** — proactively update this CLAUDE.md to reflect project state, learnings, and architecture
+Enqueue by default. Grill instead when any of these hold:
 
-## Why Worktrees Matter
+- shape is exploratory or tentative ("should we…", "thinking about…");
+- introduces or redefines a term, or affects `CONTEXT.md` / ADRs;
+- cross-cutting or architectural trade-off (new seam, dependency, data
+  shape, hard-to-reverse choice);
+- acceptance criteria or scope are unclear;
+- conflicts with an existing ADR, invariant, or queued work.
 
-Worktrees provide **isolation** (changes don't affect main until merged). This matters because:
+If both signals fire, grill — by asking a sharpening question, not by
+asking the user to choose.
 
-- Parallel work can proceed without conflicts
-- Failed experiments are contained and easily discarded
-- User merges via UI after CI passes — no surprise commits
+**Direct editing on `main` is a last resort, not a third route.** It is
+never silent and never implied. The bar is all of:
 
-## Quick Fix Escape Hatch
+- the user explicitly opts in *for this specific change* (a prior
+  session-level "you can edit directly" does **not** carry over);
+- the orchestrator path is genuinely unavailable or unsuitable (e.g.
+  the orchestrator itself is broken, or the change is a single-line
+  CLAUDE.md / docs tweak the user just dictated);
+- you state out loud that you are bypassing the orchestrator and why,
+  before the first `Edit`/`Write`.
 
-For trivial changes (<10 lines) on a **feature branch**, you can make the edit directly:
+When in doubt, enqueue. A redundant task is cheap; a silent commit on
+`main` is not.
 
-1. `git checkout -b quick-fix-description` (must be off main)
-2. Investigate the issue normally
-3. Make the edit and commit immediately
+## Tasks
 
-**On main/master:** Do not edit directly. Branch first.
+Prefer `/mars:task <prompt>` from a Claude Code session for a
+light-shaping wrapper that checks terminology against the glossary
+before enqueueing.
 
-**When to use:** typos, config tweaks, small bug fixes where investigation > implementation.
-**When NOT to use:** anything touching multiple files, anything > ~10 lines, anything risky.
+Tasks live in `.mars/queue.db`. Enqueue via `mars task add "..."`; the
+orchestrator dispatches automatically (worktree → code → verify → merge).
+Inspect via `mars list`.
 
-**Always commit immediately after a quick-fix** to avoid orphaned uncommitted changes.
+**All mutations route through the orchestrator.** Direct `Edit`/`Write`
+on the working tree (i.e. on `main`) is a last resort — see Routing
+above. Never assume a blanket "edit mode" is in effect; opt-in is
+per-change and must be re-confirmed, even within the same session.
 
-## Investigation Before Delegation
+## Top-level directories
 
-**Lead with evidence, not assumptions.** Before delegating any work:
+- `orchestrator/` — the orchestrator, running on the in-house
+  `@mars/workflow` engine (`packages/workflow/`). Headless Claude Code in
+  parallel worktrees → verify → fast-forward into `main`. Conflicts go
+  to `vcs-supervisor` ("Vega"). Node `>=22.13.0`.
+- `.mars/` — per-repo state (`state.db`, `queue.db`,
+  `worktrees/<task-id>/`, `.merge.lock`). Gitignored.
 
-1. **Read the actual code** — Don't just grep for keywords. Open the file, understand the context.
-2. **Identify the specific location** — File, function, line number where the issue lives.
-3. **Understand why** — What's the root cause? Don't guess. Trace the logic.
+## Key concepts
 
-**Anti-pattern:** "I think the bug is probably in X" → dispatching without reading X.
-**Good pattern:** "Read src/foo.ts:142-180. The bug is at line 156 — null check missing."
+- **Orchestrator workflow** — 4 steps: `setup` (worktree on `task/<id>` off
+  `main`) → `code` (`claude -p`) → `verify` → `merge` (serialized via file
+  lock; coding parallel).
+- **Merge target** — `main`. Override per-invocation with
+  `INTEGRATION_BRANCH=<branch>`.
 
-The subagent should execute confidently, not re-investigate.
+## The action queue
 
-### Hard Constraints
+The Mars action queue is the single human-facing work surface. Everything that
+needs the user — operational alerts from self-heal, tasks the orchestrator
+stopped on after exhausting retries (kind `task-blocked`), and draft proposals
+waiting to be shaped (kind `draft-proposal`) — appears as an action queue
+message. Pick one via `mars action-queue list` or `/mars:action-queue`; the action queue
+dispatches to the right resolver (`/mars:unblock`, `/mars:grill`, or
+ack/resolve/dismiss). To see pending work, run `/mars:chat` or `/mars:action-queue`.
 
-- Never dispatch without reading the actual source file involved
-- No partial investigations — if you can't identify the root cause, say so
-- No guessing at fixes — if unsure, investigate more or ask the user
+## Glossary and ADRs
 
-## Workflow
+- `CONTEXT.md` — domain glossary. Edit only via `mars glossary
+  set/remove`; read via `mars glossary list/show`.
+- `docs/adr/NNNN-<slug>.md` — ADRs. Add via `mars adr add`; read via
+  `mars adr list/show`. ADR only when hard-to-reverse, surprising, and
+  embodying a real trade-off.
 
-### Standalone (single subagent)
+Never edit `CONTEXT.md` or `docs/adr/**` directly. Reads are fine.
 
-1. **Investigate deeply** — Read the relevant files (not just grep). Identify the specific line/function.
-2. **Discuss** — Present findings with evidence, propose plan, highlight trade-offs
-3. **User confirms** approach
-4. **Dispatch** a subagent with a self-contained prompt: the files, the exact change, and how to verify
+The `/mars:chat` slash command is the conversational entry point.
+It classifies the user's input (an id, free text, or empty) and
+dispatches to the right sub-skill: `/mars:action-queue` for triage,
+`/mars:task` for quick enqueues, `/mars:grill` for ideas that need
+PRD-shaping, `/mars:unblock` for stuck tasks. Sub-skills update the
+glossary and ADRs inline as decisions crystallise — `/mars:chat`
+itself writes nothing to those files.
 
-### Plan Mode (complex features)
+## Structured tasks
 
-Use when: new feature, multiple approaches, multi-file changes, or unclear requirements.
+`mars task add` accepts `--files`, `--verify`, `--done`, and
+`--type auto|checkpoint` (default `auto`; no other values are valid —
+the CLI rejects `chore`, `feat`, etc.). Any of them stores a typed
+spec; the implementor receives `<files>`, `<verify>`, `<done>`,
+`<task_type>`, `<task_id>` sections so completion is a checklist. The
+slicer always emits structured tasks; free-prose still works and
+degrades to prompt-only. Other useful flags: `--priority 0..3`,
+`--tag coder|writer`, `--blocked-by <id>` (repeatable). Always
+`mars task add --help` to confirm the current flag surface before
+invoking — this CLAUDE.md note may lag the CLI.
 
-1. Explore with Glob/Grep/Read → design the approach
-2. AskUserQuestion for clarification → confirm the plan with the user
-3. Dispatch subagents from the approved plan
+## Blockers
 
-## Testing fleet init
+Blocker edges live in the `task_blockers` junction table (`task_id` waits
+on `blocker_task_id`). A task in `blocked` only flips to `queued` once
+**every** one of its blockers reaches `done` — and a successful recovery
+counts as its origin reaching `done`, so a recovered blocker unblocks the
+whole chain. The daemon's `onBlockerTaskCompleted` runs on each
+completion, and `recoverBlockedTasks` re-checks at daemon startup so a
+crash between completion and unblock doesn't strand work.
 
-`test/project/` is a ready-to-use copy of `test/reference/` (d2r2 — Spring Boot backend + Next.js frontend).
+When a task fails, the orchestrator spawns exactly **one** recovery task
+per origin failure to finish or fix the work. A recovery task is itself
+non-recoverable: if it fails for any reason — the same failure, a
+different one, or a watchdog kill — the origin goes to `failed` with one
+actionable action queue item and the operator resolves it explicitly (e.g.
+`mars restart`). There is no retry budget, retry count, or tunable knob —
+exactly one recovery attempt per origin failure, full stop.
 
-```bash
-# cd into the project directory first — fleet init reads cwd
-cd test/project
+Recovery tasks are **leaf nodes** in the task graph (ADR-0040): they
+cannot have blockers, cannot be blocked by anything, and the
+blocker-cascade does not recurse through them. The `task_blockers`
+insertion path rejects any edge whose either endpoint is a recovery
+task; the one legitimate origin→recovery edge is written by the
+recovery-spawn path itself.
 
-# Run interactively in your terminal (not as a subshell — needs /dev/tty for prompts)
-fleet init
-```
+- Create edges at enqueue with `mars task add ... --blocked-by <id>`
+  (repeatable; each id must already exist) or after the fact with
+  `mars block <task-id> <blocker-id> [<blocker-id> ...]`.
+- `mars unblock <id> <blocker-id> ...` removes specific edges (status
+  unchanged). `mars unblock <id>` with no blocker ids is phantom-recovery:
+  it clears all edges and flips the task to `failed` so it can be
+  `mars purge`d or `mars restart`ed.
+- A blocker that ends in `failed` leaves its dependents waiting in
+  `blocked`; resolve the chain via the action queue item on the failed blocker
+  (the failure does not cascade down the chain — behaviour unchanged).
+- Coders that can't make progress should emit a `--blocked-by $TASK_ID`
+  follow-up instead of bailing; the deviation-rules brief in the
+  orchestrator notes spells this out.
 
-`fleet init` takes no arguments. It reads the current directory, looks for `.fleet/fleet.toml`, and runs the interactive wizard if the file is absent.
+## Orchestrator notes
 
-Expected detection output:
-```
-Scanning test/project for service directories...
-  Include 'd2r2-backend' as a service? (stack: spring) [Y/n]:
-  Include 'd2r2-frontend' as a service? (stack: next) [Y/n]:
-  spring-boot-devtools not found → prompt to add
-  Rendered .fleet/Dockerfile.feature-base.spring
-  Rendered .fleet/Dockerfile.feature-base.next
-```
+- Coder runs get a deviation-rules brief: no bailing without an auto-fix
+  commit, a `--blocked-by $TASK_ID` follow-up, or a `mars proposal add`. A
+  watcher logs (but does not abort) once a coder makes 5+ consecutive
+  Read/Grep/Glob calls without an Edit/Write/Bash; override the threshold
+  via `MARS_READ_SPAN_LIMIT`.
+- **Worker models (defaults):** Coder → `claude-sonnet-4-6`, Fixer →
+  `claude-opus-4-7` (recovery resilience), Writer → `claude-haiku-4-5-20251001`,
+  Planner/Slicer → `claude-opus-4-7` (architectural reasoning), Triager →
+  `claude-sonnet-4-6`. Override the Coder model for the lifetime of a daemon
+  process via `MARS_WORKER_MODEL=<model>` (e.g. `MARS_WORKER_MODEL=claude-opus-4-7`
+  for a high-complexity session). Planner, Slicer, Writer, and Fixer models are
+  always pinned; only Coder is overridable.
+- Inspect runs at `http://localhost:4111` (`cd orchestrator && npm run dev`).
 
-Notes:
-- If `.fleet/fleet.toml` already exists in `test/project/`, the wizard is skipped and the file is used as-is. The example schema lives at `.fleet/fleet.toml.example` (tracked); the real `.fleet/fleet.toml` is gitignored
-- Generated Dockerfiles land at `.fleet/Dockerfile.feature-base.<stack>` (e.g. `.fleet/Dockerfile.feature-base.spring`), not at the repo root
-- Services are expressed as `[[services]]` entries in `fleet.toml` — no separate frontend/backend distinction
-- Both git repos (`d2r2-backend/`, `d2r2-frontend/`) should be on branch `main` before running init
-- `test/reference/` is the pristine original — never modify it; re-copy if needed: `cp -rp test/reference test/project`
+## Conventions
 
-## Current State
+- Bun compiles the `mars` CLI into standalone single-file binaries (the
+  binary embeds its own runtime; no Bun installation required to run it).
+  The orchestrator runs on Node `>=22.13.0` — Bun is not involved there.
+- Workflows run on the in-house `@mars/workflow` engine
+  (`packages/workflow/`), NOT Mastra (removed). Author them per
+  `orchestrator/docs/implement-pipeline.md`; the `mastra` skill no longer
+  applies to this repo.
+- Never commit `.env`, `.mars/`, or `node_modules`.
+- Never `cd`. Bash CWD persists across tool calls, and `mars` resolves
+  the repo from CWD upward — once shifted into `.mars/worktrees/<id>/`,
+  every later `mars` call silently binds to that worktree's `.mars/` and
+  hits the wrong DB. Use `git -C <path>`, tool `--cwd` flags, absolute
+  paths, or `mars --repo <root> …`. If a one-off subshell is unavoidable,
+  spell it `(cd <abs-path> && …)` so the parent shell never moves.
+- The daemon's HTTP server binds an OS-assigned ephemeral port
+  (`listen(0, '127.0.0.1', ...)` in
+  `orchestrator/src/mastra/daemon/http-server.ts`) and publishes it to
+  `.mars/http.port`. To reach the daemon API (e.g. `/failure-reasons`,
+  `/events`), read `PORT=$(cat .mars/http.port)` first — never guess the
+  port. A 200 from a guessed port is usually an unrelated server (the
+  UI/Vite catch-all returns index.html for any path), so a
+  guessed-port probe proves nothing.
+- A 404 on a daemon route that exists in source usually means the running
+  daemon predates that route — restart with `mars daemon restart` rather
+  than scoping a code task. (Caveat: restart hard-stops in-flight tasks;
+  they re-queue.)
+- Before enqueueing a task off a `tsc`/build error, confirm the error
+  actually reproduces in the correct directory (use
+  `(cd <abs-path> && npx tsc --noEmit)`, not a bare `cd`) and run it
+  twice — transient `node_modules`/install states have produced phantom
+  TS2307 'cannot find module' errors that vanish on re-run. Only an error
+  that reproduces in the isolated, correct context belongs in a task
+  prompt.
 
-The Stack-agnostic Fleet refactor (epic qa-fleet-pyn) is fully merged on main as of 2026-04-15.
+## Installation
 
-Key changes shipped:
-- Config now lives under `.fleet/` — `fleet.toml` replaces the old flat `fleet.conf`; no file at the repo root
-- Multi-service model: any number of `[[services]]` entries, each with its own stack, port, build, and run command
-- Per-stack Dockerfiles at `.fleet/Dockerfile.feature-base.<stack>` (one per stack type, generated by `fleet init`)
-- Container naming: `fleet-<feature>-<service>` (one container per service, up from one per feature)
-- Image naming: `fleet-base-<stack>` (was `fleet-feature-base`)
-- `fleet init` is now zero-argument — reads cwd; wizard runs if `.fleet/fleet.toml` is absent
-- `fleet add <name>` spins up all services from `fleet.toml`; `--service svc=path:image` overrides individual services
-- `fleet feature` subcommand removed
+There are two install routes, for two different audiences:
 
-Mount modes (v2.0.0): `shared_paths`/`env_files` entries declare `mode = "bind" | "volume" | "copy"`. See `.fleet/fleet.toml.example`.
+- **Prod consumers** install the `mars` CLI with a one-liner
+  curl-pipe-bash bootstrap — `curl -sSL
+  https://github.com/<org>/mars-framework/releases/latest/download/get-mars.sh
+  | bash`. It detects OS/arch, downloads the matching prebuilt binary
+  from the latest GitHub Release, verifies its sha256, and drops `mars`
+  onto PATH. This is the route to point users at; it needs no clone and
+  no dev toolchain.
+- **Dev consumers** run `install.sh` from a clone of this repo. It does
+  *not* produce a compiled Bun binary — it writes a small tsx wrapper
+  that runs the CLI from source and symlinks that tsx wrapper onto PATH,
+  so source edits go live immediately. This is a dev-only flow; prod
+  consumers should use the bootstrap above instead.
 
-See `MIGRATION.md` for the old→new key mapping and upgrade path.
+## Bundled templates
+
+The `.claude/` template tree that consumers receive via `mars init` /
+`mars update` is maintained in `orchestrator/src/init/templates/` and
+bundled at author time, not at consumer install time.
+
+**Maintainer refresh.** When the framework's `.claude/` source tree
+changes, run `npm run mars:bundle:refresh` (alias: `sync-claude-templates`)
+from the `orchestrator/` directory. This copies the canonical `.claude/`
+tree into the bundle path so the next release ships the updated templates.
+
+**CI drift gate.** A CI job (`template-sync-check`) runs on every PR. It
+re-runs `mars:bundle:refresh` and fails the PR if the result differs from
+what is already committed — i.e. if the bundled templates have drifted
+from the framework's `.claude/` source tree. Run the refresh command and
+commit the result before pushing.
+
+**No build-time side effect.** The `prebuild` and `pretest` hooks no
+longer trigger a template sync. The bundle is refreshed only when a
+maintainer explicitly runs `mars:bundle:refresh`. This supersedes the old
+expectation that `npm run build` or `npm test` would keep the bundle
+current.
+
+**Consumer-side UX is unchanged.** `mars init` and `mars update` continue
+to work exactly as before — they expand the bundled templates into the
+target repo. Only the maintainer-side refresh mechanism changed.
+
+## Loose ends
+
+Enqueue the moment you spot one — **one `mars task add` per item**, no
+batching, no MEMORY.md, no markdown TODOs. Only concrete, actionable work
+the user has seen. If user says "skip", drop it. At stopping points
+("looks good", "ship it"), do a final sweep as a safety net.
+
+Each task prompt must stand alone. Include:
+
+- file path(s) + symptom,
+- suggested fix (with trade-offs if alternatives),
+- verification command(s),
+- a closing **"Save your work"** line — the orchestrator does not commit
+  on the agent's behalf.
+
+The `mars task add "..."` outer call is a CLI invocation; any `git`/`rm`
+strings inside the heredoc'd prompt are passed verbatim to the dispatched
+agent and don't trip the outer shell's hooks.
