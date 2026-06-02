@@ -1,0 +1,30 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: fleet-feature-base
+  namespace: {NAMESPACE}
+  labels:
+    managed-by: fleet
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: fleet-feature-base
+  namespace: {NAMESPACE}
+  labels:
+    managed-by: fleet
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: fleet-feature-base:latest
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile.feature-base

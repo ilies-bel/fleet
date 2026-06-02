@@ -4,6 +4,7 @@ import fs from 'fs';
 import express, { Router } from 'express';
 import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
 import { dockerExec, dockerLogs, stopContainer, startContainer, removeContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
+import { bootstrap } from './cluster/bootstrap.js';
 
 const router = Router();
 const startedAt = Date.now();
@@ -627,6 +628,29 @@ router.get('/features/:key/build-log', (req, res) => {
     clearInterval(keepalive);
     unsubscribe();
   });
+});
+
+/**
+ * POST /_fleet/api/cluster/bootstrap?namespace=<ns>
+ *
+ * Bootstrap the fleet-feature-base ImageStream and BuildConfig into the given
+ * namespace, then trigger a one-time in-cluster build if the :latest tag does
+ * not yet exist. Safe to call multiple times — idempotent.
+ *
+ * After a successful bootstrap, feature pod specs can reference:
+ *   image-registry.openshift-image-registry.svc:5000/<namespace>/fleet-feature-base:latest
+ */
+router.post('/cluster/bootstrap', async (req, res) => {
+  const { namespace } = req.query;
+  if (!namespace || typeof namespace !== 'string' || namespace.trim() === '') {
+    return res.status(400).json({ error: 'namespace query parameter required' });
+  }
+  try {
+    await bootstrap(namespace.trim());
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;
