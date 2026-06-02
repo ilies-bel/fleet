@@ -21,7 +21,9 @@
 # Generated at fleet init time from config/nginx.conf.tmpl
 config/nginx.conf
 .worktrees/
-.claude/worktrees/
+# Claude Code runtime/tooling state (worktrees, scheduled-task locks, etc.) —
+# per-machine, never project source.
+.claude/
 .DS_Store
 node_modules/
 gateway/node_modules/
