@@ -56,31 +56,30 @@ PG_DATA="/var/lib/postgresql/16/main"
 if [ "${NEEDS_DB}" = "true" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   echo "[fleet] First start — initialising PostgreSQL cluster..."
 
-  su -s /bin/bash postgres -c \
-    "/usr/lib/postgresql/16/bin/initdb -D ${PG_DATA} -E UTF8 --locale=C --auth=trust"
+  # Run initdb directly as the current user (no su: OpenShift restricted SCC
+  # drops CAP_SETUID, so su would fail; postgres binaries refuse UID 0 but
+  # accept any other non-root UID, which is exactly what we set).
+  /usr/lib/postgresql/16/bin/initdb -D "${PG_DATA}" -E UTF8 --locale=C --auth=trust
 
   # Allow local TCP connections
   echo "host all all 127.0.0.1/32 trust" >> "${PG_DATA}/pg_hba.conf"
 
   # Start temporarily to provision the database
-  su -s /bin/bash postgres -c \
-    "/usr/lib/postgresql/16/bin/pg_ctl start -D ${PG_DATA} -w -t 30 -o '-k /tmp'"
+  /usr/lib/postgresql/16/bin/pg_ctl start -D "${PG_DATA}" -w -t 30 -o '-k /tmp'
 
   # Idempotent: DB_NAME/DB_USER may already exist (e.g. the built-in `postgres`
   # superuser when DB_USER=postgres, or a re-provision). Guard so `set -e` does
   # not abort the whole entrypoint on a benign "already exists".
-  su -s /bin/bash postgres -c "psql -h /tmp -tc \"SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';\" | grep -q 1 || psql -h /tmp -c \"CREATE DATABASE ${DB_NAME};\""
-  su -s /bin/bash postgres -c "psql -h /tmp -c \"DO \\\$\\\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}') THEN ALTER ROLE ${DB_USER} WITH PASSWORD '${DB_PASSWORD}'; ELSE CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASSWORD}'; END IF; END \\\$\\\$;\""
+  psql -h /tmp -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';" | grep -q 1 || psql -h /tmp -c "CREATE DATABASE ${DB_NAME};"
+  psql -h /tmp -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}') THEN ALTER ROLE ${DB_USER} WITH PASSWORD '${DB_PASSWORD}'; ELSE CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASSWORD}'; END IF; END \$\$;"
   # CREATEDB so build-time tooling (e.g. jOOQ codegen with -PjooqUseLocalDb) can
   # create/drop its own throwaway databases without needing the postgres superuser.
-  su -s /bin/bash postgres -c "psql -h /tmp -c \"ALTER ROLE ${DB_USER} CREATEDB;\""
-  su -s /bin/bash postgres -c "psql -h /tmp -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};\""
-  su -s /bin/bash postgres -c "psql -h /tmp -c \"ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};\""
-  su -s /bin/bash postgres -c \
-    "psql -h /tmp -d ${DB_NAME} -c \"GRANT ALL ON SCHEMA public TO ${DB_USER};\""
+  psql -h /tmp -c "ALTER ROLE ${DB_USER} CREATEDB;"
+  psql -h /tmp -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};"
+  psql -h /tmp -c "ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};"
+  psql -h /tmp -d "${DB_NAME}" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};"
 
-  su -s /bin/bash postgres -c \
-    "/usr/lib/postgresql/16/bin/pg_ctl stop -D ${PG_DATA} -w"
+  /usr/lib/postgresql/16/bin/pg_ctl stop -D "${PG_DATA}" -w
 
   echo "[fleet] PostgreSQL initialised (db=${DB_NAME}, user=${DB_USER})."
 elif [ "${NEEDS_DB}" = "true" ]; then
@@ -97,6 +96,7 @@ nodaemon=true
 logfile=/var/log/supervisor/supervisord.log
 logfile_maxbytes=10MB
 loglevel=info
+pidfile=/tmp/supervisord.pid
 SUPEREOF
 
 # PostgreSQL program block
@@ -105,7 +105,6 @@ if [ "${NEEDS_DB}" = "true" ]; then
 
 [program:postgresql]
 command=/usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main
-user=postgres
 autostart=true
 autorestart=true
 priority=10
@@ -130,7 +129,8 @@ for svc in svcs:
     svc_dir = '/app/' + name
 
     # Emit a build+run wrapper so we avoid quoting hell in supervisord command=
-    wrapper = '/usr/local/bin/start-' + name + '.sh'
+    # Use /tmp so the file is writable by any non-root UID (OpenShift SCC).
+    wrapper = '/tmp/start-' + name + '.sh'
     with open(wrapper, 'w') as f:
         f.write('#!/bin/bash\nset -e\n')
         f.write('cd ' + svc_dir + '\n')
@@ -260,7 +260,7 @@ echo "[fleet] Generating nginx config..."
 NGINX_CONF="/etc/nginx/conf.d/feature.conf"
 
 "${PYBIN}" -c "
-import sys, json
+import sys, json, os
 
 svcs = json.loads(sys.argv[1])
 
@@ -270,8 +270,9 @@ FRONTEND_STACKS = {'vite', 'next', 'webpack', 'react', 'vue'}
 default_svc = next((s for s in svcs if s.get('name') == 'frontend' and s.get('port')), None) \
     or next((s for s in svcs if s.get('stack') in FRONTEND_STACKS and s.get('port')), None)
 
+nginx_port = os.environ.get('NGINX_PORT', '8080')
 lines = ['server {']
-lines.append('    listen 80;')
+lines.append('    listen ' + nginx_port + ';')
 lines.append('    access_log /dev/stdout;')
 lines.append('    error_log /dev/stderr warn;')
 lines.append('')

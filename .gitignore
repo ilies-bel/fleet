@@ -7,6 +7,8 @@
 !.fleet/Dockerfile.feature-base
 !.fleet/fragments/
 !.fleet/fragments/**
+!.fleet/test/
+!.fleet/test/**
 .fleet-runner.pid
 .fleet-config
 # Fleet user config (per-machine, not tracked)
