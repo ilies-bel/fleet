@@ -17,15 +17,18 @@ usage() {
   echo ""
   echo -e "${GREEN}fleet add${RESET} — start a multi-service feature container"
   echo ""
-  echo "Usage: fleet add <name> [--title <title>] [--direct]"
+  echo "Usage: fleet add <name> [--title <title>] [--direct] [--host <cluster/namespace>]"
   echo ""
   echo "Arguments:"
-  echo -e "  ${BLUE}<name>${RESET}           Feature name (lowercase letters, numbers, hyphens, dots)"
+  echo -e "  ${BLUE}<name>${RESET}                        Feature name (lowercase letters, numbers, hyphens, dots)"
   echo ""
   echo "Flags:"
-  echo -e "  ${BLUE}--title <title>${RESET}  Human-readable title shown in the dashboard (optional)"
-  echo -e "  ${BLUE}--direct${RESET}         Bind-mount the primary project checkout instead of a worktree."
-  echo "                   Live-tracks the working copy (including uncommitted changes)."
+  echo -e "  ${BLUE}--title <title>${RESET}               Human-readable title shown in the dashboard (optional)"
+  echo -e "  ${BLUE}--direct${RESET}                      Bind-mount the primary project checkout instead of a worktree."
+  echo "                                Live-tracks the working copy (including uncommitted changes)."
+  echo -e "  ${BLUE}--host <cluster/namespace>${RESET}    Run on a managed OpenShift cluster instead of local Docker."
+  echo "                                Both cluster and namespace are required."
+  echo "                                Omit entirely to keep the default local-Docker path."
   echo ""
   echo "  Starts a single container fleet-<name> that runs every [[services]]"
   echo "  and [[peers]] entry from .fleet/fleet.toml under supervisord."
@@ -38,6 +41,7 @@ usage() {
   echo "  fleet add my-feature"
   echo "  fleet add my-feature --title 'My feature title'"
   echo "  fleet add qa-main --direct"
+  echo "  fleet add my-feature --host ocp-prod/preview-ns"
   echo ""
   exit "${exit_code}"
 }
@@ -55,9 +59,11 @@ shift
 
 validate_feature_name "${NAME}"
 
-# Parse remaining args: --title, --direct
+# Parse remaining args: --title, --direct, --host
 FEATURE_TITLE=""
 DIRECT=false
+FEATURE_HOST_CLUSTER=""
+FEATURE_HOST_NAMESPACE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --title)
@@ -68,6 +74,19 @@ while [ $# -gt 0 ]; do
     --direct)
       DIRECT=true
       shift
+      ;;
+    --host)
+      [ -n "${2:-}" ] || error "fleet add: --host requires a value (format: cluster/namespace)"
+      _host_val="$2"
+      FEATURE_HOST_CLUSTER="${_host_val%%/*}"
+      # If there is no '/' separator, the whole value equals the cluster part — namespace is missing.
+      if [ "${_host_val}" = "${FEATURE_HOST_CLUSTER}" ]; then
+        error "fleet add: --host '${_host_val}': namespace is missing. Format: cluster/namespace (e.g. ocp-prod/preview-ns)"
+      fi
+      FEATURE_HOST_NAMESPACE="${_host_val#*/}"
+      [ -z "${FEATURE_HOST_CLUSTER}" ] && error "fleet add: --host '${_host_val}': cluster name cannot be empty. Format: cluster/namespace"
+      [ -z "${FEATURE_HOST_NAMESPACE}" ] && error "fleet add: --host '${_host_val}': namespace cannot be empty. Format: cluster/namespace"
+      shift 2
       ;;
     *)
       error "fleet add: unknown argument '$1'. See: fleet add --help"
@@ -435,6 +454,15 @@ print(json.dumps(out))
 
 title_json=$("${_PYBIN}" -c "import sys, json; print(json.dumps(sys.argv[1]))" "${FEATURE_TITLE}")
 
+# Build the optional host JSON fragment (null when --host was not passed).
+# Python handles proper JSON escaping of cluster/namespace values.
+_HOST_JSON="null"
+if [ -n "${FEATURE_HOST_CLUSTER}" ]; then
+  _HOST_JSON=$("${_PYBIN}" -c \
+    "import sys,json; print(json.dumps({'cluster':sys.argv[1],'namespace':sys.argv[2]}))" \
+    "${FEATURE_HOST_CLUSTER}" "${FEATURE_HOST_NAMESPACE}")
+fi
+
 # ─── Create feature dir ───────────────────────────────────────────────────────
 mkdir -p "${FEATURE_DIR}"
 write_state "${FEATURE_DIR}" created
@@ -446,7 +474,7 @@ write_state "${FEATURE_DIR}" created
 write_state "${FEATURE_DIR}" building
 info "Registering '${NAME}' with gateway (status=building)..."
 _GW_RESULT=$(gateway_post_full "register-feature" \
-  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${PROJECT_WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"title\":${title_json},\"services\":${services_json},\"status\":\"building\"}")
+  "{\"name\":\"${NAME}\",\"branch\":\"${FIRST_BRANCH}\",\"worktreePath\":\"${PROJECT_WORKTREE_PATH}\",\"project\":\"${FLEET_PROJECT_NAME}\",\"title\":${title_json},\"services\":${services_json},\"status\":\"building\",\"host\":${_HOST_JSON}}")
 HTTP_STATUS="${_GW_RESULT%|*}"
 _GW_BODY_FILE="${_GW_RESULT#*|}"
 _GW_BODY=$(cat "${_GW_BODY_FILE}" 2>/dev/null || true)

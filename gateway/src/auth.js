@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, unregister, isRegistered, setActiveFeature } from './registry.js';
+import { register, unregister, isRegistered, setActiveFeature, parseFeatureHost } from './registry.js';
 
 const router = Router();
 
@@ -12,7 +12,7 @@ const router = Router();
  * directing the caller to upgrade their fleet CLI.
  */
 router.post('/register-feature', (req, res) => {
-  const { project, name, branch, worktreePath = null, status = 'running', services = [], title = null, error = null } = req.body;
+  const { project, name, branch, worktreePath = null, status = 'running', services = [], title = null, error = null, host: rawHost = null } = req.body;
 
   if (!project) {
     return res.status(400).json({ error: 'project required — upgrade your fleet CLI' });
@@ -20,6 +20,15 @@ router.post('/register-feature', (req, res) => {
 
   if (!name || !branch) {
     return res.status(400).json({ error: 'name and branch are required' });
+  }
+
+  // Validate optional host descriptor — partial descriptors (cluster without
+  // namespace, or vice versa) are rejected with a clear message.
+  let host;
+  try {
+    host = parseFeatureHost(rawHost);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
 
   // Normalize services payload: {name, port} per entry. Malformed entries are
@@ -31,7 +40,7 @@ router.post('/register-feature', (req, res) => {
         .map(s => ({ name: s.name, port: Number(s.port) }))
     : [];
 
-  register(project, name, branch, worktreePath, status, normalizedServices, title, error);
+  register(project, name, branch, worktreePath, status, normalizedServices, title, error, host);
 
   const key = `${project}-${name}`;
   res.json({ ok: true, key, project, name, branch, services: normalizedServices });

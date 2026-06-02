@@ -386,6 +386,83 @@ describe('POST /register-feature — composite key contract', () => {
     assert.equal(feature.error, null);
   });
 
+  // ── host descriptor: optional cluster + namespace ─────────────────────────
+
+  test('feature without --host has host=null (local Docker path unchanged)', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { project: 'myproj', name: 'local-feature', branch: 'main' },
+    });
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.key === 'myproj-local-feature');
+    assert.ok(feature, 'feature should be registered');
+    assert.equal(feature.host, null, 'host should be null when not provided');
+  });
+
+  test('feature with host: {cluster, namespace} persists feature.host', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: {
+        project: 'myproj',
+        name: 'cluster-feature',
+        branch: 'main',
+        host: { cluster: 'ocp-prod', namespace: 'preview-env' },
+      },
+    });
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.key === 'myproj-cluster-feature');
+    assert.ok(feature, 'feature should be registered');
+    assert.deepEqual(
+      feature.host,
+      { cluster: 'ocp-prod', namespace: 'preview-env' },
+      'host descriptor should be stored and returned verbatim'
+    );
+  });
+
+  test('rejects host missing cluster with 400 and clear error', async () => {
+    const res = await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: {
+        project: 'myproj',
+        name: 'bad-host-1',
+        branch: 'main',
+        host: { namespace: 'preview-env' },
+      },
+    });
+
+    assert.equal(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.ok(res.body.error, 'should return error message');
+    assert.ok(
+      res.body.error.includes('cluster'),
+      `error should mention 'cluster', got: ${res.body.error}`
+    );
+  });
+
+  test('rejects host missing namespace with 400 and clear error', async () => {
+    const res = await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: {
+        project: 'myproj',
+        name: 'bad-host-2',
+        branch: 'main',
+        host: { cluster: 'ocp-prod' },
+      },
+    });
+
+    assert.equal(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.ok(res.body.error, 'should return error message');
+    assert.ok(
+      res.body.error.includes('namespace'),
+      `error should mention 'namespace', got: ${res.body.error}`
+    );
+  });
+
   // ── PATCH /_fleet/api/features/:key/status contract ──────────────────────
 
   test('PATCH status transitions building → starting → up (running normalised)', async () => {

@@ -53,7 +53,8 @@ export function loadPersistedActive() {
 
 /**
  * @typedef {{ name: string, port: number }} ServiceEntry
- * @typedef {{ project: string, name: string, key: string, branch: string, worktreePath: string|null, title: string|null, addedAt: Date, status: string, error: string|null, services: ServiceEntry[] }} FeatureEntry
+ * @typedef {{ cluster: string, namespace: string }} HostDescriptor
+ * @typedef {{ project: string, name: string, key: string, branch: string, worktreePath: string|null, title: string|null, host: HostDescriptor|null, addedAt: Date, status: string, error: string|null, services: ServiceEntry[] }} FeatureEntry
  * @type {Map<string, FeatureEntry>}
  */
 const features = new Map();
@@ -156,6 +157,32 @@ function normaliseStatus(status) {
 }
 
 /**
+ * Parse and validate an optional cluster host descriptor.
+ *
+ * Accepts an object with `cluster` and `namespace` string fields.
+ * Returns null when the descriptor is absent. Throws when the descriptor is
+ * partially specified (one field present, the other missing or empty) so
+ * callers surface a clear error rather than silently dropping a misconfigured
+ * host.
+ *
+ * @param {unknown} raw  raw value from request body or CLI args
+ * @returns {HostDescriptor|null}
+ * @throws {Error} if raw is present but missing cluster or namespace
+ */
+export function parseFeatureHost(raw) {
+  if (raw == null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('host must be an object with cluster and namespace fields');
+  }
+  const hasCluster = typeof raw.cluster === 'string' && raw.cluster.length > 0;
+  const hasNamespace = typeof raw.namespace === 'string' && raw.namespace.length > 0;
+  if (!hasCluster && !hasNamespace) return null;
+  if (!hasCluster) throw new Error('host.cluster is required when host is specified');
+  if (!hasNamespace) throw new Error('host.namespace is required when host is specified');
+  return { cluster: raw.cluster, namespace: raw.namespace };
+}
+
+/**
  * Register a new feature container. Auto-activates only when status is 'up' —
  * routing traffic to a not-yet-running container (building/starting) would 502.
  * @param {string} project - project name (required — determines composite key)
@@ -166,11 +193,12 @@ function normaliseStatus(status) {
  * @param {ServiceEntry[]} services - per-service {name, port} entries for path-prefix routing
  * @param {string|null} title - human-readable display title for the dashboard card
  * @param {string|null} error - human-readable failure reason (populated for status='failed')
+ * @param {HostDescriptor|null} host - optional cluster host descriptor; null = local Docker
  */
-export function register(project, name, branch, worktreePath = null, status = 'up', services = [], title = null, error = null) {
+export function register(project, name, branch, worktreePath = null, status = 'up', services = [], title = null, error = null, host = null) {
   const key = `${project}-${name}`;
   const normalised = normaliseStatus(status);
-  features.set(key, { project, name, key, branch, worktreePath, title, addedAt: new Date(), status: normalised, error, services });
+  features.set(key, { project, name, key, branch, worktreePath, title, host, addedAt: new Date(), status: normalised, error, services });
   if (activeFeature === null && normalised === 'up') {
     activeFeature = key;
     persistActive(key);
