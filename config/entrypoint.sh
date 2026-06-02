@@ -42,23 +42,6 @@ echo "[fleet] ================================================================"
 echo "[fleet] Feature:  ${APP_NAME}  |  Branch: ${BRANCH}"
 echo "[fleet] ================================================================"
 
-# ─── Wait mode (FLEET_BOOT=wait) ─────────────────────────────────────────────
-# In cluster mode the container starts before /app code is present.  The
-# orchestrator (oc rsync or an init-container) populates /app and then touches
-# the sentinel to signal completion.  Without FLEET_BOOT=wait this block is
-# skipped entirely — local bind-mount dev is unaffected.
-#
-# Sentinel path can be overridden via FLEET_READY_SENTINEL (default below).
-# See config/README.entrypoint.md for the full contract.
-if [ "${FLEET_BOOT:-}" = "wait" ]; then
-  FLEET_READY_SENTINEL="${FLEET_READY_SENTINEL:-/app/.fleet-ready}"
-  echo "[fleet] FLEET_BOOT=wait — blocking until ${FLEET_READY_SENTINEL} appears..."
-  while [ ! -f "${FLEET_READY_SENTINEL}" ]; do
-    sleep 1
-  done
-  echo "[fleet] Sentinel detected (${FLEET_READY_SENTINEL}) — proceeding."
-fi
-
 # ─── Determine if postgres is required ───────────────────────────────────────
 NEEDS_DB=$("${PYBIN}" -c "
 import sys, json
