@@ -4,8 +4,8 @@
  * These tests verify the observable behaviour of runSmoke() through its public
  * interface: log output, step results, and exit code.
  *
- * exec, spawnBg, and fetch are injected mocks — they represent real system
- * boundaries (oc CLI, background processes, HTTP).
+ * deps.oc, deps.pkill, and deps.fetch are injected mocks — they represent real
+ * system boundaries (oc CLI, background processes, HTTP).
  *
  * Run: node --test scripts/verify-cluster-smoke.test.js
  */
@@ -17,15 +17,15 @@ import { runSmoke } from './verify-cluster-smoke.js';
 // ── Mock factories ────────────────────────────────────────────────────────────
 
 /**
- * Returns a spawnBg mock that fires `onReady` or `onError` asynchronously,
- * giving the caller time to register callbacks synchronously after the call.
+ * Returns an oc.portForward mock that fires `onReady` or `onError`
+ * asynchronously, giving the caller time to register callbacks synchronously.
  *
  * @param {'ready'|'error'|'hang'} mode
  */
-function makeSpawnBgMock(mode = 'ready') {
+function makePortForwardMock(mode = 'ready') {
   let lastHandle = null;
 
-  function spawnBg(_cmd, _args) {
+  function portForward(_podRef, _ns, _localPort, _podPort) {
     const readyCbs = [];
     const errorCbs = [];
     let killed = false;
@@ -48,7 +48,7 @@ function makeSpawnBgMock(mode = 'ready') {
     return handle;
   }
 
-  return { fn: spawnBg, getLastHandle: () => lastHandle };
+  return { fn: portForward, getLastHandle: () => lastHandle };
 }
 
 /** Returns a fetch mock that succeeds for all URLs by default. */
@@ -70,30 +70,59 @@ function makeSuccessFetch(overrides = {}) {
   return { fn, calls };
 }
 
-/** Shorthand for a clean set of dependencies where everything succeeds. */
-function makeHappyDeps(execOverride) {
-  const spawnBg = makeSpawnBgMock('ready');
+/**
+ * Shorthand for a clean set of dependencies where everything succeeds.
+ *
+ * @param {{
+ *   onDelete?: (kind, name, ns, opts) => any,
+ *   onApply?: (manifest, ns) => any,
+ *   pkillFails?: boolean,
+ *   portForwardMode?: 'ready'|'error'|'hang',
+ * }} [overrides]
+ */
+function makeHappyDeps(overrides = {}) {
+  const portForward = makePortForwardMock(overrides.portForwardMode ?? 'ready');
   const fetch = makeSuccessFetch();
   const logs = [];
+  const deleteCalls = [];
+  const applyCalls = [];
+  const waitReadyCalls = [];
 
-  const execCalls = [];
-  const exec = async (cmd, args, opts) => {
-    execCalls.push({ cmd, args, opts });
-    if (execOverride) return execOverride(cmd, args, opts);
-    return { stdout: '', stderr: '' };
+  const oc = {
+    delete: async (kind, name, ns, ocOpts = {}) => {
+      deleteCalls.push({ kind, name, ns, opts: ocOpts });
+      if (overrides.onDelete) return overrides.onDelete(kind, name, ns, ocOpts);
+      return '';
+    },
+    apply: async (manifest, ns) => {
+      applyCalls.push({ manifest, ns });
+      if (overrides.onApply) return overrides.onApply(manifest, ns);
+      return '';
+    },
+    waitReady: async (podName, ns) => {
+      waitReadyCalls.push({ podName, ns });
+      return '';
+    },
+    portForward: portForward.fn,
+  };
+
+  const pkill = async (_pattern) => {
+    if (overrides.pkillFails) throw new Error('no matching processes');
   };
 
   return {
     deps: {
-      exec,
-      spawnBg: spawnBg.fn,
+      oc,
+      pkill,
       fetch: fetch.fn,
       log: (msg) => logs.push(msg),
     },
     logs,
-    execCalls,
+    deleteCalls,
+    applyCalls,
+    waitReadyCalls,
     fetch,
-    spawnBg,
+    portForward,
   };
 }
 
@@ -121,11 +150,8 @@ describe('verify-cluster-smoke — step output format', () => {
   });
 
   test('logs FAIL:<step> <reason> when a step throws', async () => {
-    const { deps, logs } = makeHappyDeps((cmd, args) => {
-      if (cmd === 'oc' && args[0] === 'delete') {
-        throw new Error('connection refused');
-      }
-      return { stdout: '', stderr: '' };
+    const { deps, logs } = makeHappyDeps({
+      onDelete: () => { throw new Error('connection refused'); },
     });
 
     const result = await runSmoke({ ...BASE_OPTS, continueOnFail: true }, deps);
@@ -141,9 +167,8 @@ describe('verify-cluster-smoke — step output format', () => {
 describe('verify-cluster-smoke — exit code behaviour', () => {
 
   test('exits non-zero on first FAIL by default (no --continue)', async () => {
-    const { deps, logs } = makeHappyDeps((cmd, args) => {
-      if (cmd === 'oc' && args[0] === 'delete') throw new Error('cluster unavailable');
-      return { stdout: '', stderr: '' };
+    const { deps } = makeHappyDeps({
+      onDelete: () => { throw new Error('cluster unavailable'); },
     });
 
     const result = await runSmoke(BASE_OPTS /* continueOnFail defaults false */, deps);
@@ -158,10 +183,9 @@ describe('verify-cluster-smoke — exit code behaviour', () => {
   });
 
   test('continues through all steps and exits non-zero when --continue is set', async () => {
-    // Make cleanup-leftovers fail so we can confirm execution continues
-    const { deps, logs } = makeHappyDeps((cmd, args) => {
-      if (cmd === 'oc' && args[0] === 'delete') throw new Error('oc error');
-      return { stdout: '', stderr: '' };
+    // Make oc delete fail so we can confirm execution continues past cleanup-leftovers
+    const { deps } = makeHappyDeps({
+      onDelete: () => { throw new Error('oc error'); },
     });
 
     const result = await runSmoke({ ...BASE_OPTS, continueOnFail: true }, deps);
@@ -177,7 +201,7 @@ describe('verify-cluster-smoke — exit code behaviour', () => {
 describe('verify-cluster-smoke — --keep-pod flag', () => {
 
   test('skips teardown when keepPod is true', async () => {
-    const { deps, logs, execCalls } = makeHappyDeps();
+    const { deps, deleteCalls } = makeHappyDeps();
 
     const result = await runSmoke({ ...BASE_OPTS, keepPod: true }, deps);
 
@@ -187,45 +211,39 @@ describe('verify-cluster-smoke — --keep-pod flag', () => {
     assert.ok(teardown, 'teardown step should still appear in results');
     assert.equal(teardown.status, 'PASS', 'teardown step should be PASS (skipped is a pass)');
 
-    // oc delete should NOT have been called during teardown
-    // (cleanup-leftovers calls it too, so filter by the step context — we check
-    // that oc delete without --ignore-not-found was never called, since the
-    // non-idempotent teardown delete doesn't pass --ignore-not-found)
-    const hardDeletes = execCalls.filter(
-      (c) => c.cmd === 'oc' && c.args[0] === 'delete' && !c.args.includes('--ignore-not-found'),
-    );
+    // oc delete without ignoreNotFound is the hard/teardown delete — must not happen with --keep-pod
+    const hardDeletes = deleteCalls.filter((c) => !c.opts?.ignoreNotFound);
     assert.equal(hardDeletes.length, 0, 'teardown hard-deletes must not run with --keep-pod');
   });
 
   test('runs teardown and kills port-forward when keepPod is false', async () => {
-    const { deps, spawnBg } = makeHappyDeps();
+    const { deps, portForward } = makeHappyDeps();
 
     await runSmoke({ ...BASE_OPTS, keepPod: false }, deps);
 
-    assert.ok(spawnBg.getLastHandle()?.wasKilled, 'port-forward process should be killed during teardown');
+    assert.ok(portForward.getLastHandle()?.wasKilled, 'port-forward process should be killed during teardown');
   });
 
 });
 
 describe('verify-cluster-smoke — idempotency', () => {
 
-  test('cleanup-leftovers calls oc delete with --ignore-not-found for pod and service', async () => {
-    const { deps, execCalls } = makeHappyDeps();
+  test('cleanup-leftovers calls oc.delete with ignoreNotFound for pod and service', async () => {
+    const { deps, deleteCalls } = makeHappyDeps();
 
     await runSmoke(BASE_OPTS, deps);
 
-    const podDelete = execCalls.find(
-      (c) => c.cmd === 'oc' && c.args.includes('delete') && c.args.includes('--ignore-not-found') && c.args.some((a) => a.startsWith('fleet-smoke-')),
+    const podDelete = deleteCalls.find(
+      (c) => c.opts?.ignoreNotFound === true && c.name.startsWith('fleet-smoke-'),
     );
-    assert.ok(podDelete, `should have called oc delete with --ignore-not-found; calls: ${JSON.stringify(execCalls.map(c => `${c.cmd} ${c.args.join(' ')}`))}`);
+    assert.ok(
+      podDelete,
+      `should have called oc.delete with ignoreNotFound; calls: ${JSON.stringify(deleteCalls)}`,
+    );
   });
 
   test('cleanup-leftovers does not fail when there are no leftovers (pkill error is swallowed)', async () => {
-    const { deps } = makeHappyDeps((cmd) => {
-      // pkill fails (no matching process) — this must not stop the run
-      if (cmd === 'pkill') throw new Error('no matching processes');
-      return { stdout: '', stderr: '' };
-    });
+    const { deps } = makeHappyDeps({ pkillFails: true });
 
     const result = await runSmoke(BASE_OPTS, deps);
 
@@ -238,8 +256,8 @@ describe('verify-cluster-smoke — idempotency', () => {
 
 describe('verify-cluster-smoke — port-forward step', () => {
 
-  test('port-forward step passes when spawnBg emits ready', async () => {
-    const { deps, logs } = makeHappyDeps();
+  test('port-forward step passes when portForward emits ready', async () => {
+    const { deps } = makeHappyDeps();
 
     const result = await runSmoke(BASE_OPTS, deps);
 
@@ -248,16 +266,20 @@ describe('verify-cluster-smoke — port-forward step', () => {
     assert.equal(pf.status, 'PASS');
   });
 
-  test('port-forward step fails when spawnBg emits error', async () => {
-    const spawnBg = makeSpawnBgMock('error');
+  test('port-forward step fails when portForward emits error', async () => {
     const fetch = makeSuccessFetch();
     const logs = [];
 
     const result = await runSmoke(
       { ...BASE_OPTS, continueOnFail: true },
       {
-        exec: async () => ({ stdout: '', stderr: '' }),
-        spawnBg: spawnBg.fn,
+        oc: {
+          delete: async () => '',
+          apply: async () => '',
+          waitReady: async () => '',
+          portForward: makePortForwardMock('error').fn,
+        },
+        pkill: async () => {},
         fetch: fetch.fn,
         log: (msg) => logs.push(msg),
       },
@@ -287,8 +309,13 @@ describe('verify-cluster-smoke — register-feature step', () => {
     const result = await runSmoke(
       { ...BASE_OPTS, continueOnFail: true },
       {
-        exec: async () => ({ stdout: '', stderr: '' }),
-        spawnBg: makeSpawnBgMock('ready').fn,
+        oc: {
+          delete: async () => '',
+          apply: async () => '',
+          waitReady: async () => '',
+          portForward: makePortForwardMock('ready').fn,
+        },
+        pkill: async () => {},
         fetch: fetch.fn,
         log: (msg) => logs.push(msg),
       },
@@ -310,8 +337,13 @@ describe('verify-cluster-smoke — dashboard-switch step', () => {
     const result = await runSmoke(
       { ...BASE_OPTS, continueOnFail: true },
       {
-        exec: async () => ({ stdout: '', stderr: '' }),
-        spawnBg: makeSpawnBgMock('ready').fn,
+        oc: {
+          delete: async () => '',
+          apply: async () => '',
+          waitReady: async () => '',
+          portForward: makePortForwardMock('ready').fn,
+        },
+        pkill: async () => {},
         fetch: async (url, opts = {}) => {
           if ((opts.method ?? 'GET') === 'POST' && url.includes('/activate')) {
             return {
@@ -342,8 +374,13 @@ describe('verify-cluster-smoke — request-proxy step', () => {
     const result = await runSmoke(
       { ...BASE_OPTS, continueOnFail: true },
       {
-        exec: async () => ({ stdout: '', stderr: '' }),
-        spawnBg: makeSpawnBgMock('ready').fn,
+        oc: {
+          delete: async () => '',
+          apply: async () => '',
+          waitReady: async () => '',
+          portForward: makePortForwardMock('ready').fn,
+        },
+        pkill: async () => {},
         fetch: async (url) => {
           if (url === 'http://localhost:3000') throw new Error('ECONNREFUSED');
           return { ok: true, status: 200, text: async () => '{}', json: async () => ({ ok: true }) };
@@ -364,8 +401,13 @@ describe('verify-cluster-smoke — request-proxy step', () => {
     const result = await runSmoke(
       BASE_OPTS,
       {
-        exec: async () => ({ stdout: '', stderr: '' }),
-        spawnBg: makeSpawnBgMock('ready').fn,
+        oc: {
+          delete: async () => '',
+          apply: async () => '',
+          waitReady: async () => '',
+          portForward: makePortForwardMock('ready').fn,
+        },
+        pkill: async () => {},
         fetch: async (url) => {
           if (url === 'http://localhost:3000') {
             return { ok: false, status: 502, text: async () => 'Bad Gateway', json: async () => ({}) };

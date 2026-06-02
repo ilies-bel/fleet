@@ -23,6 +23,8 @@
 
 import { parseArgs } from 'node:util';
 import { spawn as nodeSpawn } from 'node:child_process';
+// All oc/kubectl spawning routes through the cluster module (architectural invariant).
+import { runOc, spawnOcProcess } from '../gateway/src/cluster/oc.js';
 
 // ── Internal sentinel ─────────────────────────────────────────────────────────
 
@@ -48,12 +50,17 @@ class StepFailed extends Error {
  * }} opts
  *
  * @param {{
- *   exec(cmd: string, args: string[], opts?: {stdin?: string}): Promise<{stdout: string, stderr: string}>,
- *   spawnBg(cmd: string, args: string[]): {
- *     onReady(cb: () => void): void,
- *     onError(cb: (err: Error) => void): void,
- *     kill(): void,
+ *   oc: {
+ *     delete(kind: string, name: string, ns: string, opts?: { ignoreNotFound?: boolean }): Promise<string>,
+ *     apply(manifest: string, ns: string): Promise<string>,
+ *     waitReady(podName: string, ns: string): Promise<string>,
+ *     portForward(podRef: string, ns: string, localPort: number, podPort: number): {
+ *       onReady(cb: () => void): void,
+ *       onError(cb: (err: Error) => void): void,
+ *       kill(): void,
+ *     },
  *   },
+ *   pkill(pattern: string): Promise<void>,
  *   fetch(url: string, init?: object): Promise<{ok: boolean, status: number, text(): Promise<string>, json(): Promise<any>}>,
  *   log(msg: string): void,
  *   gatewayUrl?: string,
@@ -65,7 +72,7 @@ class StepFailed extends Error {
  *   exitCode: number,
  * }>}
  */
-export async function runSmoke(opts, { exec, spawnBg, fetch: doFetch, log, gatewayUrl = 'http://localhost:4000', proxyUrl = 'http://localhost:3000' }) {
+export async function runSmoke(opts, { oc, pkill, fetch: doFetch, log, gatewayUrl = 'http://localhost:4000', proxyUrl = 'http://localhost:3000' }) {
   const {
     namespace,
     featureKey,
@@ -101,11 +108,11 @@ export async function runSmoke(opts, { exec, spawnBg, fetch: doFetch, log, gatew
     // ── 1. cleanup-leftovers (idempotency) ────────────────────────────────────
     await runStep('cleanup-leftovers', async () => {
       // Kill any leftover port-forward from a prior run (best-effort; ignore if no process)
-      await exec('pkill', ['-f', `oc port-forward.*${podName}`]).catch(() => {});
+      await pkill(`oc port-forward.*${podName}`).catch(() => {});
 
-      // --ignore-not-found means oc exits 0 even when the resource is absent
-      await exec('oc', ['delete', 'pod', podName, '-n', namespace, '--ignore-not-found']);
-      await exec('oc', ['delete', 'service', svcName, '-n', namespace, '--ignore-not-found']);
+      // ignoreNotFound means oc exits 0 even when the resource is absent
+      await oc.delete('pod', podName, namespace, { ignoreNotFound: true });
+      await oc.delete('service', svcName, namespace, { ignoreNotFound: true });
 
       // Deregister from Fleet if it's reachable (best-effort)
       await doFetch(`${gatewayUrl}/register-feature/${compositeKey}`, { method: 'DELETE' }).catch(() => {});
@@ -114,17 +121,17 @@ export async function runSmoke(opts, { exec, spawnBg, fetch: doFetch, log, gatew
     // ── 2. create-pod ─────────────────────────────────────────────────────────
     await runStep('create-pod', async () => {
       const manifest = buildManifest(namespace, podName, svcName);
-      await exec('oc', ['apply', '-f', '-', '-n', namespace], { stdin: manifest });
+      await oc.apply(manifest, namespace);
     });
 
     // ── 3. wait-pod-ready ─────────────────────────────────────────────────────
     await runStep('wait-pod-ready', async () => {
-      await exec('oc', ['wait', `pod/${podName}`, '-n', namespace, '--for=condition=Ready', '--timeout=120s']);
+      await oc.waitReady(podName, namespace);
     });
 
     // ── 4. port-forward ───────────────────────────────────────────────────────
     await runStep('port-forward', async () => {
-      pfHandle = spawnBg('oc', ['port-forward', `pod/${podName}`, `${localPort}:80`, '-n', namespace]);
+      pfHandle = oc.portForward(`pod/${podName}`, namespace, localPort, 80);
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(
           () => reject(new Error('port-forward ready signal timed out after 10s')),
@@ -191,8 +198,8 @@ export async function runSmoke(opts, { exec, spawnBg, fetch: doFetch, log, gatew
     } else {
       await runStep('teardown', async () => {
         if (pfHandle) { pfHandle.kill(); pfHandle = null; }
-        await exec('oc', ['delete', 'pod', podName, '-n', namespace]);
-        await exec('oc', ['delete', 'service', svcName, '-n', namespace]);
+        await oc.delete('pod', podName, namespace);
+        await oc.delete('service', svcName, namespace);
         await doFetch(`${gatewayUrl}/register-feature/${compositeKey}`, { method: 'DELETE' }).catch(() => {});
       });
     }
@@ -249,83 +256,112 @@ function buildManifest(namespace, podName, svcName) {
 
 // ── Real dependency implementations ──────────────────────────────────────────
 
-function makeExec() {
-  return function exec(cmd, args, opts = {}) {
-    return new Promise((resolve, reject) => {
-      const child = nodeSpawn(cmd, args, {
-        stdio: [opts.stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-      });
+/**
+ * Build the oc deps object backed by gateway/src/cluster/oc.js.
+ * All oc/kubectl spawning routes through runOc/spawnOcProcess from that module.
+ *
+ * @returns {{
+ *   delete(kind, name, ns, opts?): Promise<string>,
+ *   apply(manifest, ns): Promise<string>,
+ *   waitReady(podName, ns): Promise<string>,
+ *   portForward(podRef, ns, localPort, podPort): { onReady, onError, kill },
+ * }}
+ */
+function makeOcDeps() {
+  return {
+    /**
+     * @param {string} kind - e.g. 'pod' or 'service'
+     * @param {string} name
+     * @param {string} ns
+     * @param {{ ignoreNotFound?: boolean }} [ocOpts]
+     */
+    delete(kind, name, ns, ocOpts = {}) {
+      const args = ['delete', kind, name, '-n', ns];
+      if (ocOpts.ignoreNotFound) args.push('--ignore-not-found');
+      return runOc(args);
+    },
 
-      if (opts.stdin && child.stdin) {
-        child.stdin.write(opts.stdin);
-        child.stdin.end();
+    /**
+     * @param {string} manifest - YAML/JSON manifest string
+     * @param {string} ns
+     */
+    apply(manifest, ns) {
+      return runOc(['apply', '-f', '-', '-n', ns], { stdin: manifest });
+    },
+
+    /**
+     * @param {string} podName
+     * @param {string} ns
+     */
+    waitReady(podName, ns) {
+      return runOc(['wait', `pod/${podName}`, '-n', ns, '--for=condition=Ready', '--timeout=120s']);
+    },
+
+    /**
+     * @param {string} podRef  - e.g. 'pod/fleet-smoke-foo'
+     * @param {string} ns
+     * @param {number} localPort
+     * @param {number} podPort
+     * @returns {{ onReady(cb): void, onError(cb): void, kill(): void }}
+     */
+    portForward(podRef, ns, localPort, podPort) {
+      const child = spawnOcProcess(['port-forward', podRef, `${localPort}:${podPort}`, '-n', ns]);
+
+      const readyCbs = [];
+      const errorCbs = [];
+      let fired = false;
+      let firedError = null;
+
+      function emitReady() {
+        if (fired) return;
+        fired = true;
+        readyCbs.forEach((cb) => cb());
       }
 
-      const stdoutChunks = [];
-      const stderrChunks = [];
-      child.stdout.on('data', (d) => stdoutChunks.push(d));
-      child.stderr.on('data', (d) => stderrChunks.push(d));
+      function emitError(err) {
+        firedError = err;
+        errorCbs.forEach((cb) => cb(err));
+      }
 
-      child.on('error', reject);
+      // oc port-forward prints "Forwarding from 127.0.0.1:PORT -> PORT" on stdout
+      child.stdout.on('data', (chunk) => {
+        if (/Forwarding from/i.test(chunk.toString())) emitReady();
+      });
+      // Some oc versions write to stderr instead
+      child.stderr.on('data', (chunk) => {
+        if (/Forwarding from/i.test(chunk.toString())) emitReady();
+      });
+
+      child.on('error', emitError);
+
       child.on('close', (code) => {
-        const stdout = Buffer.concat(stdoutChunks).toString('utf8');
-        const stderr = Buffer.concat(stderrChunks).toString('utf8');
-        if (code !== 0) {
-          const err = Object.assign(
-            new Error(`${cmd} exited ${code}: ${(stderr || stdout).trim()}`),
-            { exitCode: code, stdout, stderr },
-          );
-          reject(err);
-        } else {
-          resolve({ stdout, stderr });
+        if (!fired && code !== 0) {
+          emitError(new Error(`oc port-forward exited unexpectedly with code ${code}`));
         }
       });
-    });
+
+      return {
+        onReady(cb) { if (fired) cb(); else readyCbs.push(cb); },
+        onError(cb) { if (firedError) cb(firedError); else errorCbs.push(cb); },
+        kill() { child.kill('SIGTERM'); },
+      };
+    },
   };
 }
 
-function makeSpawnBg() {
-  return function spawnBg(cmd, args) {
-    const child = nodeSpawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-
-    const readyCbs = [];
-    const errorCbs = [];
-    let fired = false;
-    let firedError = null;
-
-    function emitReady() {
-      if (fired) return;
-      fired = true;
-      readyCbs.forEach((cb) => cb());
-    }
-
-    function emitError(err) {
-      firedError = err;
-      errorCbs.forEach((cb) => cb(err));
-    }
-
-    // oc port-forward prints "Forwarding from 127.0.0.1:PORT -> 80" on stdout
-    child.stdout.on('data', (chunk) => {
-      if (/Forwarding from/i.test(chunk.toString())) emitReady();
+/**
+ * Returns a pkill function that sends SIGTERM to processes matching a pattern
+ * against the full command line (pkill -f). Only used for non-oc cleanup
+ * (killing leftover port-forward wrappers by process name pattern).
+ * @returns {(pattern: string) => Promise<void>}
+ */
+function makePkill() {
+  return function pkill(pattern) {
+    return new Promise((resolve, reject) => {
+      const child = nodeSpawn('pkill', ['-f', pattern]);
+      child.on('error', reject);
+      child.on('close', () => resolve());
     });
-    // Some oc versions write to stderr
-    child.stderr.on('data', (chunk) => {
-      if (/Forwarding from/i.test(chunk.toString())) emitReady();
-    });
-
-    child.on('error', emitError);
-
-    child.on('close', (code) => {
-      if (!fired && code !== 0) {
-        emitError(new Error(`${cmd} exited unexpectedly with code ${code}`));
-      }
-    });
-
-    return {
-      onReady(cb) { if (fired) cb(); else readyCbs.push(cb); },
-      onError(cb) { if (firedError) cb(firedError); else errorCbs.push(cb); },
-      kill() { child.kill('SIGTERM'); },
-    };
   };
 }
 
@@ -379,8 +415,8 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
       localPort,
     },
     {
-      exec:       makeExec(),
-      spawnBg:    makeSpawnBg(),
+      oc:         makeOcDeps(),
+      pkill:      makePkill(),
       fetch:      globalThis.fetch,
       log:        (msg) => process.stdout.write(msg + '\n'),
       gatewayUrl: values['gateway-url'],

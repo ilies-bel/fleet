@@ -170,3 +170,26 @@ export function deletePod(name, ns) {
 export function deleteService(name, ns) {
   return run(['delete', 'service', name, '-n', ns]);
 }
+
+/**
+ * Run an arbitrary oc command. Low-level escape hatch for callers that need
+ * flags or sub-commands not exposed through the higher-level helpers.
+ * All oc spawning still routes through ocBin() so the binary is overridable.
+ * @param {string[]} args
+ * @param {{ stdin?: string }} [opts]
+ * @returns {Promise<string>}
+ */
+export function runOc(args, opts) {
+  return run(args, opts);
+}
+
+/**
+ * Spawn an oc process and return the raw ChildProcess. Intended for
+ * long-running sub-commands (e.g. port-forward) that need event-based
+ * lifecycle management rather than a collect-and-resolve model.
+ * @param {string[]} args
+ * @returns {import('node:child_process').ChildProcess}
+ */
+export function spawnOcProcess(args) {
+  return spawn(ocBin(), args);
+}
