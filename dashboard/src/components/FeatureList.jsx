@@ -18,14 +18,25 @@ function groupByProject(features) {
 }
 
 export default function FeatureList({ features, activePreview, startingFeatures, onActivate, onRemoved, onLogs }) {
-  const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem('sidebar-collapsed') === 'true'
-  );
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return typeof localStorage !== 'undefined'
+        && localStorage.getItem('sidebar-collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   function toggleCollapsed() {
     setCollapsed(prev => {
       const next = !prev;
-      localStorage.setItem('sidebar-collapsed', String(next));
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('sidebar-collapsed', String(next));
+        }
+      } catch {
+        /* ignore persistence errors (e.g. SSR / disabled storage) */
+      }
       return next;
     });
   }
