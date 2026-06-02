@@ -17,7 +17,7 @@ import express from 'express';
 import { createProxyMiddleware, debugProxyErrorsPlugin, proxyEventsPlugin } from 'http-proxy-middleware';
 
 import { register, unregister, getAll, setActiveFeature } from './registry.js';
-import { stoppedContainerBody, noActiveFeatureBody, resolveTarget } from './proxy.js';
+import { stoppedContainerBody, noActiveFeatureBody, resolveTarget, NoForwardError, createFeatureProxy } from './proxy.js';
 
 // ── stoppedContainerBody unit tests ──────────────────────────────────────────
 
@@ -410,5 +410,103 @@ describe('createFeatureProxy — WebSocket upgrade handler', () => {
       // Socket destroyed by server — suppress; close event carries the assertion
       clientSocket.on('error', () => {});
     });
+  });
+});
+
+// ── resolveTarget — cluster feature branch ───────────────────────────────────
+// Cluster features have a non-null `host` descriptor. resolveTarget skips the
+// Docker liveness check and routes via the portForwardManager instead.
+//
+// The getPort dependency is injected via the opts parameter so these tests run
+// without oc/Docker and without touching the portForwardManager singleton.
+
+describe('resolveTarget — cluster feature branch', () => {
+  test('returns http://127.0.0.1:<port> when a port-forward is active', async () => {
+    clearRegistry();
+    register(
+      'clustproj', 'feat', 'main', null, 'up',
+      [], null, null,
+      { cluster: 'prod', namespace: 'my-ns' }
+    );
+    setActiveFeature('clustproj-feat');
+
+    const result = await resolveTarget({ getPort: () => 9001 });
+
+    assert.equal(result.ok, true, 'resolveTarget should return ok:true');
+    assert.equal(result.url, 'http://127.0.0.1:9001', 'URL should point to localhost port-forward');
+    assert.equal(result.key, 'clustproj-feat', 'key should be the composite feature key');
+
+    clearRegistry();
+  });
+
+  test('throws NoForwardError when no active port-forward exists', async () => {
+    clearRegistry();
+    register(
+      'clustproj2', 'feat', 'main', null, 'up',
+      [], null, null,
+      { cluster: 'prod', namespace: 'my-ns' }
+    );
+    setActiveFeature('clustproj2-feat');
+
+    await assert.rejects(
+      () => resolveTarget({ getPort: () => undefined }),
+      (err) => {
+        assert.ok(err instanceof NoForwardError,
+          `Expected NoForwardError, got ${err.constructor.name}`);
+        assert.equal(err.key, 'clustproj2-feat',
+          'NoForwardError should carry the feature key');
+        return true;
+      }
+    );
+
+    clearRegistry();
+  });
+});
+
+// ── 503 integration — cluster feature with no active forward ─────────────────
+// Verifies the full HTTP handler path: NoForwardError → 503 with a
+// human-readable body. Uses createFeatureProxy() (production code path) so the
+// NoForwardError catch in the handler is exercised end-to-end.
+// The portForwardManager singleton returns undefined for keys with no registered
+// forward, which is the condition in CI (no oc binary, no registered forward).
+
+describe('gateway — cluster feature with no active forward returns 503', () => {
+  let server;
+
+  beforeEach((_t, done) => {
+    clearRegistry();
+    // Register a cluster feature (host != null) — no oc forward is started,
+    // so getLocalPort() returns undefined → NoForwardError → 503.
+    register(
+      'clustproj3', 'feat', 'main', null, 'up',
+      [], null, null,
+      { cluster: 'prod', namespace: 'my-ns' }
+    );
+    setActiveFeature('clustproj3-feat');
+
+    const app = express();
+    app.use(createFeatureProxy());
+    server = app.listen(0, '127.0.0.1', done);
+  });
+
+  afterEach((_t, done) => {
+    clearRegistry();
+    if (server) server.close(done); else done();
+  });
+
+  test('returns 503 with human-readable body when no port-forward is registered', (_t, done) => {
+    const { port } = server.address();
+    http.get(`http://127.0.0.1:${port}/anything`, (res) => {
+      assert.equal(res.statusCode, 503, 'should return 503');
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        assert.ok(
+          body.includes('port-forward') || body.includes('NO ACTIVE PORT-FORWARD'),
+          `503 body should mention port-forward, got: ${body.slice(0, 200)}`
+        );
+        done();
+      });
+    }).on('error', done);
   });
 });

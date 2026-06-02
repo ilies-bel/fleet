@@ -1,5 +1,21 @@
 import { createProxyMiddleware, debugProxyErrorsPlugin, proxyEventsPlugin } from 'http-proxy-middleware';
 import { getActiveFeature, getContainerStatus, getFeature, updateStatus } from './registry.js';
+import { getLocalPort } from './cluster/port-forward.js';
+
+/**
+ * Thrown by resolveTarget when a cluster feature has no active port-forward.
+ * Mapped to a 503 in the request handler.
+ */
+export class NoForwardError extends Error {
+  /**
+   * @param {string} key  composite feature key (without 'fleet-' prefix)
+   */
+  constructor(key) {
+    super(`No active port-forward for cluster feature '${key}'`);
+    this.name = 'NoForwardError';
+    this.key = key;
+  }
+}
 
 /**
  * Transparent proxy middleware for PROXY_PORT (3000).
@@ -32,10 +48,17 @@ export function createFeatureProxy() {
       // Resolve the active feature fresh on every request/upgrade. Works for
       // both the HTTP middleware path and http-proxy-middleware's auto-wired
       // WebSocket upgrade listener (which does NOT run the outer handler).
-      const resolved = await resolveTarget();
-      if (!resolved.ok) return undefined;
-      req._fleetFeature = resolved.key;
-      return `http://fleet-${resolved.key}:80`;
+      try {
+        const resolved = await resolveTarget();
+        if (!resolved.ok) return undefined;
+        req._fleetFeature = resolved.key;
+        return resolved.url;
+      } catch (err) {
+        // NoForwardError and other resolution errors: return undefined so
+        // http-proxy-middleware does not attempt to forward to an invalid target.
+        if (err instanceof NoForwardError) return undefined;
+        throw err;
+      }
     },
     changeOrigin: true,
     ejectPlugins: true,
@@ -73,7 +96,22 @@ export function createFeatureProxy() {
   });
 
   const handler = async (req, res, next) => {
-    const resolved = await resolveTarget();
+    let resolved;
+    try {
+      resolved = await resolveTarget();
+    } catch (err) {
+      if (err instanceof NoForwardError) {
+        return res.status(503).send(
+          '<html><body style="font-family:monospace;background:#0a0a0a;color:#888;padding:2rem">' +
+          '<h2 style="color:#ff4444">// NO ACTIVE PORT-FORWARD</h2>' +
+          `<p>No active port-forward for cluster feature <code style="color:#ffaa00">${err.key}</code>.</p>` +
+          '<p>The port-forward may still be starting. Try again in a moment, or check the fleet dashboard at ' +
+          '<a href="http://localhost:4000" style="color:#00ff88">localhost:4000</a>.</p>' +
+          '</body></html>'
+        );
+      }
+      throw err;
+    }
     if (!resolved.ok) {
       return res.status(503).send(resolved.body);
     }
@@ -92,7 +130,17 @@ export function createFeatureProxy() {
    * @param {Buffer} head
    */
   const upgrade = async (req, socket, head) => {
-    const resolved = await resolveTarget();
+    let resolved;
+    try {
+      resolved = await resolveTarget();
+    } catch (err) {
+      if (err instanceof NoForwardError) {
+        socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      throw err;
+    }
     if (!resolved.ok) {
       socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
       socket.destroy();
@@ -109,45 +157,65 @@ export function createFeatureProxy() {
  * Resolve which feature should serve a request.
  *
  * Resolution order:
- *   1. Active feature is running → use it.
- *   2. Active feature is stopped → update registry, return 503.
- *   3. No active feature → return 503.
+ *   1. No active feature → return 503.
+ *   2. Cluster feature (feature.host != null):
+ *      a. Active port-forward found → return http://127.0.0.1:<port>.
+ *      b. No active port-forward → throw NoForwardError (caller maps to 503).
+ *   3. Local feature (no host): Docker liveness check.
+ *      a. Container running → return http://fleet-<key>:80.
+ *      b. Container stopped → update registry, return 503.
  *
  * The `key` in the success shape is the composite registry key (= the
  * Docker container name suffix, i.e. `fleet-${key}` is the container).
+ * The `url` in the success shape is the full target URL to proxy to.
  *
- * @returns {Promise<{ ok: true, key: string } | { ok: false, body: string }>}
+ * @param {{ getPort?: (key: string) => number | undefined }} [opts]
+ *   opts.getPort — injected port lookup for testing; defaults to the
+ *   portForwardManager singleton's getLocalPort.
+ * @returns {Promise<{ ok: true, key: string, url: string } | { ok: false, body: string }>}
+ * @throws {NoForwardError} when the active feature is a cluster feature with no active forward
  */
-export async function resolveTarget() {
+export async function resolveTarget({ getPort = getLocalPort } = {}) {
   const selected = getActiveFeature();
 
-  if (selected) {
-    const status = await getContainerStatus(selected);
-    if (status === 'running') {
-      // Upgrade stale registry status back to 'up' when Docker reports the
-      // container is actually running. Fixes the inverse of the bug below:
-      // a container marked 'failed' from a previous crashed `fleet add` that
-      // later became healthy was never reverted by the in-memory registry.
-      const entry = getFeature(selected);
-      if (entry && entry.status !== 'up') {
-        updateStatus(selected, 'up', null);
-      }
-      return { ok: true, key: selected };
-    }
-    // Sync registry so the dashboard reflects reality.
-    // Guard against the TOCTOU race: `selected` was captured at the top of
-    // this function but another handler (DELETE /register-feature, teardown)
-    // may have called unregister(selected) between that read and here, which
-    // causes updateStatus() to throw "Feature is not registered" — killing the
-    // gateway process. If the feature is already gone the container is
-    // definitively gone too; returning a 503 is correct in both cases.
-    if (getFeature(selected)) {
-      updateStatus(selected, 'stopped');
-    }
-    return { ok: false, body: stoppedContainerBody(selected) };
+  if (!selected) {
+    return { ok: false, body: noActiveFeatureBody() };
   }
 
-  return { ok: false, body: noActiveFeatureBody() };
+  const feature = getFeature(selected);
+
+  // ── Cluster feature path ─────────────────────────────────────────────────
+  // Cluster features have a host descriptor; they are not Docker containers.
+  // Liveness is managed by the portForwardManager (auto-restarts on crash).
+  if (feature && feature.host) {
+    const port = getPort(selected);
+    if (!port) throw new NoForwardError(selected);
+    return { ok: true, key: selected, url: `http://127.0.0.1:${port}` };
+  }
+
+  // ── Local feature path ───────────────────────────────────────────────────
+  const status = await getContainerStatus(selected);
+  if (status === 'running') {
+    // Upgrade stale registry status back to 'up' when Docker reports the
+    // container is actually running. Fixes the inverse of the bug below:
+    // a container marked 'failed' from a previous crashed `fleet add` that
+    // later became healthy was never reverted by the in-memory registry.
+    if (feature && feature.status !== 'up') {
+      updateStatus(selected, 'up', null);
+    }
+    return { ok: true, key: selected, url: `http://fleet-${selected}:80` };
+  }
+  // Sync registry so the dashboard reflects reality.
+  // Guard against the TOCTOU race: `selected` was captured at the top of
+  // this function but another handler (DELETE /register-feature, teardown)
+  // may have called unregister(selected) between that read and here, which
+  // causes updateStatus() to throw "Feature is not registered" — killing the
+  // gateway process. If the feature is already gone the container is
+  // definitively gone too; returning a 503 is correct in both cases.
+  if (getFeature(selected)) {
+    updateStatus(selected, 'stopped');
+  }
+  return { ok: false, body: stoppedContainerBody(selected) };
 }
 
 /**
