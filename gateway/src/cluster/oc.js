@@ -122,8 +122,13 @@ export function portForward(svcName, ns, remotePort) {
       if (!match) return;
       resolved = true;
       const localPort = parseInt(match[1], 10);
+      // exitPromise resolves (with the exit code) whenever the child exits,
+      // whether expectedly (after stop()) or unexpectedly (crash). Callers
+      // that need crash-detection should watch this promise.
+      const exitPromise = new Promise(res => child.once('close', res));
       resolve({
         localPort,
+        exitPromise,
         stop: () => {
           if (child.exitCode !== null) return Promise.resolve();
           return new Promise(res => {
