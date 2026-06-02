@@ -1,0 +1,14 @@
+# mars init -f mars.init.toml
+#
+# Declarative stack config for the fleet repo. The root package.json is a
+# publish-only descriptor (no deps/scripts — just bin/files/publishConfig for
+# `npm install -g @ilies-bel/fleet`), so it is intentionally NOT listed here;
+# only the two real tech-bearing folders are.
+
+[[stack]]
+path = "gateway"
+tech = "node-backend"   # Express proxy service (src/index.js)
+
+[[stack]]
+path = "dashboard"
+tech = "react"          # React 19 + Vite + Vitest frontend
