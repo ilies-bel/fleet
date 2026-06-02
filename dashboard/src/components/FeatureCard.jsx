@@ -186,14 +186,16 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
         </div>
       ) : (
       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-        <button
-          onClick={handleActivate}
-          disabled={activating || isActive}
-          style={btn(isActive ? 'accent-fill' : 'accent', activating || isActive)}
-          title={isActive ? 'Currently active on port 3000' : 'Route port 3000 to this feature'}
-        >
-          {activating ? '[...]' : isActive ? '[ACTIVE]' : '[ACTIVATE]'}
-        </button>
+        {health !== 'down' && (
+          <button
+            onClick={handleActivate}
+            disabled={activating || isActive}
+            style={btn(isActive ? 'accent-fill' : 'accent', activating || isActive)}
+            title={isActive ? 'Currently active on port 3000' : 'Route port 3000 to this feature'}
+          >
+            {activating ? '[...]' : isActive ? '[ACTIVE]' : '[ACTIVATE]'}
+          </button>
+        )}
         <button
           onClick={handleTogglePower}
           disabled={togglingPower || health === 'checking'}
