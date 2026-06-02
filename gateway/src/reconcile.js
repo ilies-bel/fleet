@@ -1,4 +1,5 @@
 import * as _dockerDefault from './docker.js';
+import * as _clusterStatusDefault from './cluster/status.js';
 import { register, isRegistered, getAll, unregister, probeContainerState, commitProbedStatus } from './registry.js';
 
 const GATEWAY_NAME = 'fleet-gateway';
@@ -22,6 +23,23 @@ let _docker = _dockerDefault;
  */
 export function _setDockerImpl(impl) {
   _docker = impl;
+}
+
+/**
+ * Mutable cluster-status implementation holder.
+ * Tests can swap this out with `_setClusterStatusImpl(stub)`.
+ * Production code always uses the real cluster/status.js.
+ * @type {{ status: Function }}
+ */
+let _clusterStatus = _clusterStatusDefault;
+
+/**
+ * Test seam: replace the cluster-status implementation used by reconcile functions.
+ * Not intended for production use.
+ * @param {{ status: Function }} impl
+ */
+export function _setClusterStatusImpl(impl) {
+  _clusterStatus = impl;
 }
 
 /**
@@ -257,15 +275,18 @@ export async function reconcileSweep() {
     }
   }
 
-  // 1. Prune registry entries whose container is gone.
+  // 1. Prune local (docker) registry entries whose container is gone.
+  //    Cluster features are never in the Docker list — skip them here; their
+  //    status is reconciled via the cluster backend in step 4 below.
   for (const entry of getAll()) {
+    if (entry.host) continue;
     if (!seen.has(entry.key)) {
       unregister(entry.key);
       console.log(`[reconcile.sweep] unregistered phantom: ${entry.key}`);
     }
   }
 
-  // 2 & 3. For each live container: register if new, else reconcile its status.
+  // 2 & 3. For each live Docker container: register if new, else reconcile status.
   for (const [key, { containerName, info, container }] of seen) {
     if (!isRegistered(key)) {
       try {
@@ -280,6 +301,18 @@ export async function reconcileSweep() {
     const result = commitProbedStatus(key, probed);
     if (result.changed) {
       console.log(`[reconcile.sweep] ${key}: status → ${result.status}`);
+    }
+  }
+
+  // 4. Reconcile cluster features: query pod phase via oc and commit any status change.
+  //    A deleted pod returns 'stopped' from the cluster backend, which the debounce
+  //    path will commit after N consecutive observations.
+  for (const entry of getAll()) {
+    if (!entry.host) continue;
+    const probed = await _clusterStatus.status(entry);
+    const result = commitProbedStatus(entry.key, probed);
+    if (result.changed) {
+      console.log(`[reconcile.sweep] ${entry.key}: cluster status → ${result.status}`);
     }
   }
 }
