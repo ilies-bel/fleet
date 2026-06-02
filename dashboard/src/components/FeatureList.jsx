@@ -16,7 +16,7 @@ function groupByProject(features) {
   return [...named, ...unnamed].map(k => [k, map[k]]);
 }
 
-export default function FeatureList({ features, activePreview, startingFeatures, onActivate, onRemoved, onAdd, onLogs }) {
+export default function FeatureList({ features, activePreview, startingFeatures, onActivate, onRemoved, onLogs }) {
   const groups = groupByProject(features);
   const isMultiProject = groups.length > 1 || (groups.length === 1 && groups[0][0] !== '');
 
@@ -89,25 +89,6 @@ export default function FeatureList({ features, activePreview, startingFeatures,
         )}
       </div>
 
-      <div style={{ padding: '0.75rem', borderTop: '1px solid #222' }}>
-        <button
-          onClick={onAdd}
-          style={{
-            width: '100%',
-            background: 'transparent',
-            border: '1px solid var(--color-accent)',
-            color: 'var(--color-accent)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.8rem',
-            fontWeight: 700,
-            padding: '0.4rem',
-            cursor: 'pointer',
-            borderRadius: 0,
-          }}
-        >
-          + ADD
-        </button>
-      </div>
     </div>
   );
 }

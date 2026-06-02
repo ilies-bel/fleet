@@ -191,7 +191,6 @@ describe('FeatureList — services[] forward-compatibility', () => {
           startingFeatures={new Set()}
           onActivate={noopFn}
           onRemoved={noopFn}
-          onAdd={noopFn}
           onLogs={noopFn}
         />
       )
@@ -211,7 +210,6 @@ describe('FeatureList — services[] forward-compatibility', () => {
         startingFeatures={new Set()}
         onActivate={noopFn}
         onRemoved={noopFn}
-        onAdd={noopFn}
         onLogs={noopFn}
       />
     );

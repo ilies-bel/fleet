@@ -4,7 +4,6 @@ import { getFeatures, activateFeature } from './api.js';
 import StatusBar from './components/StatusBar.jsx';
 import FeatureList from './components/FeatureList.jsx';
 import PreviewFrame from './components/PreviewFrame.jsx';
-import AddFeatureModal from './components/AddFeatureModal.jsx';
 import LogPanel from './components/LogPanel.jsx';
 import ResourceMonitor from './components/ResourceMonitor.jsx';
 
@@ -42,8 +41,7 @@ function FeaturesPage() {
   const [features, setFeatures] = useState([]);
   const [activePreview, setActivePreview] = useState(null);
   const [previewKey, setPreviewKey] = useState(0);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [logFeature, setLogFeature] = useState(null);
+const [logFeature, setLogFeature] = useState(null);
   const [startingFeatures, setStartingFeatures] = useState(new Set());
 
   // Key the user just clicked [ACTIVATE] on; suppresses poll-driven
@@ -99,19 +97,7 @@ function FeaturesPage() {
     }
   }
 
-  async function handleAdded(key) {
-    setStartingFeatures(prev => new Set([...prev, key]));
-    await fetchFeatures();
-    setTimeout(() => {
-      setStartingFeatures(prev => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }, 120_000);
-  }
-
-  const activeBranch = features.find(f => f.key === activePreview)?.branch ?? '';
+const activeBranch = features.find(f => f.key === activePreview)?.branch ?? '';
 
   return (
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -121,21 +107,13 @@ function FeaturesPage() {
         startingFeatures={startingFeatures}
         onActivate={handleActivate}
         onRemoved={handleRemoved}
-        onAdd={() => setShowAddModal(true)}
-        onLogs={key => setLogFeature(key)}
+onLogs={key => setLogFeature(key)}
       />
       <PreviewFrame
         activePreview={activePreview}
         branch={activeBranch}
         previewKey={previewKey}
       />
-
-      {showAddModal && (
-        <AddFeatureModal
-          onClose={() => setShowAddModal(false)}
-          onAdded={handleAdded}
-        />
-      )}
 
       {logFeature && (
         <LogPanel

@@ -25,19 +25,6 @@ export function getFeatures() {
 }
 
 /**
- * @param {string} name
- * @param {string} branch
- * @returns {Promise<object>}
- */
-export function addFeature(name, branch) {
-  return request('/_fleet/api/features', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, branch }),
-  });
-}
-
-/**
  * @param {string} key  Composite key: "<project>-<name>"
  * @returns {Promise<{ ok: boolean, active: string }>}
  */
