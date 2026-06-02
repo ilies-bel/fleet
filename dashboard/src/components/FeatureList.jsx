@@ -17,22 +17,24 @@ function groupByProject(features) {
   return [...named, ...unnamed].map(k => [k, map[k]]);
 }
 
+function readCollapsed() {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem('fleet.sidebar.collapsed') === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export default function FeatureList({ features, activePreview, startingFeatures, onActivate, onRemoved, onLogs }) {
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return typeof localStorage !== 'undefined'
-        && localStorage.getItem('sidebar-collapsed') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const [collapsed, setCollapsed] = useState(readCollapsed);
 
   function toggleCollapsed() {
     setCollapsed(prev => {
       const next = !prev;
       try {
         if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('sidebar-collapsed', String(next));
+          localStorage.setItem('fleet.sidebar.collapsed', String(next));
         }
       } catch {
         /* ignore persistence errors (e.g. SSR / disabled storage) */
@@ -66,7 +68,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
       transition: 'width 200ms ease',
     }}>
       <div style={{
-        padding: '0.6rem 0.75rem',
+        padding: '0.6rem 0.5rem',
         borderBottom: '1px solid #222',
         fontFamily: 'var(--font-mono)',
         fontSize: '0.65rem',
@@ -74,14 +76,12 @@ export default function FeatureList({ features, activePreview, startingFeatures,
         letterSpacing: '0.08em',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: collapsed ? 'center' : 'space-between',
         flexShrink: 0,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
       }}>
-        <span style={{ opacity: collapsed ? 0 : 1, transition: 'opacity 150ms ease' }}>
-          // FEATURES
-        </span>
+        {!collapsed && <span>// FEATURES</span>}
         <button
           onClick={toggleCollapsed}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
