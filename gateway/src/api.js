@@ -3,8 +3,9 @@ import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
 import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
-import { dockerExec, dockerLogs, stopContainer, startContainer, removeContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
+import { dockerExec, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 import { bootstrap } from './cluster/bootstrap.js';
+import { stopFeature } from './backend.js';
 
 const router = Router();
 const startedAt = Date.now();
@@ -66,22 +67,27 @@ router.post('/features/:key/activate', (req, res) => {
 
 /**
  * DELETE /_fleet/api/features/:key
- * Force-stop and remove the container, then unregister from the registry.
+ * Stop the feature (cluster or local), then unregister from the registry.
  * `:key` is the composite `${project}-${name}` string.
  */
 router.delete('/features/:key', async (req, res) => {
   const { key } = req.params;
-  if (!getFeature(key)) {
+  const feature = getFeature(key);
+  if (!feature) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
   try {
-    await removeContainer(`fleet-${key}`);
+    await stopFeature(feature);
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
     if (err instanceof DockerContainerError && err.status !== 404) {
       return res.status(503).json({ error: err.message });
     }
-    // 404 from Docker is fine — container was already gone
+    if (feature.host) {
+      // oc command failures are fatal — pod or service may still exist
+      return res.status(503).json({ error: err.message });
+    }
+    // 404 from Docker is fine — container was already gone, proceed with unregister
   }
   unregister(key);
   res.json({ ok: true });
