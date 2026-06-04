@@ -42,13 +42,14 @@ function CpuBar({ percent }) {
 }
 
 export default function ResourceMonitor() {
-  const [rows, setRows] = useState([]);
+  const [state, setState] = useState({ status: 'loading' });
 
   const refresh = useCallback(async () => {
     let features;
     try {
       features = await getFeatures();
-    } catch {
+    } catch (err) {
+      setState({ status: 'error', error: String(err.message || err) });
       return;
     }
 
@@ -75,7 +76,7 @@ export default function ResourceMonitor() {
       }),
     );
 
-    setRows(updated);
+    setState({ status: 'ok', features: updated });
   }, []);
 
   useEffect(() => {
@@ -113,7 +114,23 @@ export default function ResourceMonitor() {
         // RESOURCE MONITOR &nbsp;— auto-refresh {POLL_MS / 1000}s
       </div>
 
-      {rows.length === 0 ? (
+      {state.status === 'loading' ? (
+        <div className="resource-loading" style={{ color: 'var(--color-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>
+          loading resources…
+        </div>
+      ) : state.status === 'error' ? (
+        <div
+          role="alert"
+          style={{
+            color: 'var(--color-danger)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.65rem',
+            marginTop: '0.4rem',
+          }}
+        >
+          {state.error}
+        </div>
+      ) : state.features.length === 0 ? (
         <div style={{ color: '#333', fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>
           no features registered
         </div>
@@ -131,7 +148,7 @@ export default function ResourceMonitor() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {state.features.map((r) => {
               const statusColor = r.status === 'running'
                 ? 'var(--color-accent)'
                 : r.status === 'stopped'
