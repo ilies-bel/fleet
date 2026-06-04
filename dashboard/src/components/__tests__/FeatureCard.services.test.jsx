@@ -9,9 +9,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import FeatureCard from '../FeatureCard.jsx';
 import FeatureList from '../FeatureList.jsx';
+import * as api from '../../api.js';
 
 // Mock the api module — FeatureCard calls getHealth on mount via useEffect
 vi.mock('../../api.js', () => ({
@@ -159,6 +160,57 @@ describe('FeatureCard — services[] forward-compatibility', () => {
         />
       )
     ).not.toThrow();
+  });
+});
+
+describe('FeatureCard — Sync two-step confirmation', () => {
+  const noopFn = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('first sync click does not call api.sync', () => {
+    const feature = makeFeature();
+    render(
+      <FeatureCard
+        feature={feature}
+        isActive={false}
+        isPreview={false}
+        isStarting={false}
+        onActivate={noopFn}
+        onRemoved={noopFn}
+        onLogs={noopFn}
+      />
+    );
+
+    fireEvent.click(screen.getByText('[SYNC]'));
+
+    expect(api.syncFeature).not.toHaveBeenCalled();
+  });
+
+  it('second sync click calls api.sync once', () => {
+    const feature = makeFeature();
+    render(
+      <FeatureCard
+        feature={feature}
+        isActive={false}
+        isPreview={false}
+        isStarting={false}
+        onActivate={noopFn}
+        onRemoved={noopFn}
+        onLogs={noopFn}
+      />
+    );
+
+    // First click — enters confirm state, does NOT fire API
+    fireEvent.click(screen.getByText('[SYNC]'));
+    expect(api.syncFeature).not.toHaveBeenCalled();
+
+    // Second click — confirm state visible, fires API exactly once
+    fireEvent.click(screen.getByText('[CONFIRM SYNC?]'));
+    expect(api.syncFeature).toHaveBeenCalledTimes(1);
+    expect(api.syncFeature).toHaveBeenCalledWith(feature.key);
   });
 });
 

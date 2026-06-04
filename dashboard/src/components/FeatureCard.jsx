@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getHealth, removeFeature, stopFeature, startFeature, syncFeature } from '../api.js';
 import { describeFeature } from './featurePresentation.js';
 
@@ -6,6 +6,8 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   const { key, name, branch, title, project } = feature;
   const [health, setHealth] = useState('checking');
   const [confirming, setConfirming] = useState(false);
+  const [syncConfirm, setSyncConfirm] = useState(false);
+  const syncConfirmTimer = useRef(null);
   const [activating, setActivating] = useState(false);
   const [togglingPower, setTogglingPower] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -73,6 +75,13 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   }
 
   async function handleSync() {
+    if (!syncConfirm) {
+      setSyncConfirm(true);
+      syncConfirmTimer.current = setTimeout(() => setSyncConfirm(false), 3000);
+      return;
+    }
+    clearTimeout(syncConfirmTimer.current);
+    setSyncConfirm(false);
     setSyncing(true);
     setActionError(null);
     try {
@@ -207,10 +216,10 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
         <button
           onClick={handleSync}
           disabled={syncing}
-          style={btn('warning', syncing)}
+          style={btn(syncConfirm ? 'danger-fill' : 'warning', syncing)}
           title="Pull latest code, rebuild and restart backend (logs open automatically)"
         >
-          {syncing ? '[...]' : '[SYNC]'}
+          {syncing ? '[...]' : syncConfirm ? '[CONFIRM SYNC?]' : '[SYNC]'}
         </button>
         <button
           onClick={() => onLogs(key)}
