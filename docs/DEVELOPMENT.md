@@ -169,6 +169,148 @@ Set these in your Next.js config as `process.env.NEXT_PUBLIC_BACKEND_URL ?? '__F
 
 ---
 
+## OpenShift Cluster Features
+
+Fleet can run feature containers on a managed OpenShift cluster instead of local Docker,
+removing the local hardware bottleneck. The cluster path is fully transparent from the
+developer's perspective: `fleet add`, `fleet rm`, and the dashboard proxy work the same way
+regardless of where the container runs.
+
+### How it works
+
+When a feature is added with `--host <cluster/namespace>`:
+
+1. `fleet add` registers the feature with the gateway, setting `feature.host = { cluster, namespace }`.
+2. The gateway creates a Pod and headless Service in the target namespace
+   (`gateway/src/cluster/lifecycle.js`).
+3. The gateway opens an `oc port-forward` from a local port to port 80 on the pod
+   (`gateway/src/cluster/port-forward.js`).
+4. The transparent proxy routes requests through the local port-forward instead of a Docker
+   container port (`gateway/src/proxy.js` → `resolveTarget`).
+5. On `fleet rm`, the gateway kills the port-forward, deletes the Pod and Service, and
+   unregisters the feature (`gateway/src/backend.js` → `stopFeature`).
+
+### Prerequisites
+
+- `oc` CLI on PATH and logged in: `oc login <api-url> --token=<token>`
+- The fleet gateway running locally (`fleet init` or `node gateway/src/index.js`)
+- The base image bootstrapped in the target namespace (one-time — see below)
+
+### Bootstrap (one-time per namespace)
+
+Build the `fleet-feature-base` image inside the cluster before adding cluster features:
+
+```bash
+curl -s -X POST \
+  "http://localhost:4000/_fleet/api/cluster/bootstrap?namespace=<ns>"
+```
+
+This applies an ImageStream and BuildConfig, then runs `oc start-build --from-dir=.` to
+push the local `.fleet/` build context and build the image in-cluster. The build takes
+several minutes the first time; subsequent calls are no-ops (idempotent check on the
+ImageStreamTag).
+
+The built image is reachable inside the cluster at:
+```
+image-registry.openshift-image-registry.svc:5000/<namespace>/fleet-feature-base:latest
+```
+
+### Adding a cluster feature
+
+Pass `--host <cluster>/<namespace>` to `fleet add`:
+
+```bash
+fleet add my-feature --host ocp-prod/preview-ns
+```
+
+Both the cluster name and namespace are required. The gateway registers the feature
+and spins up the Pod + port-forward automatically.
+
+### Removing a cluster feature
+
+```bash
+fleet rm my-feature
+```
+
+Deletes the Pod and Service in the cluster namespace and tears down the port-forward.
+No extra flags needed — the gateway detects whether the feature is cluster-backed from
+the stored `host` field.
+
+### Reconciliation
+
+The gateway periodically queries `oc get pod` to reconcile each cluster feature's
+status (running / stopped / failed). This is handled by `gateway/src/reconcile.js`
+alongside Docker-based reconciliation.
+
+Force immediate reconciliation for a specific feature:
+
+```bash
+curl -s -X PATCH "http://localhost:4000/_fleet/api/features/<key>/reconcile" | jq .
+```
+
+### End-to-end smoke test
+
+`scripts/verify-cluster-smoke.js` runs the full lifecycle against a real cluster.
+It requires an active `oc` session and a running local gateway.
+
+```bash
+node scripts/verify-cluster-smoke.js \
+  --namespace <ns> \
+  --feature-key <key>
+```
+
+Steps executed in order:
+
+| Step | What it does |
+|------|-------------|
+| `cleanup-leftovers` | Idempotent cleanup of any prior run (ignoreNotFound) |
+| `create-pod` | Applies a minimal nginx pod manifest via `oc apply` |
+| `wait-pod-ready` | Waits for pod Ready condition (`oc wait --for=condition=Ready`) |
+| `port-forward` | Opens `oc port-forward` and waits for the "Forwarding from" signal |
+| `register-feature` | POSTs to `POST /register-feature` on the gateway |
+| `request-proxy` | Fetches `http://localhost:3000` — any HTTP response is a PASS |
+| `dashboard-switch` | Calls `POST /_fleet/api/features/<key>/activate` |
+| `teardown` | Deletes pod + service; kills port-forward |
+
+Each step prints `PASS: <step>` or `FAIL: <step> <reason>`. The script exits 0 on full
+success, 1 if any step fails.
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--namespace` | required | Kubernetes namespace to use |
+| `--feature-key` | required | Unique key for the test feature |
+| `--keep-pod` | false | Skip teardown (useful for post-mortem debugging) |
+| `--continue` | false | Run all steps even after a failure |
+| `--local-port` | 13000 | Local port for the `oc port-forward` |
+| `--gateway-url` | http://localhost:4000 | Fleet gateway admin URL |
+| `--proxy-url` | http://localhost:3000 | Fleet proxy URL |
+
+### Troubleshooting cluster features
+
+**Port-forward hangs or times out:**
+Check the pod status and that `oc` is on PATH and logged in:
+```bash
+oc get pod fleet-smoke-<key> -n <ns>
+oc whoami
+```
+
+**503 from the proxy:**
+The port-forward may not be established yet or the pod is not ready.
+Check the gateway feature state:
+```bash
+curl -s http://localhost:4000/_fleet/api/features | jq '.[] | {key, status, host}'
+```
+
+**Feature stuck in `building` after `fleet add --host`:**
+The cluster lifecycle runs asynchronously. Check the pod events:
+```bash
+oc describe pod fleet-<name> -n <ns>
+```
+
+---
+
 ## Registry & Reconciliation
 
 ### Feature registry
