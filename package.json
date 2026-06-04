@@ -32,9 +32,6 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "prepublishOnly": "cd dashboard && npm install --include=dev && npm run build"
-  },
   "files": [
     "fleet",
     "bin/",

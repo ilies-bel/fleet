@@ -54,6 +54,20 @@ jobs:
           fi
           echo "${PKG_NAME}@${PKG_VER} is not yet published — proceeding."
 
+      - name: Build dashboard
+        # Build the Vite dashboard explicitly here, as a normal install (not a
+        # child of `npm publish`). When the build runs inside the
+        # `prepublishOnly` hook instead, the publish process exports
+        # `npm_config_omit=dev`, which a nested `npm install` inherits and which
+        # overrides any `--include=dev` flag — so vite (a devDependency) is never
+        # installed and the build fails with `vite: not found`. Building here
+        # avoids that nesting entirely; the output lands in gateway/public/,
+        # which the `files` array ships in the tarball.
+        run: |
+          cd dashboard
+          npm install
+          npm run build
+
       - name: Pack dry-run (preview tarball contents)
         run: npm publish --dry-run
 
