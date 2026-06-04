@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getLogs } from '../api.js';
+import { Button } from './Button.jsx';
 
 const SOURCES = ['build', 'backend', 'nginx', 'postgresql', 'supervisord', 'all'];
 
@@ -217,36 +218,51 @@ export default function LogPanel({ featureName, onClose }) {
             // LOGS — {featureName}
           </span>
 
-          {/* Source tabs */}
+          {/* Source tabs — primary tone; active tab shows the filled inversion */}
           <div style={{ display: 'flex', gap: '0.3rem' }}>
             {SOURCES.map(s => (
-              <button
+              <Button
                 key={s}
+                tone="primary"
                 onClick={() => setSource(s)}
                 aria-pressed={s === source}
-                style={tabBtn(s === source)}
+                style={{
+                  fontSize: '0.65rem',
+                  padding: '2px 6px',
+                  ...(s === source ? { background: '#00ff88', color: '#000' } : {}),
+                }}
               >
                 [{s.toUpperCase()}]
-              </button>
+              </Button>
             ))}
           </div>
 
           <div style={{ flex: 1 }} />
 
-          {/* Auto-tail toggle */}
-          <button
+          {/* Auto-tail toggle — primary when active (tailing), caution when paused */}
+          <Button
+            tone={autoTail ? 'primary' : 'caution'}
             onClick={() => setAutoTail(v => !v)}
-            style={tabBtn(autoTail)}
             aria-pressed={autoTail}
             title={autoTail ? 'Pause auto-refresh' : 'Enable auto-refresh every 3s'}
+            style={{
+              fontSize: '0.68rem',
+              padding: '2px 7px',
+              ...(autoTail ? { background: '#00ff88', color: '#000' } : {}),
+            }}
           >
             {autoTail ? '[TAIL]' : '[PAUSED]'}
-          </button>
+          </Button>
 
-          {/* Close */}
-          <button onClick={handleClose} style={dangerBtn} aria-label="Close log panel">
+          {/* Close — primary (closing the panel causes no data loss); handleClose restores focus */}
+          <Button
+            tone="primary"
+            onClick={handleClose}
+            aria-label="Close log panel"
+            style={{ fontSize: '0.68rem', padding: '2px 7px' }}
+          >
             [CLOSE]
-          </button>
+          </Button>
         </div>
 
         {/* Log area */}
@@ -326,13 +342,15 @@ export default function LogPanel({ featureName, onClose }) {
             {lineCount} lines | fetched {fetchedTime}
             {loading && autoTail ? ' | refreshing…' : ''}
           </span>
-          <button
+          {/* Clear — caution, not destructive: only clears the display buffer */}
+          <Button
+            tone="caution"
             onClick={handleClear}
-            style={{ ...dangerBtn, fontSize: '0.65rem', padding: '1px 6px' }}
             aria-label="Clear log output"
+            style={{ fontSize: '0.65rem', padding: '1px 6px' }}
           >
             [CLEAR]
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -398,27 +416,3 @@ function AllSourcesView({ sources, loading }) {
     </div>
   );
 }
-
-function tabBtn(active) {
-  return {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.65rem',
-    padding: '2px 6px',
-    cursor: 'pointer',
-    borderRadius: 0,
-    background: active ? 'var(--color-accent)' : 'transparent',
-    border: '1px solid var(--color-accent)',
-    color: active ? '#000' : 'var(--color-accent)',
-  };
-}
-
-const dangerBtn = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '0.68rem',
-  padding: '2px 7px',
-  cursor: 'pointer',
-  borderRadius: 0,
-  background: 'transparent',
-  border: '1px solid var(--color-danger)',
-  color: 'var(--color-danger)',
-};

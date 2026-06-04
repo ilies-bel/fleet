@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getHealth, removeFeature, stopFeature, startFeature, syncFeature } from '../api.js';
 import { describeFeature } from './featurePresentation.js';
+import { Button } from './Button.jsx';
 
 export default function FeatureCard({ feature, isActive, isPreview, isStarting, onActivate, onRemoved, onLogs }) {
   const { key, name, branch, title, project } = feature;
@@ -98,6 +99,9 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   const isNotStarted = feature.status === 'not_started';
   const presentation = describeFeature(feature, health, isStarting);
   const displayName = title || name;
+
+  /* Small sizing shared by all action buttons in this card */
+  const cardBtnStyle = { fontSize: '0.68rem', padding: '2px 7px' };
 
   return (
     <div
@@ -231,45 +235,62 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             ) : (
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                 {health !== 'down' && (
-                  <button
+                  <Button
+                    tone="primary"
                     onClick={handleActivate}
                     disabled={activating || isActive}
-                    style={btn(isActive ? 'accent-fill' : 'accent', activating || isActive)}
+                    style={{
+                      ...cardBtnStyle,
+                      ...(isActive ? { background: '#00ff88', color: '#000' } : {}),
+                    }}
                     title={isActive ? 'Currently active on port 3000' : 'Route port 3000 to this feature'}
                   >
                     {activating ? '[...]' : isActive ? '[ACTIVE]' : '[ACTIVATE]'}
-                  </button>
+                  </Button>
                 )}
-                <button
+                {/* Stop/Start: both use primary tone — stop is reversible, not destructive */}
+                <Button
+                  tone="primary"
                   onClick={handleTogglePower}
                   disabled={togglingPower || health === 'checking'}
-                  style={btn(health === 'up' ? 'warning' : 'accent', togglingPower || health === 'checking')}
+                  style={cardBtnStyle}
                   title={health === 'up' ? 'Stop container' : 'Start container'}
                 >
                   {togglingPower ? '[...]' : health === 'up' ? '[STOP]' : '[START]'}
-                </button>
-                <button
+                </Button>
+                {/* Sync: caution tone (rebuild/restart) — escalates to a red confirm fill */}
+                <Button
+                  tone="caution"
                   onClick={handleSync}
                   disabled={syncing}
-                  style={btn(syncConfirm ? 'danger-fill' : 'warning', syncing)}
+                  style={{
+                    ...cardBtnStyle,
+                    ...(syncConfirm ? { background: '#ff4444', color: '#000' } : {}),
+                  }}
                   title="Pull latest code, rebuild and restart backend (logs open automatically)"
                 >
                   {syncing ? '[...]' : syncConfirm ? '[CONFIRM SYNC?]' : '[SYNC]'}
-                </button>
-                <button
+                </Button>
+                <Button
+                  tone="primary"
                   onClick={() => onLogs(key)}
-                  style={btn('accent')}
+                  style={cardBtnStyle}
                   title="View container logs"
                 >
                   [LOGS]
-                </button>
-                <button
+                </Button>
+                {/* Kill: destructive — permanently removes the feature */}
+                <Button
+                  tone="destructive"
                   onClick={handleKill}
-                  style={btn(confirming ? 'danger-fill' : 'danger')}
+                  style={{
+                    ...cardBtnStyle,
+                    ...(confirming ? { background: '#ff4444', color: '#000' } : {}),
+                  }}
                   aria-label={`Kill feature ${displayName}`}
                 >
                   {confirming ? '[CONFIRM?]' : '[KILL]'}
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -291,30 +312,4 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       )}
     </div>
   );
-}
-
-function btn(variant, disabled = false) {
-  const base = {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.68rem',
-    padding: '2px 7px',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    borderRadius: 0,
-    opacity: disabled ? 0.5 : 1,
-  };
-
-  switch (variant) {
-    case 'accent':
-      return { ...base, background: 'transparent', border: '1px solid var(--color-accent)', color: 'var(--color-accent)' };
-    case 'accent-fill':
-      return { ...base, background: 'var(--color-accent)', border: '1px solid var(--color-accent)', color: '#000' };
-    case 'warning':
-      return { ...base, background: 'transparent', border: '1px solid var(--color-warning)', color: 'var(--color-warning)' };
-    case 'danger':
-      return { ...base, background: 'transparent', border: '1px solid var(--color-danger)', color: 'var(--color-danger)' };
-    case 'danger-fill':
-      return { ...base, background: 'var(--color-danger)', border: '1px solid var(--color-danger)', color: '#fff' };
-    default:
-      return base;
-  }
 }

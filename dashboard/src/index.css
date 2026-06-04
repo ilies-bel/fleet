@@ -103,3 +103,33 @@ input {
     row-gap: 0.3rem;
   }
 }
+
+/* ── Button primitive ──────────────────────────────────────────────────────── */
+.btn {
+  font-family: 'JetBrains Mono', monospace;
+  border-radius: 0;
+  border: 1px solid currentColor;
+  background: transparent;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* primary — phosphor-green, affirmative */
+.btn-primary           { color: #00ff88; }
+.btn-primary:hover:not(:disabled),
+.btn-primary:focus:not(:disabled) { background: #00ff88; color: #000; outline: none; }
+
+/* caution — amber, use-with-care */
+.btn-caution           { color: #ffb000; }
+.btn-caution:hover:not(:disabled),
+.btn-caution:focus:not(:disabled) { background: #ffb000; color: #000; outline: none; }
+
+/* destructive — red, permanent / irreversible */
+.btn-destructive           { color: #ff4444; }
+.btn-destructive:hover:not(:disabled),
+.btn-destructive:focus:not(:disabled) { background: #ff4444; color: #000; outline: none; }
