@@ -136,7 +136,9 @@ const [logFeature, setLogFeature] = useState(null);
     }
   }
 
-const activeBranch = features.find(f => f.key === activePreview)?.branch ?? '';
+const activeFeature = features.find(f => f.key === activePreview);
+const activeBranch = activeFeature?.branch ?? '';
+const activeTitle = activeFeature?.title || activeFeature?.name || '';
 
   return (
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -158,6 +160,7 @@ const activeBranch = features.find(f => f.key === activePreview)?.branch ?? '';
         activePreview={activePreview}
         branch={activeBranch}
         previewKey={previewKey}
+        title={activeTitle}
       />
 
       {logFeature && (

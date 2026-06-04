@@ -3,7 +3,7 @@ import { useRef } from 'react';
 // Port 3000 is the transparent proxy — always the same URL regardless of which feature is active.
 const PROXY_URL = 'http://localhost:3000/';
 
-export default function PreviewFrame({ activePreview, branch, previewKey }) {
+export default function PreviewFrame({ activePreview, branch, previewKey, title }) {
   const iframeRef = useRef(null);
 
   if (!activePreview) {
@@ -37,16 +37,19 @@ export default function PreviewFrame({ activePreview, branch, previewKey }) {
         gap: '1rem',
         flexShrink: 0,
       }}>
-        <span style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '0.75rem',
-          color: 'var(--color-accent)',
-          flex: 1,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}>
-          {activePreview} // {branch}
+        <span
+          title={`${activePreview} // ${branch}`}
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.75rem',
+            color: 'var(--color-accent)',
+            flex: 1,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {title || activePreview}
         </span>
         <button
           onClick={() => window.open(PROXY_URL, '_blank')}
