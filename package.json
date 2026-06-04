@@ -33,7 +33,7 @@
     "access": "public"
   },
   "scripts": {
-    "prepublishOnly": "cd dashboard && npm install && npm run build"
+    "prepublishOnly": "cd dashboard && npm install --include=dev && npm run build"
   },
   "files": [
     "fleet",
