@@ -77,6 +77,20 @@ const [logFeature, setLogFeature] = useState(null);
     return () => clearInterval(poll);
   }, [fetchFeatures]);
 
+  useEffect(() => {
+    function onKey(e) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const n = e.key >= '1' && e.key <= '9' ? Number(e.key) : 0;
+      if (!n) return;
+      const target = features[n - 1];
+      if (!target) return;
+      e.preventDefault();
+      handleActivate(target.key);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [features]);
+
   function handleRemoved(key) {
     if (pendingActivateRef.current === key) pendingActivateRef.current = null;
     setFeatures(prev => prev.filter(f => f.key !== key));
