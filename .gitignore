@@ -47,6 +47,11 @@ gateway/public/index.html
 # Mars runtime state (queue/state dbs, watcher pid/socket — per-machine)
 .mars/
 
+# Impeccable design-tooling artifacts (critiques + generated product doc) —
+# local design byproducts, not project source.
+**/.impeccable/
+PRODUCT.md
+
 
 test/project
 test/reference

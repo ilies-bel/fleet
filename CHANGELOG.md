@@ -2,6 +2,23 @@
 
 All notable changes to fleet will be documented here.
 
+## 2.1.0
+
+### Added
+
+- **OpenShift cluster features.** Fleet can now start and stop feature
+  environments on an OpenShift cluster in addition to local Docker. New cluster
+  lifecycle and backend plumbing (`backend.stopFeature` for cluster and local
+  teardown, `renderFeaturePod` manifest generation, cluster `lifecycle.js`/
+  `backend.js`, and an idle-wait entrypoint mode for cluster pods via
+  `FLEET_BOOT=wait`). The gateway's `resolveTarget` branches on local vs cluster
+  backend. See the OpenShift cluster features section in `DEVELOPMENT.md`.
+
+### Fixed
+
+- **Dashboard `localStorage` access guarded** in the `FeatureList` collapse
+  state so the dashboard no longer throws where `localStorage` is unavailable.
+
 ## 2.0.4
 
 ### Changed
