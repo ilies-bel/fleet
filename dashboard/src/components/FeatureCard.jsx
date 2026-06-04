@@ -12,6 +12,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   const [togglingPower, setTogglingPower] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -96,6 +97,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
 
   const isNotStarted = feature.status === 'not_started';
   const presentation = describeFeature(feature, health, isStarting);
+  const displayName = title || name;
 
   return (
     <div
@@ -110,14 +112,42 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       onMouseEnter={e => { if (!isActive && !isPreview) e.currentTarget.style.background = '#161616'; }}
       onMouseLeave={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'transparent'; }}
     >
-      <div style={{
-        display: 'flex',
-        alignItems: 'baseline',
-        gap: '0.4rem',
-        marginBottom: '0.2rem',
-        minWidth: 0,
-      }}>
-        <div style={{
+      {/* Collapse/expand toggle — always visible, keyboard-accessible via <button> */}
+      <button
+        onClick={() => setCollapsed(prev => !prev)}
+        aria-expanded={!collapsed}
+        aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${displayName}`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.4rem',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          padding: 0,
+          width: '100%',
+          textAlign: 'left',
+          fontFamily: 'var(--font-mono)',
+          minWidth: 0,
+          marginBottom: collapsed ? 0 : '0.2rem',
+        }}
+      >
+        <span style={{ color: '#555', fontSize: '0.75rem', flexShrink: 0, lineHeight: 1 }}>
+          {collapsed ? '▸' : '▾'}
+        </span>
+        {/* Status chip appears in the compact header only when collapsed */}
+        {collapsed && (
+          <span style={{
+            color: presentation.dotColor,
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.68rem',
+            flexShrink: 0,
+            animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
+          }}>
+            {presentation.dotLabel}
+          </span>
+        )}
+        <span style={{
           color: isActive ? 'var(--color-accent)' : '#eee',
           fontFamily: 'var(--font-mono)',
           fontSize: '0.9rem',
@@ -127,8 +157,8 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           textOverflow: 'ellipsis',
           minWidth: 0,
         }}>
-          {title || name}
-        </div>
+          {displayName}
+        </span>
         {project && (
           <span style={{
             fontFamily: 'var(--font-mono)',
@@ -143,113 +173,121 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             {project}
           </span>
         )}
-      </div>
-      <div style={{
-        color: 'var(--color-muted)',
-        fontFamily: 'var(--font-mono)',
-        fontSize: '0.68rem',
-        marginBottom: '0.5rem',
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-      }}>
-        {branch}
-      </div>
+      </button>
 
-      <div style={{ marginBottom: '0.5rem' }}>
-        <span style={{
-          color: presentation.dotColor,
-          fontFamily: 'var(--font-mono)',
-          fontSize: '0.68rem',
-          animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
-        }}>
-          {presentation.dotLabel}
-        </span>
-        {presentation.showError && feature.error && (
-          <div
-            role="alert"
-            title={feature.error}
-            style={{
-              color: '#ff4444',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.65rem',
-              marginTop: '0.3rem',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}
-          >
-            {feature.error}
-          </div>
-        )}
-      </div>
-
-      {/* Action buttons */}
-      {isNotStarted ? (
-        <div style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '0.65rem',
-          color: '#555',
-          marginTop: '0.25rem',
-        }}>
-          Start: <span style={{ color: '#888' }}>fleet add {name} {branch}</span>
-        </div>
-      ) : (
-      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-        {health !== 'down' && (
-          <button
-            onClick={handleActivate}
-            disabled={activating || isActive}
-            style={btn(isActive ? 'accent-fill' : 'accent', activating || isActive)}
-            title={isActive ? 'Currently active on port 3000' : 'Route port 3000 to this feature'}
-          >
-            {activating ? '[...]' : isActive ? '[ACTIVE]' : '[ACTIVATE]'}
-          </button>
-        )}
-        <button
-          onClick={handleTogglePower}
-          disabled={togglingPower || health === 'checking'}
-          style={btn(health === 'up' ? 'warning' : 'accent', togglingPower || health === 'checking')}
-          title={health === 'up' ? 'Stop container' : 'Start container'}
-        >
-          {togglingPower ? '[...]' : health === 'up' ? '[STOP]' : '[START]'}
-        </button>
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          style={btn(syncConfirm ? 'danger-fill' : 'warning', syncing)}
-          title="Pull latest code, rebuild and restart backend (logs open automatically)"
-        >
-          {syncing ? '[...]' : syncConfirm ? '[CONFIRM SYNC?]' : '[SYNC]'}
-        </button>
-        <button
-          onClick={() => onLogs(key)}
-          style={btn('accent')}
-          title="View container logs"
-        >
-          [LOGS]
-        </button>
-        <button
-          onClick={handleKill}
-          style={btn(confirming ? 'danger-fill' : 'danger')}
-          aria-label={`Kill feature ${title || name}`}
-        >
-          {confirming ? '[CONFIRM?]' : '[KILL]'}
-        </button>
-      </div>
-      )}
-
-      {actionError && (
-        <div
-          role="alert"
-          style={{
-            color: 'var(--color-danger)',
+      {/* Expanded body — hidden when collapsed */}
+      {!collapsed && (
+        <>
+          <div style={{
+            color: 'var(--color-muted)',
             fontFamily: 'var(--font-mono)',
-            fontSize: '0.65rem',
-            marginTop: '0.4rem',
-          }}
-        >
-          {actionError}
-        </div>
+            fontSize: '0.68rem',
+            marginBottom: '0.5rem',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            {branch}
+          </div>
+
+          <div style={{ marginBottom: '0.5rem' }}>
+            <span style={{
+              color: presentation.dotColor,
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.68rem',
+              animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
+            }}>
+              {presentation.dotLabel}
+            </span>
+            {presentation.showError && feature.error && (
+              <div
+                role="alert"
+                title={feature.error}
+                style={{
+                  color: '#ff4444',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.65rem',
+                  marginTop: '0.3rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {feature.error}
+              </div>
+            )}
+          </div>
+
+          {/* Controls region — action buttons and not-started instructions */}
+          <div data-testid="feature-controls">
+            {isNotStarted ? (
+              <div style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.65rem',
+                color: '#555',
+                marginTop: '0.25rem',
+              }}>
+                Start: <span style={{ color: '#888' }}>fleet add {name} {branch}</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                {health !== 'down' && (
+                  <button
+                    onClick={handleActivate}
+                    disabled={activating || isActive}
+                    style={btn(isActive ? 'accent-fill' : 'accent', activating || isActive)}
+                    title={isActive ? 'Currently active on port 3000' : 'Route port 3000 to this feature'}
+                  >
+                    {activating ? '[...]' : isActive ? '[ACTIVE]' : '[ACTIVATE]'}
+                  </button>
+                )}
+                <button
+                  onClick={handleTogglePower}
+                  disabled={togglingPower || health === 'checking'}
+                  style={btn(health === 'up' ? 'warning' : 'accent', togglingPower || health === 'checking')}
+                  title={health === 'up' ? 'Stop container' : 'Start container'}
+                >
+                  {togglingPower ? '[...]' : health === 'up' ? '[STOP]' : '[START]'}
+                </button>
+                <button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  style={btn(syncConfirm ? 'danger-fill' : 'warning', syncing)}
+                  title="Pull latest code, rebuild and restart backend (logs open automatically)"
+                >
+                  {syncing ? '[...]' : syncConfirm ? '[CONFIRM SYNC?]' : '[SYNC]'}
+                </button>
+                <button
+                  onClick={() => onLogs(key)}
+                  style={btn('accent')}
+                  title="View container logs"
+                >
+                  [LOGS]
+                </button>
+                <button
+                  onClick={handleKill}
+                  style={btn(confirming ? 'danger-fill' : 'danger')}
+                  aria-label={`Kill feature ${displayName}`}
+                >
+                  {confirming ? '[CONFIRM?]' : '[KILL]'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {actionError && (
+            <div
+              role="alert"
+              style={{
+                color: 'var(--color-danger)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.65rem',
+                marginTop: '0.4rem',
+              }}
+            >
+              {actionError}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
