@@ -13,3 +13,7 @@ _Avoid_: app, application
 
 **instance**:
 A running container hosting the full app at a feature's defined version. Named like app-<feature> (e.g. app-bd-app-3s9 runs feature bd-app-3s9). A feature has at most one instance.
+
+**operation**:
+A bounded gateway action on an instance — build, sync, activate, stop, or remove — with a start, an end, and an outcome (success or failure); the unit a Fleet log page is scoped to.
+_Avoid_: run, workflow_run
