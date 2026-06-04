@@ -1,23 +1,8 @@
 import { useState, useEffect } from 'react';
 import { getStatus } from '../api.js';
 
-function pad(n) {
-  return String(n).padStart(2, '0');
-}
-
-function clock() {
-  const d = new Date();
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
 export default function StatusBar() {
-  const [time, setTime] = useState(clock());
   const [status, setStatus] = useState(null);
-
-  useEffect(() => {
-    const tick = setInterval(() => setTime(clock()), 1000);
-    return () => clearInterval(tick);
-  }, []);
 
   useEffect(() => {
     async function check() {
@@ -65,7 +50,7 @@ export default function StatusBar() {
       <span style={{ color: 'var(--color-accent)', fontWeight: 700 }}>[QA FLEET v1.0]</span>
       <span style={{ color: gwColor }}>{gwLabel}</span>
       <span style={{ color: 'var(--color-muted)' }}>
-        {status?.featureCount ?? 0} FEATURES &nbsp;|&nbsp; {time}
+        {status?.featureCount ?? 0} FEATURES
       </span>
     </div>
   );
