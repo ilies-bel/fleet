@@ -24,20 +24,58 @@ export default function LogPanel({ featureName, onClose }) {
   const [error, setError]           = useState(null);
   const [autoTail, setAutoTail]     = useState(true);
   const [fetchedAt, setFetchedAt]   = useState(null);
-  const sentinelRef = useRef(null);
-  const dialogRef   = useRef(null);
+  const sentinelRef  = useRef(null);
+  const dialogRef    = useRef(null);
+  const prevFocusRef = useRef(null);
 
-  // Focus dialog on mount for keyboard/screen-reader users
+  // Save the previously-focused element and move focus into the dialog on mount.
   useEffect(() => {
+    prevFocusRef.current = document.activeElement;
     dialogRef.current?.focus();
   }, []);
 
-  // Close on Escape
-  useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') onClose(); }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+  // Close the panel and restore focus to whoever opened it.
+  const handleClose = useCallback(() => {
+    prevFocusRef.current?.focus();
+    onClose();
   }, [onClose]);
+
+  // Keyboard handler on the dialog: Escape closes; Tab wraps within focusable set.
+  function handleKeyDown(e) {
+    if (e.key === 'Escape') {
+      handleClose();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const focusable = Array.from(
+      dialog.querySelectorAll(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input, select, textarea',
+      ),
+    );
+    if (focusable.length === 0) return;
+
+    const first  = focusable[0];
+    const last   = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (e.shiftKey) {
+      // Shift+Tab from first (or the dialog container itself) → wrap to last.
+      if (active === first || active === dialog) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      // Tab from last → wrap to first.
+      if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }
 
   // Reset state when source or feature changes
   useEffect(() => {
@@ -135,7 +173,7 @@ export default function LogPanel({ featureName, onClose }) {
   return (
     <div
       role="presentation"
-      onClick={onClose}
+      onClick={handleClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -154,6 +192,7 @@ export default function LogPanel({ featureName, onClose }) {
         aria-label={`Logs — ${featureName}`}
         tabIndex={-1}
         onClick={e => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
         style={{
           width: '860px',
           maxWidth: '95vw',
@@ -205,7 +244,7 @@ export default function LogPanel({ featureName, onClose }) {
           </button>
 
           {/* Close */}
-          <button onClick={onClose} style={dangerBtn} aria-label="Close log panel">
+          <button onClick={handleClose} style={dangerBtn} aria-label="Close log panel">
             [CLOSE]
           </button>
         </div>
