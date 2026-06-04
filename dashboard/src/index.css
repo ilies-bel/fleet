@@ -63,3 +63,43 @@ input {
   0%, 49% { opacity: 1; }
   50%, 100% { opacity: 0.2; }
 }
+
+/* ── Responsive: off-canvas feature drawer (< 768px) ─────────────────────── */
+
+@media (max-width: 767px) {
+  /* Slide the feature drawer off-screen when closed; slide in when open.
+     position:fixed removes it from the flex flow so the preview area
+     automatically fills the full width. The body::before scanline overlay
+     (z-index: 9999) sits above the drawer, preserving the CRT effect. */
+  .feature-drawer {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 280px;
+    z-index: 200;
+    background: var(--color-bg);
+    border-right: 1px solid #222;
+    transform: translateX(-100%);
+    transition: transform 200ms ease;
+    overflow: hidden;
+  }
+
+  .feature-drawer[data-open="true"] {
+    transform: translateX(0);
+  }
+
+  /* Make FeatureList fill the drawer width at narrow sizes. */
+  .feature-drawer > div {
+    width: 100% !important;
+  }
+
+  /* StatusBar: wrap instead of clip at narrow widths. */
+  .status-bar {
+    height: auto !important;
+    min-height: 40px;
+    flex-wrap: wrap;
+    padding: 0.4rem 1rem;
+    row-gap: 0.3rem;
+  }
+}

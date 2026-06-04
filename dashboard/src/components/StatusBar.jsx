@@ -47,18 +47,21 @@ export default function StatusBar() {
       : 'var(--color-danger)';
 
   return (
-    <div style={{
-      height: '40px',
-      background: '#000',
-      borderBottom: '1px solid #222',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '0 1rem',
-      fontFamily: 'var(--font-mono)',
-      fontSize: '0.75rem',
-      flexShrink: 0,
-    }}>
+    <div
+      className="status-bar"
+      style={{
+        minHeight: '40px',
+        background: '#000',
+        borderBottom: '1px solid #222',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 1rem',
+        fontFamily: 'var(--font-mono)',
+        fontSize: '0.75rem',
+        flexShrink: 0,
+      }}
+    >
       <span style={{ color: 'var(--color-accent)', fontWeight: 700 }}>[QA FLEET v1.0]</span>
       <span style={{ color: gwColor }}>{gwLabel}</span>
       <span style={{ color: 'var(--color-muted)' }}>

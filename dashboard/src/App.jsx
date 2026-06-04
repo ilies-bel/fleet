@@ -7,7 +7,7 @@ import PreviewFrame from './components/PreviewFrame.jsx';
 import LogPanel from './components/LogPanel.jsx';
 import ResourceMonitor from './components/ResourceMonitor.jsx';
 
-function NavBar() {
+function NavBar({ onDrawerToggle, isNarrow }) {
   const linkStyle = ({ isActive }) => ({
     fontFamily: 'var(--font-mono)',
     fontSize: '0.72rem',
@@ -31,13 +31,37 @@ function NavBar() {
       alignItems: 'stretch',
       flexShrink: 0,
     }}>
+      {isNarrow && (
+        <button
+          onClick={onDrawerToggle}
+          aria-label="Toggle feature drawer"
+          style={{
+            background: 'none',
+            border: 'none',
+            borderRight: '1px solid #222',
+            cursor: 'pointer',
+            padding: '0 0.75rem',
+            color: 'var(--color-muted)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '1.1rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-accent)'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = ''; }}
+        >
+          ☰
+        </button>
+      )}
       <NavLink to="/features" style={linkStyle}>FEATURES</NavLink>
       <NavLink to="/monitor" style={linkStyle}>RESOURCES</NavLink>
     </div>
   );
 }
 
-function FeaturesPage() {
+function FeaturesPage({ drawerOpen, onDrawerClose }) {
   const [features, setFeatures] = useState([]);
   const [activePreview, setActivePreview] = useState(null);
   const [previewKey, setPreviewKey] = useState(0);
@@ -103,6 +127,7 @@ const [logFeature, setLogFeature] = useState(null);
       await activateFeature(key);
       setActivePreview(key);              // instant, optimistic highlight
       setPreviewKey(k => k + 1);          // force iframe reload
+      onDrawerClose();                    // close the off-canvas drawer (no-op on wide viewports)
       await fetchFeatures();              // confirm against gateway (clears pending when matched)
     } catch (err) {
       pendingActivateRef.current = null;  // activation failed — let gateway truth resume
@@ -115,14 +140,20 @@ const activeBranch = features.find(f => f.key === activePreview)?.branch ?? '';
 
   return (
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-      <FeatureList
-        features={features}
-        activePreview={activePreview}
-        startingFeatures={startingFeatures}
-        onActivate={handleActivate}
-        onRemoved={handleRemoved}
-onLogs={key => setLogFeature(key)}
-      />
+      <aside
+        className="feature-drawer"
+        data-open={String(drawerOpen)}
+        aria-label="Feature list drawer"
+      >
+        <FeatureList
+          features={features}
+          activePreview={activePreview}
+          startingFeatures={startingFeatures}
+          onActivate={handleActivate}
+          onRemoved={handleRemoved}
+          onLogs={key => setLogFeature(key)}
+        />
+      </aside>
       <PreviewFrame
         activePreview={activePreview}
         branch={activeBranch}
@@ -140,6 +171,22 @@ onLogs={key => setLogFeature(key)}
 }
 
 export default function App() {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isNarrow, setIsNarrow] = useState(
+    () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(max-width: 767px)').matches
+  );
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia('(max-width: 767px)');
+    const handler = (e) => {
+      setIsNarrow(e.matches);
+      if (!e.matches) setDrawerOpen(false);
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   return (
     <div style={{
       height: '100vh',
@@ -149,11 +196,19 @@ export default function App() {
       background: 'var(--color-bg)',
     }}>
       <StatusBar />
-      <NavBar />
+      <NavBar
+        onDrawerToggle={() => setDrawerOpen(o => !o)}
+        isNarrow={isNarrow}
+      />
 
       <Routes>
         <Route path="/" element={<Navigate to="/features" replace />} />
-        <Route path="/features" element={<FeaturesPage />} />
+        <Route path="/features" element={
+          <FeaturesPage
+            drawerOpen={drawerOpen}
+            onDrawerClose={() => setDrawerOpen(false)}
+          />
+        } />
         <Route path="/monitor" element={<ResourceMonitor />} />
       </Routes>
     </div>
