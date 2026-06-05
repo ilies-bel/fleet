@@ -101,3 +101,8 @@ export function syncFeature(key, { regenerateSources = false } = {}) {
   const params = regenerateSources ? '?regenerateSources=true' : '';
   return request(`/_fleet/api/features/${key}/sync${params}`, { method: 'POST' });
 }
+
+/** @returns {Promise<{cpuPercent:number,cpuCores:number,memTotalMB:number,memFreeMB:number,memUsedMB:number}>} */
+export function getHostStats() {
+  return request('/_fleet/api/host-stats');
+}
