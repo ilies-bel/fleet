@@ -455,6 +455,11 @@ PYEOF
   export FLEET_CONFIG_ROOT
   FLEET_PROJECT_NAME=$(_get project_name)
   FLEET_PROJECT_ROOT=$(_get project_root)
+  # Resolve relative project.root against the directory containing .fleet/fleet.toml
+  case "${FLEET_PROJECT_ROOT}" in
+    ""       ) FLEET_PROJECT_ROOT="${FLEET_CONFIG_ROOT}" ;;
+    [!/]*    ) FLEET_PROJECT_ROOT="$(cd "${FLEET_CONFIG_ROOT}" && cd "${FLEET_PROJECT_ROOT}" && pwd)" ;;
+  esac
   FLEET_WORKTREE_PATH=$(_get worktree_path)
   FLEET_PORT_PROXY=$(_get port_proxy)
   FLEET_PORT_ADMIN=$(_get port_admin)
