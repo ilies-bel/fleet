@@ -939,6 +939,7 @@ show_help() {
   echo -e "  ${BLUE}restart${RESET} <name>                       Restart a feature container"
   echo -e "  ${BLUE}stop${RESET}    <name>|--all                 Stop feature container(s) without destroying them"
   echo -e "  ${BLUE}start${RESET}   <name>|--all                 Resume stopped feature container(s)"
+  echo -e "  ${BLUE}ui${RESET}      start|restart|stop [--dev]   Manage the dashboard UI (gateway in prod, Vite in --dev)"
   echo -e "  ${BLUE}push${RESET}    <name>                       Push service branches to remote"
   echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] [--rebuild]  Pull latest code and rebuild"
   echo -e "  ${BLUE}migrate-names${RESET}                        Identify and remove pre-migration bare-named containers"

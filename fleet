@@ -25,6 +25,7 @@ case "$cmd" in
   restart)         exec "$FLEET_ROOT/cli/cmd-restart.sh" "$@" ;;
   stop)            exec "$FLEET_ROOT/cli/cmd-stop.sh" "$@" ;;
   start)           exec "$FLEET_ROOT/cli/cmd-start.sh" "$@" ;;
+  ui)              exec "$FLEET_ROOT/cli/cmd-ui.sh" "$@" ;;
   push)            exec "$FLEET_ROOT/cli/cmd-push.sh" "$@" ;;
   sync)            exec "$FLEET_ROOT/cli/cmd-sync.sh" "$@" ;;
   migrate-names)   exec "$FLEET_ROOT/cli/cmd-migrate-names.sh" "$@" ;;
@@ -45,6 +46,7 @@ case "$cmd" in
         restart)        exec "$FLEET_ROOT/cli/cmd-restart.sh" --help ;;
         stop)           exec "$FLEET_ROOT/cli/cmd-stop.sh" --help ;;
         start)          exec "$FLEET_ROOT/cli/cmd-start.sh" --help ;;
+        ui)             exec "$FLEET_ROOT/cli/cmd-ui.sh" --help ;;
         push)           exec "$FLEET_ROOT/cli/cmd-push.sh" --help ;;
         sync)           exec "$FLEET_ROOT/cli/cmd-sync.sh" --help ;;
         migrate-names)  exec "$FLEET_ROOT/cli/cmd-migrate-names.sh" --help ;;
