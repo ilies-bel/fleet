@@ -2,20 +2,19 @@ import { useState, useEffect } from 'react';
 import { getHostStats } from '../api.js';
 
 const POLL_MS = 3000;
-const FLEET_COLOR = '#0ea5e9';
 
-export default function SystemResourcePanel({ fleetCpuPercent, fleetMemUsedMB, fleetNetRxMB, fleetNetTxMB, instanceCounts }) {
-  const [hostStats, setHostStats] = useState(null);
+export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instanceCounts }) {
+  const [host, setHost] = useState({ status: 'loading' });
 
   useEffect(() => {
     let cancelled = false;
 
     async function poll() {
       try {
-        const stats = await getHostStats();
-        if (!cancelled) setHostStats(stats);
+        const h = await getHostStats();
+        if (!cancelled) setHost({ status: 'ok', ...h });
       } catch {
-        // silent — keep previous data, retry on next tick
+        if (!cancelled) setHost({ status: 'unavailable' });
       }
     }
 
@@ -27,43 +26,24 @@ export default function SystemResourcePanel({ fleetCpuPercent, fleetMemUsedMB, f
     };
   }, []);
 
-  if (!hostStats) {
-    return (
-      <div style={{ marginBottom: '1.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-        loading host stats…
-      </div>
-    );
-  }
-
-  const { cpuPercent, cpuCores, memUsedMB, memTotalMB, memFreeMB } = hostStats;
-
-  const safeFleetCpu = fleetCpuPercent ?? 0;
-  const safeFleetMem = fleetMemUsedMB ?? 0;
-
-  // CPU layering: fleet fill clamped to min(fleet, host), remainder is host-only
-  const clampedFleetCpu = Math.min(safeFleetCpu, cpuPercent);
-  const hostOnlyCpu = cpuPercent - clampedFleetCpu;
-
-  const cpuColor = cpuPercent > 80
-    ? 'var(--color-danger)'
-    : cpuPercent > 50
-      ? 'var(--color-warning)'
-      : 'var(--color-accent)';
-
-  // Memory segments: fleet / other / free
-  const otherMemMB = Math.max(0, memUsedMB - safeFleetMem);
-  const safeMemFree = memFreeMB ?? Math.max(0, memTotalMB - memUsedMB);
-
-  const memPercent = memTotalMB > 0 ? (memUsedMB / memTotalMB) * 100 : 0;
-  const memColor = memPercent > 80
-    ? 'var(--color-danger)'
-    : memPercent > 50
-      ? 'var(--color-warning)'
-      : 'var(--color-accent)';
-
-  const fleetMemPct = memTotalMB > 0 ? safeFleetMem / memTotalMB * 100 : 0;
-  const otherMemPct = memTotalMB > 0 ? otherMemMB / memTotalMB * 100 : 0;
-  const freeMemPct = memTotalMB > 0 ? safeMemFree / memTotalMB * 100 : 0;
+  const memPercent =
+    host.status === 'ok' && host.memTotalMB > 0
+      ? (host.memUsedMB / host.memTotalMB) * 100
+      : 0;
+  const memColor =
+    memPercent > 80
+      ? 'var(--color-danger)'
+      : memPercent > 50
+        ? 'var(--color-warning)'
+        : 'var(--color-accent)';
+  const cpuColor =
+    host.status === 'ok'
+      ? host.cpuPercent > 80
+        ? 'var(--color-danger)'
+        : host.cpuPercent > 50
+          ? 'var(--color-warning)'
+          : 'var(--color-accent)'
+      : 'var(--color-muted)';
 
   return (
     <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', background: '#0d0d0d', border: '1px solid #1a1a1a' }}>
@@ -80,29 +60,27 @@ export default function SystemResourcePanel({ fleetCpuPercent, fleetMemUsedMB, f
       {/* CPU row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
-          CPU ({cpuCores} cores)
+          CPU{host.status === 'ok' ? ` (${host.cpuCores} cores)` : ''}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', width: '120px', height: '6px', background: '#222', flexShrink: 0, overflow: 'hidden' }}>
-            <div data-testid="cpu-fleet" style={{
-              flexBasis: `${Math.min(clampedFleetCpu, 100)}%`,
-              flexShrink: 0,
-              height: '100%',
-              background: FLEET_COLOR,
-              transition: 'flex-basis 0.4s ease',
-            }} />
-            <div data-testid="cpu-host" style={{
-              flexBasis: `${Math.min(hostOnlyCpu, 100)}%`,
-              flexShrink: 0,
-              height: '100%',
-              background: cpuColor,
-              transition: 'flex-basis 0.4s ease',
-            }} />
+        {host.status === 'ok' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ width: '120px', height: '6px', background: '#222', flexShrink: 0 }}>
+              <div style={{
+                width: `${Math.min(host.cpuPercent, 100)}%`,
+                height: '100%',
+                background: cpuColor,
+                transition: 'width 0.4s ease',
+              }} />
+            </div>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: cpuColor, minWidth: '48px' }}>
+              {host.cpuPercent.toFixed(1)}%
+            </span>
           </div>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: cpuColor }}>
-            Fleet {safeFleetCpu.toFixed(1)}% / Host {cpuPercent.toFixed(1)}% of {cpuCores} cores
+        ) : (
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+            {host.status === 'unavailable' ? '— unavailable' : '…'}
           </span>
-        </div>
+        )}
       </div>
 
       {/* Memory row */}
@@ -110,37 +88,40 @@ export default function SystemResourcePanel({ fleetCpuPercent, fleetMemUsedMB, f
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
           MEM
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', width: '120px', height: '6px', background: '#222', flexShrink: 0, overflow: 'hidden' }}>
-            <div data-testid="mem-fleet" style={{
-              flexBasis: `${fleetMemPct}%`,
-              flexShrink: 0,
-              height: '100%',
-              background: FLEET_COLOR,
-              transition: 'flex-basis 0.4s ease',
-            }} />
-            <div data-testid="mem-other" style={{
-              flexBasis: `${otherMemPct}%`,
-              flexShrink: 0,
-              height: '100%',
-              background: memColor,
-              transition: 'flex-basis 0.4s ease',
-            }} />
-            <div data-testid="mem-free" style={{
-              flexBasis: `${freeMemPct}%`,
-              flexShrink: 0,
-              height: '100%',
-              background: '#333',
-              transition: 'flex-basis 0.4s ease',
-            }} />
+        {host.status === 'ok' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ width: '120px', height: '6px', background: '#222', flexShrink: 0 }}>
+              <div style={{
+                width: `${Math.min(memPercent, 100)}%`,
+                height: '100%',
+                background: memColor,
+                transition: 'width 0.4s ease',
+              }} />
+            </div>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: memColor }}>
+              {host.memUsedMB} / {host.memTotalMB} MB
+            </span>
           </div>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: memColor }}>
-            Fleet {safeFleetMem} MB / Other {otherMemMB} MB / Free {safeMemFree} MB of {memTotalMB} MB
+        ) : (
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+            {host.status === 'unavailable' ? '— unavailable' : '…'}
           </span>
-        </div>
+        )}
       </div>
 
-      {/* Fleet network row */}
+      {/* Instance counts — always rendered when provided */}
+      {instanceCounts != null && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
+            INSTANCES
+          </span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+            {instanceCounts.running ?? 0} running / {instanceCounts.total ?? 0} total
+          </span>
+        </div>
+      )}
+
+      {/* Fleet network row — always rendered regardless of host status */}
       <span className="fleet-net" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--color-muted)' }}>
         FLEET NETWORK ↓{fleetNetRxMB} ↑{fleetNetTxMB} MB
       </span>
