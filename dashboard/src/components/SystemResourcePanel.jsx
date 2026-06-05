@@ -57,6 +57,24 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
         // HOST RESOURCES
       </div>
 
+      {/* Instance counts roll-up — 'failed' counts status === 'error' (ResourceMonitor maps fetch errors to status:'error'; no lifecycle.failed field exists yet) */}
+      {instanceCounts && (
+        <div className="instance-counts" style={{ display: 'flex', gap: '1.5rem', marginBottom: '0.75rem' }}>
+          <span className="count-total" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)' }}>
+            TOTAL {instanceCounts.total}
+          </span>
+          <span className="count-running" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-accent)' }}>
+            RUNNING {instanceCounts.running}
+          </span>
+          <span className="count-stopped" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-warning)' }}>
+            STOPPED {instanceCounts.stopped}
+          </span>
+          <span className="count-failed" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-danger)' }}>
+            FAILED {instanceCounts.failed}
+          </span>
+        </div>
+      )}
+
       {/* CPU row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
