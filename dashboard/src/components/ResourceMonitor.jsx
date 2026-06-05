@@ -86,6 +86,15 @@ export default function ResourceMonitor() {
     return () => clearInterval(id);
   }, [refresh]);
 
+  const instanceCounts = state.status === 'ok'
+    ? {
+        total: state.features.length,
+        running: state.features.filter(f => f.status === 'running').length,
+        stopped: state.features.filter(f => f.status === 'stopped').length,
+        failed: state.features.filter(f => f.status === 'error').length,
+      }
+    : { total: 0, running: 0, stopped: 0, failed: 0 };
+
   const col = {
     fontFamily: 'var(--font-mono)',
     fontSize: '0.72rem',
@@ -116,7 +125,7 @@ export default function ResourceMonitor() {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
-      <SystemResourcePanel fleetNetRxMB={fleetNetRxMB} fleetNetTxMB={fleetNetTxMB} />
+      <SystemResourcePanel fleetNetRxMB={fleetNetRxMB} fleetNetTxMB={fleetNetTxMB} instanceCounts={instanceCounts} />
       <div style={{
         fontFamily: 'var(--font-mono)',
         fontSize: '0.65rem',
