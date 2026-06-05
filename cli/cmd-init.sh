@@ -513,7 +513,7 @@ detect_services() {
 # ─── Write canonical fleet.toml ──────────────────────────────────────────────
 
 write_fleet_toml() {
-  local proj_root="$1" proj_name="$2" proxy_port="$3" admin_port="$4" db_port="$5" worktree_tmpl="${6:-}"
+  local proj_root="$1" proj_name="$2" proxy_port="$3" admin_port="$4" db_port="$5" nginx_port="$6" worktree_tmpl="${7:-}"
   local i stack
 
   mkdir -p "${FLEET_DIR}"
@@ -523,13 +523,14 @@ write_fleet_toml() {
     echo ""
     echo "[project]"
     echo "name = \"${proj_name}\""
-    echo "root = \"${proj_root}\""
+    echo "root = \".\""
     echo "path = \"${worktree_tmpl}\""
     echo ""
     echo "[ports]"
     echo "proxy = ${proxy_port}"
     echo "admin = ${admin_port}"
     echo "db    = ${db_port}"
+    echo "nginx = ${nginx_port}"
     echo ""
 
     for i in "${!SVC_NAMES[@]}"; do
@@ -620,6 +621,7 @@ PROJECT_NAME=""
 PROXY_PORT="3000"
 ADMIN_PORT="4000"
 DB_PORT="5432"
+NGINX_PORT="8000"
 WORKTREE_TEMPLATE=".worktrees/{name}"
 
 FLEET_TOML_EXISTED=0
@@ -630,10 +632,11 @@ if [ -f "${FLEET_TOML}" ]; then
   load_fleet_toml
 
   PROJECT_ROOT="${FLEET_PROJECT_ROOT}"
-  PROJECT_NAME="${FLEET_PROJECT_NAME}"
+  PROJECT_NAME="$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')"
   PROXY_PORT="${FLEET_PORT_PROXY:-3000}"
   ADMIN_PORT="${FLEET_PORT_ADMIN:-4000}"
   DB_PORT="${FLEET_PORT_DB:-5432}"
+  NGINX_PORT="${FLEET_PORT_NGINX:-8000}"
   # Preserve existing path if set; otherwise keep the default.
   # NB: can't use ${VAR:-.worktrees/{name}} — bash parameter-expansion braces
   # don't nest, so the first `}` closes the expansion and the second `}` is
@@ -643,7 +646,7 @@ if [ -f "${FLEET_TOML}" ]; then
   else
     WORKTREE_TEMPLATE=".worktrees/{name}"
   fi
-  export PROXY_PORT ADMIN_PORT DB_PORT
+  export PROXY_PORT ADMIN_PORT DB_PORT NGINX_PORT
 
   # Rebuild SVC_* arrays from loaded TOML using python
   local_pybin=$(_find_python_with_tomllib)
@@ -699,13 +702,14 @@ else
   PROXY_PORT=$(pick_port "3000"); export PROXY_PORT
   ADMIN_PORT=$(pick_port "4000"); export ADMIN_PORT
   DB_PORT="5432"; export DB_PORT
+  NGINX_PORT="8000"; export NGINX_PORT
 
   ask "Worktree template (use {name} as placeholder)" ".worktrees/{name}"
   WORKTREE_TEMPLATE="${_PROMPT_RESULT}"
 
   detect_services "${PROJECT_ROOT}"
 
-  write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}" "${WORKTREE_TEMPLATE}"
+  write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}" "${NGINX_PORT}" "${WORKTREE_TEMPLATE}"
 fi
 
 # ─── Hot-reload advisory (runs without Dockerfile generation now) ─────────────
@@ -717,7 +721,7 @@ done
 
 # ─── Re-emit canonical fleet.toml (normalize format on idempotent runs) ──────
 if [ "${FLEET_TOML_EXISTED}" -eq 0 ] || [ "${OVERRIDE}" -eq 1 ]; then
-  write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}" "${WORKTREE_TEMPLATE}"
+  write_fleet_toml "${PROJECT_ROOT}" "${PROJECT_NAME}" "${PROXY_PORT}" "${ADMIN_PORT}" "${DB_PORT}" "${NGINX_PORT}" "${WORKTREE_TEMPLATE}"
 else
   info "Keeping existing .fleet/fleet.toml (pass --override to regenerate)"
 fi
