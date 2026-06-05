@@ -110,9 +110,13 @@ export default function ResourceMonitor() {
     padding: '0.6rem 0.75rem',
   };
 
+  const runningFeatures = state.status === 'ok' ? state.features.filter(f => f.status === 'running') : [];
+  const fleetNetRxMB = runningFeatures.reduce((s, f) => s + f.netRxMB, 0);
+  const fleetNetTxMB = runningFeatures.reduce((s, f) => s + f.netTxMB, 0);
+
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
-      <SystemResourcePanel />
+      <SystemResourcePanel fleetNetRxMB={fleetNetRxMB} fleetNetTxMB={fleetNetTxMB} />
       <div style={{
         fontFamily: 'var(--font-mono)',
         fontSize: '0.65rem',

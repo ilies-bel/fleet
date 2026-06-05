@@ -82,7 +82,7 @@ export default function SystemResourcePanel({ fleetCpuPercent, fleetMemUsedMB, f
       </div>
 
       {/* Memory row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
           MEM
         </span>
@@ -100,6 +100,11 @@ export default function SystemResourcePanel({ fleetCpuPercent, fleetMemUsedMB, f
           </span>
         </div>
       </div>
+
+      {/* Fleet network row */}
+      <span className="fleet-net" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+        FLEET NETWORK ↓{fleetNetRxMB} ↑{fleetNetTxMB} MB
+      </span>
     </div>
   );
 }
