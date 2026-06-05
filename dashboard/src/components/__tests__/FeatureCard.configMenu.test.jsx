@@ -119,4 +119,24 @@ describe('FeatureCard — config menu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open alpha configuration' }));
     expect(screen.getByRole('heading', { name: 'alpha' })).toBeInTheDocument();
   });
+
+  // ── Modal shows worktree path when present ────────────────────────────────
+
+  it('modal body renders the worktree path when worktreePath is set', () => {
+    renderCard({ worktreePath: '/abs/path/to/worktree' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha Feature configuration' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Worktree')).toBeInTheDocument();
+    expect(within(dialog).getByText('/abs/path/to/worktree')).toBeInTheDocument();
+  });
+
+  // ── Modal shows 'direct mount' when worktreePath is null ─────────────────
+
+  it('modal body renders "direct mount" when worktreePath is null', () => {
+    renderCard({ worktreePath: null });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha Feature configuration' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Worktree')).toBeInTheDocument();
+    expect(within(dialog).getByText('direct mount')).toBeInTheDocument();
+  });
 });

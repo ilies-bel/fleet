@@ -1,4 +1,5 @@
 import { useRef, useEffect } from 'react';
+import { formatWorktree } from './featurePresentation.js';
 
 export default function FeatureConfigModal({ feature, onClose }) {
   const closeRef = useRef(null);
@@ -74,6 +75,8 @@ export default function FeatureConfigModal({ feature, onClose }) {
         }}>
           <dt style={{ color: '#888' }}>Branch</dt>
           <dd style={{ margin: 0 }}>{feature.branch}</dd>
+          <dt style={{ color: '#888' }}>Worktree</dt>
+          <dd style={{ margin: 0, wordBreak: 'break-all', fontFamily: 'var(--font-mono)' }}>{formatWorktree(feature.worktreePath)}</dd>
         </dl>
       </div>
     </div>

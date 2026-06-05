@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeFeature } from '../featurePresentation.js';
+import { describeFeature, formatWorktree } from '../featurePresentation.js';
 
 const f = (status) => ({ status });
 
@@ -65,5 +65,23 @@ describe('describeFeature', () => {
   it('falls back to ... for an unknown health on a running feature', () => {
     const p = describeFeature(f('up'), 'weird-value', false);
     expect(p.dotLabel).toBe('● ...');
+  });
+});
+
+describe('formatWorktree', () => {
+  it('returns the path verbatim when a non-empty string is provided', () => {
+    expect(formatWorktree('/abs/path/to/worktree')).toBe('/abs/path/to/worktree');
+  });
+
+  it('returns "direct mount" when worktreePath is null', () => {
+    expect(formatWorktree(null)).toBe('direct mount');
+  });
+
+  it('returns "direct mount" when worktreePath is undefined', () => {
+    expect(formatWorktree(undefined)).toBe('direct mount');
+  });
+
+  it('returns "direct mount" when worktreePath is an empty string', () => {
+    expect(formatWorktree('')).toBe('direct mount');
   });
 });

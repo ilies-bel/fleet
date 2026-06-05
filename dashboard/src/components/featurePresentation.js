@@ -56,6 +56,17 @@ export function describeFeature(feature, health, isStarting) {
   return normalise(HEALTH_PRESENTATION[effectiveHealth] ?? UNKNOWN_PRESENTATION);
 }
 
+/**
+ * Returns the worktree path for display, or 'direct mount' when absent.
+ *
+ * @param {string|null|undefined} worktreePath
+ * @returns {string}
+ */
+export function formatWorktree(worktreePath) {
+  if (typeof worktreePath !== 'string' || worktreePath.length === 0) return 'direct mount';
+  return worktreePath;
+}
+
 /** Fill defaults so the component never reads undefined flags. */
 function normalise(p) {
   return {
