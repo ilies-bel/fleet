@@ -106,3 +106,11 @@ export function syncFeature(key, { regenerateSources = false } = {}) {
 export function getHostStats() {
   return request('/_fleet/api/host-stats');
 }
+
+/**
+ * Fetch recent gateway operations (activate events etc.) from the log store.
+ * @returns {Promise<Array<{id,kind,key,startedAt,endedAt,outcome,errorMessage}>>}
+ */
+export function fetchOperations() {
+  return request('/_fleet/api/operations');
+}

@@ -7,6 +7,7 @@ import { dockerExec, dockerLogs, stopContainer, startContainer, getContainerStat
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
 import { getHostMetrics } from './host-metrics.js';
+import { startOperation, endOperation, listOperations } from './log-store.js';
 
 const router = Router();
 const startedAt = Date.now();
@@ -58,12 +59,23 @@ router.post('/features/:key/activate', (req, res) => {
   if (!getFeature(key)) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
+  const opId = startOperation({ kind: 'activate', key });
   try {
     setActiveFeature(key);
+    endOperation(opId, { outcome: 'success' });
     res.json({ ok: true, active: key });
   } catch (err) {
+    endOperation(opId, { outcome: 'failure', error: err });
     res.status(400).json({ error: err.message });
   }
+});
+
+/**
+ * GET /_fleet/api/operations
+ * Returns the most recent 100 operations ordered by startedAt DESC.
+ */
+router.get('/operations', (_req, res) => {
+  res.json(listOperations({ limit: 100 }));
 });
 
 /**

@@ -6,6 +6,7 @@ import FeatureList from './components/FeatureList.jsx';
 import PreviewFrame from './components/PreviewFrame.jsx';
 import LogPanel from './components/LogPanel.jsx';
 import ResourceMonitor from './components/ResourceMonitor.jsx';
+import OperationsList from './components/OperationsList.jsx';
 
 function NavBar({ onDrawerToggle, isNarrow }) {
   const linkStyle = ({ isActive }) => ({
@@ -57,6 +58,7 @@ function NavBar({ onDrawerToggle, isNarrow }) {
       )}
       <NavLink to="/features" style={linkStyle}>FEATURES</NavLink>
       <NavLink to="/monitor" style={linkStyle}>RESOURCES</NavLink>
+      <NavLink to="/operations" style={linkStyle}>OPERATIONS</NavLink>
     </div>
   );
 }
@@ -213,6 +215,7 @@ export default function App() {
           />
         } />
         <Route path="/monitor" element={<ResourceMonitor />} />
+        <Route path="/operations" element={<OperationsList />} />
       </Routes>
     </div>
   );

@@ -8,9 +8,12 @@ import { createFeatureProxy } from './proxy.js';
 import { createBackendProxy } from './backend-proxy.js';
 import { reconcileFromDocker, reconcileSweep } from './reconcile.js';
 import { loadPersistedActive, isRegistered, setActiveFeature } from './registry.js';
+import { openLogStore } from './log-store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+openLogStore();
 
 await reconcileFromDocker();
 
