@@ -9,11 +9,22 @@ export default function FeatureConfigModal({ feature, onClose }) {
     closeRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    function handler(e) {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    }
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-label={`${displayName} configuration`}
+      onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -25,6 +36,7 @@ export default function FeatureConfigModal({ feature, onClose }) {
       }}
     >
       <div
+        onClick={(e) => e.stopPropagation()}
         style={{
           background: '#1a1a1a',
           border: '1px solid #333',
