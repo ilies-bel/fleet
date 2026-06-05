@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { formatWorktree } from './featurePresentation.js';
+import { formatWorktree, formatHost } from './featurePresentation.js';
 
 export default function FeatureConfigModal({ feature, onClose }) {
   const closeRef = useRef(null);
@@ -89,6 +89,19 @@ export default function FeatureConfigModal({ feature, onClose }) {
           <dd style={{ margin: 0 }}>{feature.branch}</dd>
           <dt style={{ color: '#888' }}>Worktree</dt>
           <dd style={{ margin: 0, wordBreak: 'break-all', fontFamily: 'var(--font-mono)' }}>{formatWorktree(feature.worktreePath)}</dd>
+          <dt style={{ color: '#888' }}>Host</dt>
+          {(() => {
+            const h = formatHost(feature.host);
+            if (h.kind === 'local') {
+              return <dd style={{ margin: 0 }}>local docker</dd>;
+            }
+            return (
+              <dd style={{ margin: 0 }}>
+                <div>cluster: {h.cluster}</div>
+                <div>namespace: {h.namespace}</div>
+              </dd>
+            );
+          })()}
         </dl>
       </div>
     </div>

@@ -67,6 +67,17 @@ export function formatWorktree(worktreePath) {
   return worktreePath;
 }
 
+/**
+ * Describes where a feature is hosted.
+ *
+ * @param {object|null|undefined} host  feature.host from the registry
+ * @returns {{ kind: 'local' } | { kind: 'cluster', cluster: string, namespace: string }}
+ */
+export function formatHost(host) {
+  if (host == null) return { kind: 'local' };
+  return { kind: 'cluster', cluster: host.cluster, namespace: host.namespace };
+}
+
 /** Fill defaults so the component never reads undefined flags. */
 function normalise(p) {
   return {

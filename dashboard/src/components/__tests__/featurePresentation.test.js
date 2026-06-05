@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeFeature, formatWorktree } from '../featurePresentation.js';
+import { describeFeature, formatWorktree, formatHost } from '../featurePresentation.js';
 
 const f = (status) => ({ status });
 
@@ -83,5 +83,23 @@ describe('formatWorktree', () => {
 
   it('returns "direct mount" when worktreePath is an empty string', () => {
     expect(formatWorktree('')).toBe('direct mount');
+  });
+});
+
+describe('formatHost', () => {
+  it('returns {kind:"local"} when host is null', () => {
+    expect(formatHost(null)).toEqual({ kind: 'local' });
+  });
+
+  it('returns {kind:"local"} when host is undefined', () => {
+    expect(formatHost(undefined)).toEqual({ kind: 'local' });
+  });
+
+  it('returns cluster/namespace descriptor when host is an object', () => {
+    expect(formatHost({ cluster: 'c1', namespace: 'ns1' })).toEqual({
+      kind: 'cluster',
+      cluster: 'c1',
+      namespace: 'ns1',
+    });
   });
 });

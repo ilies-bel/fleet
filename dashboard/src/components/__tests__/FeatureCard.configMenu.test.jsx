@@ -139,4 +139,25 @@ describe('FeatureCard — config menu', () => {
     expect(within(dialog).getByText('Worktree')).toBeInTheDocument();
     expect(within(dialog).getByText('direct mount')).toBeInTheDocument();
   });
+
+  // ── Host row: local docker ─────────────────────────────────────────────────
+
+  it('modal shows "local docker" when feature.host is null', () => {
+    renderCard({ host: null });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha Feature configuration' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Host')).toBeInTheDocument();
+    expect(within(dialog).getByText('local docker')).toBeInTheDocument();
+  });
+
+  // ── Host row: cluster fixture ──────────────────────────────────────────────
+
+  it('modal shows cluster and namespace when feature.host is set', () => {
+    renderCard({ host: { cluster: 'prod', namespace: 'team-a' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha Feature configuration' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Host')).toBeInTheDocument();
+    expect(within(dialog).getByText(/prod/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/team-a/)).toBeInTheDocument();
+  });
 });
