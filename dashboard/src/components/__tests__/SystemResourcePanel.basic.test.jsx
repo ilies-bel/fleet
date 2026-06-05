@@ -25,8 +25,7 @@ describe('SystemResourcePanel', () => {
     render(<SystemResourcePanel />);
 
     await waitFor(() => {
-      expect(screen.getByText('42.5%')).toBeInTheDocument();
-      expect(screen.getByText(/8 cores/)).toBeInTheDocument();
+      expect(screen.getByText(/Fleet 0\.0% \/ Host 42\.5% of 8 cores/)).toBeInTheDocument();
     });
   });
 
@@ -42,7 +41,7 @@ describe('SystemResourcePanel', () => {
     render(<SystemResourcePanel />);
 
     await waitFor(() => {
-      expect(screen.getByText(/4096\s*\/\s*8192\s*MB/)).toBeInTheDocument();
+      expect(screen.getByText(/Fleet 0 MB \/ Other 4096 MB \/ Free 4096 MB of 8192 MB/)).toBeInTheDocument();
     });
   });
 });
