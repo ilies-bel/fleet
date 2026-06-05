@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { getHealth, removeFeature, stopFeature, startFeature, syncFeature } from '../api.js';
 import { describeFeature } from './featurePresentation.js';
 import { Button } from './Button.jsx';
+import FeatureConfigModal from './FeatureConfigModal.jsx';
 
 export default function FeatureCard({ feature, isActive, isPreview, isStarting, onActivate, onRemoved, onLogs }) {
   const { key, name, branch, title, project } = feature;
@@ -9,11 +10,13 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   const [confirming, setConfirming] = useState(false);
   const [syncConfirm, setSyncConfirm] = useState(false);
   const syncConfirmTimer = useRef(null);
+  const configTriggerRef = useRef(null);
   const [activating, setActivating] = useState(false);
   const [togglingPower, setTogglingPower] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -116,68 +119,82 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       onMouseEnter={e => { if (!isActive && !isPreview) e.currentTarget.style.background = '#161616'; }}
       onMouseLeave={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'transparent'; }}
     >
-      {/* Collapse/expand toggle — always visible, keyboard-accessible via <button> */}
-      <button
-        onClick={() => setCollapsed(prev => !prev)}
-        aria-expanded={!collapsed}
-        aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${displayName}`}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.4rem',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 0,
-          width: '100%',
-          textAlign: 'left',
-          fontFamily: 'var(--font-mono)',
-          minWidth: 0,
-          marginBottom: collapsed ? 0 : '0.2rem',
-        }}
-      >
-        <span style={{ color: '#555', fontSize: '0.75rem', flexShrink: 0, lineHeight: 1 }}>
-          {collapsed ? '▸' : '▾'}
-        </span>
-        {/* Status chip appears in the compact header only when collapsed */}
-        {collapsed && (
-          <span style={{
-            color: presentation.dotColor,
+      {/* Header row: collapse/expand toggle + config menu trigger */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.25rem',
+        marginBottom: collapsed ? 0 : '0.2rem',
+      }}>
+        <button
+          onClick={() => setCollapsed(prev => !prev)}
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${displayName}`}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            flex: 1,
+            textAlign: 'left',
             fontFamily: 'var(--font-mono)',
-            fontSize: '0.68rem',
-            flexShrink: 0,
-            animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
-          }}>
-            {presentation.dotLabel}
+            minWidth: 0,
+          }}
+        >
+          <span style={{ color: '#555', fontSize: '0.75rem', flexShrink: 0, lineHeight: 1 }}>
+            {collapsed ? '▸' : '▾'}
           </span>
-        )}
-        <span style={{
-          color: isActive ? 'var(--color-accent)' : '#eee',
-          fontFamily: 'var(--font-mono)',
-          fontSize: '0.9rem',
-          fontWeight: 700,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          minWidth: 0,
-        }}>
-          {displayName}
-        </span>
-        {project && (
+          {/* Status chip appears in the compact header only when collapsed */}
+          {collapsed && (
+            <span style={{
+              color: presentation.dotColor,
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.68rem',
+              flexShrink: 0,
+              animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
+            }}>
+              {presentation.dotLabel}
+            </span>
+          )}
           <span style={{
+            color: isActive ? 'var(--color-accent)' : '#eee',
             fontFamily: 'var(--font-mono)',
-            fontSize: '0.58rem',
-            color: '#888',
-            background: '#111',
-            border: '1px solid #2a2a2a',
-            padding: '1px 5px',
+            fontSize: '0.9rem',
+            fontWeight: 700,
             whiteSpace: 'nowrap',
-            flexShrink: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            minWidth: 0,
           }}>
-            {project}
+            {displayName}
           </span>
-        )}
-      </button>
+          {project && (
+            <span style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.58rem',
+              color: '#888',
+              background: '#111',
+              border: '1px solid #2a2a2a',
+              padding: '1px 5px',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}>
+              {project}
+            </span>
+          )}
+        </button>
+        <button
+          ref={configTriggerRef}
+          aria-label={`Open ${displayName} configuration`}
+          onClick={(e) => { e.stopPropagation(); setConfigOpen(true); }}
+          style={{ ...cardBtnStyle, flexShrink: 0 }}
+        >
+          ⋯
+        </button>
+      </div>
 
       {/* Expanded body — hidden when collapsed */}
       {!collapsed && (
@@ -309,6 +326,15 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             </div>
           )}
         </>
+      )}
+      {configOpen && (
+        <FeatureConfigModal
+          feature={feature}
+          onClose={() => {
+            setConfigOpen(false);
+            setTimeout(() => configTriggerRef.current?.focus(), 0);
+          }}
+        />
       )}
     </div>
   );

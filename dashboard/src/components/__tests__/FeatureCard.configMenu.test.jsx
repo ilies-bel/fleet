@@ -1,0 +1,122 @@
+/**
+ * Behaviour tests for the per-card config menu in FeatureCard.
+ *
+ * Verifies observable behaviour through the public interface:
+ * the ⋯ button is present, opens a modal with the feature's displayName
+ * and branch value, and the close button dismisses the modal.
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import FeatureCard from '../FeatureCard.jsx';
+
+vi.mock('../../api.js', () => ({
+  getHealth: vi.fn().mockResolvedValue({ status: 'down' }),
+  removeFeature: vi.fn().mockResolvedValue({}),
+  stopFeature: vi.fn().mockResolvedValue({}),
+  startFeature: vi.fn().mockResolvedValue({}),
+  syncFeature: vi.fn().mockResolvedValue({ ok: true }),
+  getFeatures: vi.fn().mockResolvedValue([]),
+  activateFeature: vi.fn().mockResolvedValue({ ok: true }),
+  addFeature: vi.fn().mockResolvedValue({}),
+  getLogs: vi.fn().mockResolvedValue({ lines: '' }),
+  getStats: vi.fn().mockResolvedValue({}),
+  getStatus: vi.fn().mockResolvedValue({}),
+}));
+
+const makeFeature = (overrides = {}) => ({
+  key: 'proj-alpha',
+  name: 'alpha',
+  branch: 'feature/my-branch',
+  title: 'Alpha Feature',
+  project: 'proj',
+  isActive: false,
+  status: 'running',
+  services: [],
+  ...overrides,
+});
+
+const renderCard = (overrides = {}) =>
+  render(
+    <FeatureCard
+      feature={makeFeature(overrides)}
+      isActive={false}
+      isPreview={false}
+      isStarting={false}
+      onActivate={vi.fn()}
+      onRemoved={vi.fn()}
+      onLogs={vi.fn()}
+    />
+  );
+
+describe('FeatureCard — config menu', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // ── Tracer bullet: ⋯ button is present in expanded state ──────────────────
+
+  it('renders a ⋯ button with accessible aria-label in expanded state', () => {
+    renderCard();
+    expect(
+      screen.getByRole('button', { name: 'Open Alpha Feature configuration' })
+    ).toBeInTheDocument();
+  });
+
+  // ── ⋯ button present when card is collapsed ───────────────────────────────
+
+  it('renders a ⋯ button with accessible aria-label in collapsed state', () => {
+    renderCard();
+    fireEvent.click(screen.getByRole('button', { name: /collapse alpha feature/i }));
+    expect(
+      screen.getByRole('button', { name: 'Open Alpha Feature configuration' })
+    ).toBeInTheDocument();
+  });
+
+  // ── Clicking ⋯ opens modal with feature displayName ───────────────────────
+
+  it('clicking ⋯ opens a modal titled with the feature displayName', () => {
+    renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha Feature configuration' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Alpha Feature' })).toBeInTheDocument();
+  });
+
+  // ── Modal shows branch value ───────────────────────────────────────────────
+
+  it('modal body renders the feature branch value', () => {
+    renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha Feature configuration' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Branch')).toBeInTheDocument();
+    expect(within(dialog).getByText('feature/my-branch')).toBeInTheDocument();
+  });
+
+  // ── Close button dismisses the modal ─────────────────────────────────────
+
+  it('close button dismisses the modal', () => {
+    renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha Feature configuration' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  // ── Close button returns focus to the ⋯ trigger ───────────────────────────
+
+  it('close button returns focus to the ⋯ trigger', async () => {
+    renderCard();
+    const trigger = screen.getByRole('button', { name: 'Open Alpha Feature configuration' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  // ── Feature name used as title when title prop is absent ──────────────────
+
+  it('uses feature name as displayName when title is absent', () => {
+    renderCard({ title: undefined });
+    fireEvent.click(screen.getByRole('button', { name: 'Open alpha configuration' }));
+    expect(screen.getByRole('heading', { name: 'alpha' })).toBeInTheDocument();
+  });
+});
