@@ -17,3 +17,6 @@ A running container hosting the full app at a feature's defined version. Named l
 **operation**:
 A bounded gateway action on an instance — build, sync, activate, stop, or remove — with a start, an end, and an outcome (success or failure); the unit a Fleet log page is scoped to.
 _Avoid_: run, workflow_run
+
+**failure-reason clustering**:
+Grouping of failed operations by their curated reason code, so repeated failures of the same cause surface as one cluster rather than many separate entries in the Fleet log UI.
