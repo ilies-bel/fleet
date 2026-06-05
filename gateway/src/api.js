@@ -6,6 +6,7 @@ import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, upd
 import { dockerExec, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
+import { getHostMetrics } from './host-metrics.js';
 
 const router = Router();
 const startedAt = Date.now();
@@ -285,6 +286,19 @@ router.post('/features/:key/reconcile', async (req, res) => {
   } catch (err) {
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /_fleet/api/host-stats
+ * Returns a snapshot of host machine resource usage (CPU %, memory).
+ * Responds 503 with { error } if metrics cannot be collected.
+ */
+router.get('/host-stats', async (_req, res) => {
+  try {
+    res.json(await getHostMetrics());
+  } catch (err) {
+    res.status(503).json({ error: err.message });
   }
 });
 
