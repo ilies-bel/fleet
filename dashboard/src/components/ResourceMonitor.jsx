@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getFeatures, getStats } from '../api.js';
+import SystemResourcePanel from './SystemResourcePanel.jsx';
 
 const POLL_MS = 3000;
 
@@ -111,6 +112,7 @@ export default function ResourceMonitor() {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+      <SystemResourcePanel />
       <div style={{
         fontFamily: 'var(--font-mono)',
         fontSize: '0.65rem',
