@@ -14,19 +14,29 @@ describe('ResourceMonitor — fetch states', () => {
     vi.clearAllMocks();
   });
 
-  it('shows loading indicator on initial render before fetch resolves', () => {
+  it('shows muted loading row inside the table region on initial render before fetch resolves', () => {
     getFeatures.mockImplementation(() => new Promise(() => {})); // never resolves
     render(<ResourceMonitor />);
-    expect(screen.getByText('loading resources…')).toBeInTheDocument();
+    // Loading row is inside the table
+    expect(screen.getByText('loading instances…')).toBeInTheDocument();
+    // Table column headers are visible alongside the loading row
+    expect(screen.getByText('FEATURE')).toBeInTheDocument();
+    // The resource monitor header is unaffected
+    expect(screen.getByText(/RESOURCE MONITOR/)).toBeInTheDocument();
   });
 
-  it('shows inline error block matching FeatureCard error style when getFeatures rejects', async () => {
+  it('shows inline error chip with message and retry hint when getFeatures rejects', async () => {
     getFeatures.mockRejectedValue(new Error('network failure'));
     render(<ResourceMonitor />);
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
     });
-    expect(screen.getByText('network failure')).toBeInTheDocument();
+    const chip = screen.getByRole('alert');
+    expect(chip).toHaveClass('resource-error-chip');
+    expect(chip).toHaveTextContent('network failure');
+    expect(chip).toHaveTextContent('auto-retry pending');
+    // The resource monitor header continues to render (panel above unaffected)
+    expect(screen.getByText(/RESOURCE MONITOR/)).toBeInTheDocument();
   });
 
   it('shows "no features registered" only after a successful fetch that returns empty array', async () => {

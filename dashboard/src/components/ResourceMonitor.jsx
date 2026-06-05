@@ -102,6 +102,13 @@ export default function ResourceMonitor() {
     background: '#000',
   };
 
+  const mutedCell = {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.65rem',
+    color: 'var(--color-muted)',
+    padding: '0.6rem 0.75rem',
+  };
+
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
       <div style={{
@@ -114,41 +121,49 @@ export default function ResourceMonitor() {
         // RESOURCE MONITOR &nbsp;— auto-refresh {POLL_MS / 1000}s
       </div>
 
-      {state.status === 'loading' ? (
-        <div className="resource-loading" style={{ color: 'var(--color-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>
-          loading resources…
-        </div>
-      ) : state.status === 'error' ? (
+      {state.status === 'error' && (
         <div
+          className="resource-error-chip"
           role="alert"
           style={{
+            display: 'inline-flex',
+            alignItems: 'center',
             color: 'var(--color-danger)',
             fontFamily: 'var(--font-mono)',
             fontSize: '0.65rem',
-            marginTop: '0.4rem',
+            padding: '0.15rem 0.5rem',
+            border: '1px solid var(--color-danger)',
+            borderRadius: '2px',
+            marginBottom: '0.5rem',
           }}
         >
-          {state.error}
+          {state.error} — auto-retry pending
         </div>
-      ) : state.features.length === 0 ? (
-        <div style={{ color: '#333', fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>
-          no features registered
-        </div>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
+      )}
+
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: 'left' }}>FEATURE</th>
+            <th style={{ ...th, textAlign: 'left' }}>PROJECT</th>
+            <th style={{ ...th, textAlign: 'left' }}>BRANCH</th>
+            <th style={{ ...th, textAlign: 'left' }}>STATUS</th>
+            <th style={{ ...th, textAlign: 'left' }}>CPU</th>
+            <th style={{ ...th, textAlign: 'left' }}>MEMORY</th>
+            <th style={{ ...th, textAlign: 'left' }}>NETWORK</th>
+          </tr>
+        </thead>
+        <tbody>
+          {state.status === 'loading' ? (
             <tr>
-              <th style={{ ...th, textAlign: 'left' }}>FEATURE</th>
-              <th style={{ ...th, textAlign: 'left' }}>PROJECT</th>
-              <th style={{ ...th, textAlign: 'left' }}>BRANCH</th>
-              <th style={{ ...th, textAlign: 'left' }}>STATUS</th>
-              <th style={{ ...th, textAlign: 'left' }}>CPU</th>
-              <th style={{ ...th, textAlign: 'left' }}>MEMORY</th>
-              <th style={{ ...th, textAlign: 'left' }}>NETWORK</th>
+              <td colSpan={7} style={mutedCell}>loading instances…</td>
             </tr>
-          </thead>
-          <tbody>
-            {state.features.map((r) => {
+          ) : state.status === 'ok' && state.features.length === 0 ? (
+            <tr>
+              <td colSpan={7} style={mutedCell}>no features registered</td>
+            </tr>
+          ) : state.status === 'ok' ? (
+            state.features.map((r) => {
               const statusColor = r.status === 'running'
                 ? 'var(--color-accent)'
                 : r.status === 'stopped'
@@ -174,10 +189,10 @@ export default function ResourceMonitor() {
                   </td>
                 </tr>
               );
-            })}
-          </tbody>
-        </table>
-      )}
+            })
+          ) : null}
+        </tbody>
+      </table>
     </div>
   );
 }
