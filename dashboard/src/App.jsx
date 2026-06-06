@@ -9,6 +9,7 @@ import ResourceMonitor from './components/ResourceMonitor.jsx';
 import OperationsList from './components/OperationsList.jsx';
 import FailureClusters from './components/FailureClusters.jsx';
 import OperationDetail from './components/OperationDetail.jsx';
+import { useReviewNotes } from './hooks/useReviewNotes.js';
 
 function NavBar({ onDrawerToggle, isNarrow }) {
   const linkStyle = ({ isActive }) => ({
@@ -73,6 +74,7 @@ const [logFeature, setLogFeature] = useState(null);
   const [startingFeatures, setStartingFeatures] = useState(new Set());
   const [isCapture, setIsCapture] = useState(false);
   const toggleCapture = useCallback(() => setIsCapture(prev => !prev), []);
+  const { notesByWorktree, addNote, removeNote, clearForWorktree } = useReviewNotes();
 
   // Key the user just clicked [ACTIVATE] on; suppresses poll-driven
   // reconciliation until the gateway confirms this is the active feature.
@@ -174,6 +176,7 @@ const activeTitle = activeFeature?.title || activeFeature?.name || '';
         title={activeTitle}
         isCapture={isCapture}
         onToggleCapture={toggleCapture}
+        addNote={addNote}
       />
 
       {logFeature && (

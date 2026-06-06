@@ -1,11 +1,12 @@
 import { useRef, useState, useEffect } from 'react';
 import DiffPane from './DiffPane.jsx';
+import ReviewCaptureLayer from './ReviewCaptureLayer.jsx';
 import { PROXY_ORIGIN } from '../lib/captureProtocol.js';
 
 // Port 3000 is the transparent proxy — always the same URL regardless of which feature is active.
 const PROXY_URL = 'http://localhost:3000/';
 
-export default function PreviewFrame({ activePreview, branch, previewKey, title, isCapture, onToggleCapture }) {
+export default function PreviewFrame({ activePreview, branch, previewKey, title, isCapture, onToggleCapture, addNote }) {
   const iframeRef = useRef(null);
   const [viewMode, setViewMode] = useState('preview');
 
@@ -47,7 +48,7 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
   }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
       {/* Toolbar */}
       <div style={{
         height: '40px',
@@ -132,6 +133,9 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
 
       {/* Diff pane — only mounted when diff mode is active */}
       {viewMode === 'diff' && <DiffPane activeKey={activePreview} />}
+
+      {/* Inline note input — appears when the operator picks an element in capture mode */}
+      <ReviewCaptureLayer activeWorktree={activePreview} addNote={addNote} />
     </div>
   );
 }
