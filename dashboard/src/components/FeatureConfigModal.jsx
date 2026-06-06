@@ -102,6 +102,17 @@ export default function FeatureConfigModal({ feature, onClose }) {
               </dd>
             );
           })()}
+          <dt style={{ color: '#888' }}>Services</dt>
+          <dd style={{ margin: 0 }}>
+            {(() => {
+              const services = Array.isArray(feature.services) ? feature.services : [];
+              return services.length === 0
+                ? <span>no services</span>
+                : <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontFamily: 'var(--font-mono)' }}>
+                    {services.map(s => <li key={s.name}>{s.name} → {s.port}</li>)}
+                  </ul>;
+            })()}
+          </dd>
         </dl>
       </div>
     </div>

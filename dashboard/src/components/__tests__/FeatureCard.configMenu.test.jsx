@@ -160,4 +160,32 @@ describe('FeatureCard — config menu', () => {
     expect(within(dialog).getByText(/prod/)).toBeInTheDocument();
     expect(within(dialog).getByText(/team-a/)).toBeInTheDocument();
   });
+
+  // ── Services section: populated with three entries ────────────────────────
+
+  it('modal body renders a row per service when services is non-empty', () => {
+    renderCard({
+      services: [
+        { name: 'web', port: 3000 },
+        { name: 'api', port: 4000 },
+        { name: 'pg', port: 5432 },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha Feature configuration' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Services')).toBeInTheDocument();
+    expect(within(dialog).getByText('web → 3000')).toBeInTheDocument();
+    expect(within(dialog).getByText('api → 4000')).toBeInTheDocument();
+    expect(within(dialog).getByText('pg → 5432')).toBeInTheDocument();
+  });
+
+  // ── Services section: empty array shows fallback ──────────────────────────
+
+  it('modal body renders "no services" when services is empty', () => {
+    renderCard({ services: [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha Feature configuration' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Services')).toBeInTheDocument();
+    expect(within(dialog).getByText('no services')).toBeInTheDocument();
+  });
 });
