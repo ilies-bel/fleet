@@ -24,3 +24,7 @@ Grouping of failed operations by their curated reason code, so repeated failures
 **review note**:
 An improvement jotted against the active feature while previewing it: a captured CSS selector (or none) plus free text, scoped to a feature and the page route it was captured on, persisted client-side until the operator deletes it.
 _Avoid_: annotation, comment
+
+**capture mode**:
+A dashboard preview state in which clicks inside the previewed app are intercepted to record an element's selector as a review note instead of driving the app; off by default, marked on-screen, toggled from the UI or a keyboard shortcut.
+_Avoid_: picker mode, inspect mode
