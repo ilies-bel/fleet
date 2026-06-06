@@ -1,5 +1,5 @@
 import { inspectContainer } from './docker.js';
-import { writeFileSync, renameSync, readFileSync } from 'node:fs';
+import { writeFileSync, renameSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
@@ -214,7 +214,16 @@ export function register(project, name, branch, worktreePath = null, status = 'u
         gitCommonDir = resolvePath(gitDir, '..', '..');
       }
     } catch {
-      // Not a linked worktree or unreadable .git — leave null.
+      // .git may be a directory (normal repo root) — check with statSync.
+      try {
+        const s = statSync(`${worktreePath}/.git`);
+        if (s.isDirectory()) {
+          gitDir = resolvePath(worktreePath, '.git');
+          gitCommonDir = gitDir;
+        }
+      } catch {
+        // No .git at all — leave null.
+      }
     }
   }
 
