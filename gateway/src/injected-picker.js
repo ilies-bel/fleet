@@ -67,7 +67,7 @@ export function computeRef(el) {
 }
 
 export const INJECTED_PICKER = String.raw`(() => {
-  const state = { active: false, captureRoot: null };
+  const state = { active: false, captureRoot: null, noteTintLayer: null };
 
   // Resolve expected dashboard origin dynamically so no port is hardcoded.
   // ancestorOrigins[0] is the immediate parent frame's origin (Chromium/WebKit).
@@ -171,6 +171,32 @@ export const INJECTED_PICKER = String.raw`(() => {
     });
   }
 
+  // Paint blue tint overlays for every note whose route matches the current page
+  // route and whose selector resolves to at least one element.
+  // Clears layer first so the result always equals the current note set exactly.
+  // Called both on initial activation (layer is freshly created) and on every
+  // mars.capture.notesUpdated message (layer holds the prior set).
+  function renderNoteTints(layer, notes) {
+    layer.replaceChildren();
+    _marked = [];
+    const currentRoute = location.pathname + location.search;
+    (notes || []).forEach(function(note) {
+      if (note.route !== currentRoute) return;
+      if (!note.selector) return;
+      let els;
+      try { els = document.querySelectorAll(note.selector); } catch (_) { return; }
+      Array.from(els).forEach(function(el) {
+        const d = document.createElement('div');
+        d.style.cssText =
+          'position:fixed;top:0;left:0;pointer-events:none;box-sizing:border-box;' +
+          'background:rgba(59,130,246,0.12);box-shadow:inset 0 0 0 1px rgba(59,130,246,0.35)';
+        layer.appendChild(d);
+        _marked.push({ el: el, rect: d });
+      });
+    });
+    reposition();
+  }
+
   function onCaptureClick(ev) {
     // Ignore clicks that land on the capture-root overlay host (the banner /
     // hover-highlight UI) so the operator can interact with it without
@@ -221,35 +247,29 @@ export const INJECTED_PICKER = String.raw`(() => {
         renderBanner(shadow);
         installHoverHighlight(shadow);
 
-        // Note tint layer — a sibling container for blue note-marker overlays.
+        // Note tint layer: sibling container for blue note-marker overlays.
+        // Stored in state so mars.capture.notesUpdated can repaint without
+        // re-initialising the capture UI.
         const noteTintLayer = document.createElement('div');
+        state.noteTintLayer = noteTintLayer;
         shadow.appendChild(noteTintLayer);
-        const currentRoute = location.pathname + location.search;
-        (event.data.notes || []).forEach(function(note) {
-          if (note.route !== currentRoute) return;
-          if (!note.selector) return;
-          let els;
-          try { els = document.querySelectorAll(note.selector); } catch (_) { return; }
-          Array.from(els).forEach(function(el) {
-            const d = document.createElement('div');
-            d.style.cssText =
-              'position:fixed;top:0;left:0;pointer-events:none;box-sizing:border-box;' +
-              'background:rgba(59,130,246,0.12);box-shadow:inset 0 0 0 1px rgba(59,130,246,0.35)';
-            noteTintLayer.appendChild(d);
-            _marked.push({ el: el, rect: d });
-          });
-        });
+        renderNoteTints(noteTintLayer, event.data.notes);
         // Keep tints aligned to their elements on scroll and resize.
         document.addEventListener('scroll', reposition, { capture: true, passive: true });
         window.addEventListener('resize', reposition);
-        reposition();
       } else {
         uninstallHoverHighlight();
         document.removeEventListener('scroll', reposition, { capture: true });
         window.removeEventListener('resize', reposition);
         _marked = [];
+        state.noteTintLayer = null;
         shadow.innerHTML = '';
       }
+    } else if (event.data.type === 'mars.capture.notesUpdated') {
+      // Reactive repaint: replace the entire tint set with the incoming notes.
+      // Silently ignored when capture mode is not active.
+      if (!state.active || !state.noteTintLayer) return;
+      renderNoteTints(state.noteTintLayer, event.data.notes);
     }
   });
 
