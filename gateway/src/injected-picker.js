@@ -43,6 +43,57 @@ export const INJECTED_PICKER = String.raw`(() => {
       'Capture mode — click an element to mark it</div>';
   }
 
+  // _hoverHandler holds the registered mousemove handler so uninstall can remove
+  // the exact same function reference. _rafId tracks any pending rAF so it can
+  // be cancelled on teardown.
+  let _hoverHandler = null;
+  let _rafId = null;
+
+  function installHoverHighlight(shadow) {
+    const hoverDiv = document.createElement('div');
+    hoverDiv.id = 'mars-hover';
+    hoverDiv.style.cssText =
+      'position:fixed;top:0;left:0;pointer-events:none;display:none;box-sizing:border-box;' +
+      'outline:2px solid #0b3;background:rgba(0,187,51,0.08)';
+    shadow.appendChild(hoverDiv);
+
+    let pendingX = 0, pendingY = 0, rafPending = false;
+
+    _hoverHandler = function(e) {
+      pendingX = e.clientX;
+      pendingY = e.clientY;
+      if (rafPending) return;
+      rafPending = true;
+      _rafId = requestAnimationFrame(function() {
+        rafPending = false;
+        _rafId = null;
+        const el = document.elementFromPoint(pendingX, pendingY);
+        if (!el || el.closest('#mars-capture-root')) {
+          hoverDiv.style.display = 'none';
+          return;
+        }
+        const rect = el.getBoundingClientRect();
+        hoverDiv.style.display = '';
+        hoverDiv.style.transform = 'translate(' + rect.left + 'px,' + rect.top + 'px)';
+        hoverDiv.style.width = rect.width + 'px';
+        hoverDiv.style.height = rect.height + 'px';
+      });
+    };
+
+    document.addEventListener('mousemove', _hoverHandler);
+  }
+
+  function uninstallHoverHighlight() {
+    if (_hoverHandler) {
+      document.removeEventListener('mousemove', _hoverHandler);
+      _hoverHandler = null;
+    }
+    if (_rafId !== null) {
+      cancelAnimationFrame(_rafId);
+      _rafId = null;
+    }
+  }
+
   window.addEventListener('message', function(event) {
     // Ignore messages whose type does not start with 'mars.capture.'
     if (
@@ -63,7 +114,9 @@ export const INJECTED_PICKER = String.raw`(() => {
       const shadow = ensureRoot();
       if (state.active) {
         renderBanner(shadow);
+        installHoverHighlight(shadow);
       } else {
+        uninstallHoverHighlight();
         shadow.innerHTML = '';
       }
     }
