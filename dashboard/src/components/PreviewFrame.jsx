@@ -6,17 +6,18 @@ import { PROXY_ORIGIN } from '../lib/captureProtocol.js';
 // Port 3000 is the transparent proxy — always the same URL regardless of which feature is active.
 const PROXY_URL = 'http://localhost:3000/';
 
-export default function PreviewFrame({ activePreview, branch, previewKey, title, isCapture, onToggleCapture, addNote }) {
+export default function PreviewFrame({ activePreview, branch, previewKey, title, isCapture, onToggleCapture, addNote, notes }) {
   const iframeRef = useRef(null);
   const [viewMode, setViewMode] = useState('preview');
 
-  // Sync capture state into the iframe whenever it changes.
+  // Sync capture state (and current route notes) into the iframe.
+  // notes is sent so the picker can paint blue tint overlays for existing review notes.
   useEffect(() => {
     iframeRef.current?.contentWindow?.postMessage(
-      { type: 'mars.capture.activate', active: isCapture },
+      { type: 'mars.capture.activate', active: isCapture, notes: notes ?? [] },
       PROXY_URL
     );
-  }, [isCapture]);
+  }, [isCapture, notes]);
 
   // Forward keyboard shortcut fired inside the iframe back into the toggle path.
   useEffect(() => {

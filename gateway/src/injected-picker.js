@@ -203,6 +203,27 @@ export const INJECTED_PICKER = String.raw`(() => {
       if (state.active) {
         renderBanner(shadow);
         installHoverHighlight(shadow);
+
+        // Note tint layer — a sibling container for blue note-marker overlays.
+        const noteTintLayer = document.createElement('div');
+        shadow.appendChild(noteTintLayer);
+        const currentRoute = location.pathname + location.search;
+        (event.data.notes || []).forEach(function(note) {
+          if (note.route !== currentRoute) return;
+          if (!note.selector) return;
+          let els;
+          try { els = document.querySelectorAll(note.selector); } catch (_) { return; }
+          Array.from(els).forEach(function(el) {
+            const rect = el.getBoundingClientRect();
+            const d = document.createElement('div');
+            d.style.cssText =
+              'position:fixed;top:0;left:0;pointer-events:none;box-sizing:border-box;' +
+              'background:rgba(59,130,246,0.12);box-shadow:inset 0 0 0 1px rgba(59,130,246,0.35);' +
+              'transform:translate(' + rect.left + 'px,' + rect.top + 'px);' +
+              'width:' + rect.width + 'px;height:' + rect.height + 'px';
+            noteTintLayer.appendChild(d);
+          });
+        });
       } else {
         uninstallHoverHighlight();
         shadow.innerHTML = '';

@@ -178,6 +178,7 @@ const activeTitle = activeFeature?.title || activeFeature?.name || '';
         isCapture={isCapture}
         onToggleCapture={toggleCapture}
         addNote={addNote}
+        notes={notesByWorktree[activePreview] ?? []}
       />
 
       {activePreview && (
