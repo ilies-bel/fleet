@@ -4,3 +4,5 @@
 RUN mkdir -p /home/developer \
  && chgrp 0 /home/developer \
  && chmod g+rwX /home/developer
+
+ENV HOME=/home/developer
