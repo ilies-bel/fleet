@@ -1,6 +1,6 @@
 import { inspectContainer } from './docker.js';
 import { writeFileSync, renameSync, readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
 /**
@@ -54,7 +54,7 @@ export function loadPersistedActive() {
 /**
  * @typedef {{ name: string, port: number }} ServiceEntry
  * @typedef {{ cluster: string, namespace: string }} HostDescriptor
- * @typedef {{ project: string, name: string, key: string, branch: string, worktreePath: string|null, title: string|null, host: HostDescriptor|null, addedAt: Date, status: string, error: string|null, services: ServiceEntry[] }} FeatureEntry
+ * @typedef {{ project: string, name: string, key: string, branch: string, worktreePath: string|null, gitDir: string|null, gitCommonDir: string|null, title: string|null, host: HostDescriptor|null, addedAt: Date, status: string, error: string|null, services: ServiceEntry[] }} FeatureEntry
  * @type {Map<string, FeatureEntry>}
  */
 const features = new Map();
@@ -198,7 +198,27 @@ export function parseFeatureHost(raw) {
 export function register(project, name, branch, worktreePath = null, status = 'up', services = [], title = null, error = null, host = null) {
   const key = `${project}-${name}`;
   const normalised = normaliseStatus(status);
-  features.set(key, { project, name, key, branch, worktreePath, title, host, addedAt: new Date(), status: normalised, error, services });
+
+  // Detect linked worktree: if worktreePath/.git is a file starting with "gitdir: ",
+  // resolve the per-worktree gitdir and the common gitdir (the main repo's .git/).
+  let gitDir = null;
+  let gitCommonDir = null;
+  if (worktreePath) {
+    try {
+      const gitFileContent = readFileSync(`${worktreePath}/.git`, 'utf8').trim();
+      if (gitFileContent.startsWith('gitdir: ')) {
+        const rel = gitFileContent.slice('gitdir: '.length).trim();
+        gitDir = resolvePath(worktreePath, rel);
+        // Standard layout: gitDir = /main/.git/worktrees/<name>
+        // so gitCommonDir = gitDir/../../ = /main/.git
+        gitCommonDir = resolvePath(gitDir, '..', '..');
+      }
+    } catch {
+      // Not a linked worktree or unreadable .git — leave null.
+    }
+  }
+
+  features.set(key, { project, name, key, branch, worktreePath, gitDir, gitCommonDir, title, host, addedAt: new Date(), status: normalised, error, services });
   if (activeFeature === null && normalised === 'up') {
     activeFeature = key;
     persistActive(key);

@@ -505,8 +505,11 @@ async function runRebuild(key) {
   // Step 2 — resolve paths
   const composeFile = path.join(FLEET_PROJECT_ROOT, '.fleet', key, 'docker-compose.yml');
 
-  // Extract image name from compose file (line like `    image: fleet-feature-base-myproject`)
+  // Extract image name and service name from compose file.
+  // image line looks like `    image: fleet-feature-base-myproject`
+  // service name is the first indented key under `services:`
   let imageName;
+  let composeServiceName;
   try {
     const composeContent = fs.readFileSync(composeFile, 'utf8');
     const imageMatch = composeContent.match(/^\s+image:\s+(.+)$/m);
@@ -514,9 +517,30 @@ async function runRebuild(key) {
       throw new Error(`No 'image:' line found in ${composeFile}`);
     }
     imageName = imageMatch[1].trim();
+    const serviceMatch = composeContent.match(/^services:\s*\n\s+(\S+):/m);
+    composeServiceName = serviceMatch ? serviceMatch[1] : null;
   } catch (err) {
     updateStatus(key, 'failed', `rebuild: could not read compose file: ${err.message}`);
     throw err;
+  }
+
+  // For linked-worktree features, write a compose override that mounts the git
+  // directories read-only so that `git diff main...HEAD` resolves inside the container.
+  const feature = getFeature(key);
+  const gitLinksOverrideFile = path.join(FLEET_PROJECT_ROOT, '.fleet', key, 'docker-compose.gitlinks.yml');
+  if (feature?.gitDir && feature?.gitCommonDir && composeServiceName) {
+    const overrideYaml = [
+      'services:',
+      `  ${composeServiceName}:`,
+      '    volumes:',
+      `      - ${feature.gitDir}:${feature.gitDir}:ro`,
+      `      - ${feature.gitCommonDir}:${feature.gitCommonDir}:ro`,
+      '',
+    ].join('\n');
+    fs.writeFileSync(gitLinksOverrideFile, overrideYaml, 'utf8');
+  } else {
+    // Remove any stale override from a previous registration
+    try { fs.unlinkSync(gitLinksOverrideFile); } catch { /* not present — fine */ }
   }
 
   // Resolve Dockerfile: project-local first, fallback to FLEET_ROOT
@@ -589,9 +613,12 @@ async function runRebuild(key) {
 
     // Step 5 — recreate container with new image
     log(`[rebuild] Recreating container via docker compose up -d...`);
-    await runCommand('docker', [
-      'compose', '-f', composeFile, 'up', '-d',
-    ]);
+    const composeArgs = ['compose', '-f', composeFile];
+    if (feature?.gitDir && feature?.gitCommonDir && composeServiceName && fs.existsSync(gitLinksOverrideFile)) {
+      composeArgs.push('-f', gitLinksOverrideFile);
+    }
+    composeArgs.push('up', '-d');
+    await runCommand('docker', composeArgs);
 
     // Step 6 — transition to starting
     updateStatus(key, 'starting', null);
