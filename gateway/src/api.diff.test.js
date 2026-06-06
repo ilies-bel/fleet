@@ -2,16 +2,15 @@
  * Tests for GET /_fleet/api/features/:key/diff
  *
  * Exercises the diff endpoint through a real Express HTTP server on an
- * ephemeral port. child_process.spawn is mocked so no real git binary
- * is invoked — we are testing the HTTP contract, not git itself.
+ * ephemeral port. dockerExec is mocked so no real Docker daemon or git
+ * binary is invoked — we are testing the HTTP contract, not git itself.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'http';
 import express from 'express';
-import { EventEmitter } from 'events';
 
-// ── mock child_process before importing api.js ────────────────────────────────
+// ── mock child_process before importing api.js (api.js uses spawn in other routes) ──
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
   execFile: vi.fn(),
@@ -55,8 +54,8 @@ vi.mock('./host-metrics.js', () => ({
 }));
 
 // ── import after mocks are in place ──────────────────────────────────────────
-import { spawn } from 'child_process';
 import { getFeature } from './registry.js';
+import { dockerExec } from './docker.js';
 import router from './api.js';
 
 // ── test server lifecycle ─────────────────────────────────────────────────────
@@ -85,29 +84,6 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ── helper: create a fake child process that emits stdout then closes ─────────
-
-/**
- * @param {{ stdout?: string, error?: Error }} opts
- */
-function makeChildProcess({ stdout = '', error = null } = {}) {
-  const child = new EventEmitter();
-  child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
-  child.kill = vi.fn();
-
-  setImmediate(() => {
-    if (error) {
-      child.emit('error', error);
-    } else {
-      if (stdout.length > 0) child.stdout.emit('data', Buffer.from(stdout));
-      child.emit('close', 0);
-    }
-  });
-
-  return child;
-}
-
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('GET /_fleet/api/features/:key/diff', () => {
@@ -128,7 +104,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       branch: 'feat',
     });
     const diffOutput = 'diff --git a/foo.js b/foo.js\n+added line\n';
-    spawn.mockImplementation(() => makeChildProcess({ stdout: diffOutput }));
+    dockerExec.mockResolvedValue(diffOutput);
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
@@ -140,35 +116,34 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body.originalBytes).toBe(diffOutput.length);
   });
 
-  it('returns { patch: "", isEmpty: true } when there are no changes', async () => {
+  it('returns { patch: "", isEmpty: true, truncated: false, originalBytes: 0 } when there are no changes', async () => {
     getFeature.mockReturnValue({
       key: 'app-clean',
       worktreePath: '/tmp/worktrees/app-clean',
       branch: 'clean',
     });
-    spawn.mockImplementation(() => makeChildProcess({ stdout: '' }));
+    dockerExec.mockResolvedValue('');
 
     const res = await fetch(`${baseUrl}/features/app-clean/diff`);
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.patch).toBe('');
-    expect(body.isEmpty).toBe(true);
+    expect(body).toEqual({ patch: '', isEmpty: true, truncated: false, originalBytes: 0 });
   });
 
-  it('invokes git with the three-dot merge-base syntax', async () => {
+  it('invokes dockerExec with --no-optional-locks and three-dot merge-base syntax', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
       worktreePath: '/opt/worktrees/app-feat',
       branch: 'feat',
     });
-    spawn.mockImplementation(() => makeChildProcess());
+    dockerExec.mockResolvedValue('');
 
     await fetch(`${baseUrl}/features/app-feat/diff`);
 
-    expect(spawn).toHaveBeenCalledWith(
-      'git',
-      ['-C', '/opt/worktrees/app-feat', 'diff', 'main...HEAD'],
+    expect(dockerExec).toHaveBeenCalledWith(
+      'fleet-app-feat',
+      ['git', '--no-optional-locks', '-C', '/app', 'diff', 'main...HEAD'],
     );
   });
 
@@ -186,15 +161,13 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body.error).toMatch(/worktree/i);
   });
 
-  it('returns 500 when git exits with an error', async () => {
+  it('returns 500 when dockerExec rejects', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
-    spawn.mockImplementation(() =>
-      makeChildProcess({ error: new Error('fatal: not a git repository') }),
-    );
+    dockerExec.mockRejectedValue(new Error('fatal: not a git repository'));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 

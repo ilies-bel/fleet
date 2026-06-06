@@ -756,12 +756,15 @@ router.post('/cluster/bootstrap', async (req, res) => {
 
 /**
  * GET /_fleet/api/features/:key/diff
- * Returns the git diff of the feature's worktree against the merge-base of
- * main and the feature branch (three-dot syntax: `git diff main...HEAD`).
+ * Returns the git diff of the feature branch against the merge-base of main,
+ * computed inside the feature's running container via Docker exec (three-dot
+ * syntax: `git diff main...HEAD`). The read-only `--no-optional-locks` flag
+ * ensures the index lock is never taken, so the command cannot collide with
+ * in-progress edits.
  *
  * Output is capped at DIFF_CAP_BYTES. When the underlying git output exceeds
- * the cap, the child is killed, the response carries `truncated: true`, and
- * `originalBytes` reflects how many bytes were streamed before the kill.
+ * the cap, the response carries `truncated: true` and `originalBytes` reflects
+ * the full byte count before truncation.
  *
  * Response: { patch: string, isEmpty: boolean, truncated: boolean, originalBytes: number }
  *   patch         — raw unified diff output (empty string when there are no changes)
@@ -771,15 +774,15 @@ router.post('/cluster/bootstrap', async (req, res) => {
  *
  * 404 — feature not registered
  * 422 — feature has no worktreePath (cluster-hosted features, for example)
- * 500 — git command failed
+ * 500 — git command or Docker exec failed
  */
 const DIFF_CAP_BYTES = 1_048_576;
 
-// Mutable shim so tests can swap out the git spawn without touching child_process.
-let _diffSpawnImpl = spawn;
+// Mutable shim so tests can swap out dockerExec without module mocking.
+let _dockerExecImpl = dockerExec;
 
-/** @internal — test seam, allows tests to replace the diff spawn without module mocking. */
-export function _setDiffSpawnImpl(fn) { _diffSpawnImpl = fn; }
+/** @internal — test seam, allows tests to replace the dockerExec implementation. */
+export function _setDockerExecImpl(fn) { _dockerExecImpl = fn; }
 
 router.get('/features/:key/diff', async (req, res) => {
   const { key } = req.params;
@@ -791,43 +794,28 @@ router.get('/features/:key/diff', async (req, res) => {
     return res.status(422).json({ error: 'Feature has no worktree path' });
   }
 
+  const containerName = `fleet-${key}`;
   try {
-    const result = await new Promise((resolve, reject) => {
-      const chunks = [];
-      let collected = 0;
-      let truncated = false;
-      let originalBytes = 0;
+    const output = await _dockerExecImpl(containerName, [
+      'git', '--no-optional-locks', '-C', '/app', 'diff', 'main...HEAD',
+    ]);
 
-      const child = _diffSpawnImpl('git', ['-C', feature.worktreePath, 'diff', 'main...HEAD']);
+    const rawBytes = Buffer.byteLength(output, 'utf8');
+    let patch;
+    let truncated = false;
 
-      child.stdout.on('data', (chunk) => {
-        originalBytes += chunk.length;
-        if (truncated) return; // draining after cap — discard, keep counting
-        const remaining = DIFF_CAP_BYTES - collected;
-        if (chunk.length <= remaining) {
-          chunks.push(chunk);
-          collected += chunk.length;
-        } else {
-          if (remaining > 0) chunks.push(chunk.slice(0, remaining));
-          collected = DIFF_CAP_BYTES;
-          truncated = true;
-          child.kill('SIGTERM');
-        }
-      });
-
-      child.on('error', reject);
-
-      child.on('close', () => {
-        const patch = Buffer.concat(chunks).toString('utf8');
-        resolve({ patch, truncated, originalBytes: truncated ? originalBytes : patch.length });
-      });
-    });
+    if (rawBytes > DIFF_CAP_BYTES) {
+      patch = Buffer.from(output, 'utf8').slice(0, DIFF_CAP_BYTES).toString('utf8');
+      truncated = true;
+    } else {
+      patch = output;
+    }
 
     res.json({
-      patch: result.patch,
-      isEmpty: result.patch.length === 0,
-      truncated: result.truncated,
-      originalBytes: result.originalBytes,
+      patch,
+      isEmpty: patch.length === 0,
+      truncated,
+      originalBytes: truncated ? rawBytes : patch.length,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
