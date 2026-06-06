@@ -21,6 +21,7 @@ import {
   startOperation,
   endOperation,
   listOperations,
+  listFailureClusters,
   getOperation,
   __resetPruneClock,
   __pruneCount,
@@ -174,6 +175,62 @@ describe('log-store', () => {
 
     const [op] = listOperations({ limit: 1 });
     assert.equal(op.reasonCode, 'build:failed');
+  });
+
+  test('listFailureClusters collapses 3 failed build rows with same reason_code to count=3', () => {
+    const err = new Error('docker socket gone');
+    err.reasonCode = 'docker:socket-unavailable';
+
+    const id1 = startOperation({ kind: 'build', key: 'proj-a' });
+    endOperation(id1, { outcome: 'failure', error: err });
+    const id2 = startOperation({ kind: 'build', key: 'proj-b' });
+    endOperation(id2, { outcome: 'failure', error: err });
+    const id3 = startOperation({ kind: 'build', key: 'proj-c' });
+    endOperation(id3, { outcome: 'failure', error: err });
+
+    const clusters = listFailureClusters({ sinceMs: Date.now() - 60_000 });
+
+    assert.equal(clusters.length, 1, 'should collapse to one cluster');
+    assert.equal(clusters[0].reasonCode, 'docker:socket-unavailable');
+    assert.equal(clusters[0].count, 3, 'count should be 3');
+    assert.ok(Array.isArray(clusters[0].sampleKeys), 'sampleKeys should be an array');
+    assert.ok(clusters[0].sampleKeys.length > 0, 'sampleKeys should contain instance keys');
+    assert.ok(clusters[0].lastSeenAt > 0, 'lastSeenAt should be a positive timestamp');
+  });
+
+  test('listFailureClusters excludes operations outside the time window', () => {
+    const err = new Error('old failure');
+    err.reasonCode = 'build:failed';
+
+    // Insert a failure that ended outside the window (old)
+    const rawDb = __getDb();
+    const oldEndedAt = Date.now() - 48 * 60 * 60 * 1000; // 48h ago
+    const oldId = Number(
+      rawDb
+        .prepare('INSERT INTO operations (kind, key, started_at, ended_at, outcome, reason_code) VALUES (?, ?, ?, ?, ?, ?)')
+        .run('build', 'old-proj', oldEndedAt - 1000, oldEndedAt, 'failure', 'build:failed').lastInsertRowid,
+    );
+
+    // Insert a fresh failure within the window
+    const freshId = startOperation({ kind: 'build', key: 'fresh-proj' });
+    const freshErr = new Error('fresh failure');
+    freshErr.reasonCode = 'build:failed';
+    endOperation(freshId, { outcome: 'failure', error: freshErr });
+
+    // Default 24h window — should exclude the 48h-old row
+    const clusters = listFailureClusters({ sinceMs: Date.now() - 24 * 60 * 60 * 1000 });
+    assert.equal(clusters.length, 1, 'only fresh cluster should appear');
+    assert.equal(clusters[0].count, 1, 'only the fresh failure counts');
+
+    void oldId; // prevent unused variable lint
+  });
+
+  test('listFailureClusters returns empty array when no failures exist', () => {
+    startOperation({ kind: 'activate', key: 'proj-ok' });
+    // No endOperation call — still in-flight, should be excluded
+
+    const clusters = listFailureClusters({ sinceMs: Date.now() - 60_000 });
+    assert.equal(clusters.length, 0);
   });
 
   test('getOperation returns null for unknown id', () => {

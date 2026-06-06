@@ -7,7 +7,7 @@ import { dockerExec, dockerLogs, stopContainer, startContainer, getContainerStat
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
 import { getHostMetrics } from './host-metrics.js';
-import { startOperation, endOperation, listOperations, getOperation } from './log-store.js';
+import { startOperation, endOperation, listOperations, listFailureClusters, getOperation } from './log-store.js';
 import { tagError, FAILURE_REASONS } from './failure-reasons.js';
 
 const router = Router();
@@ -78,6 +78,17 @@ router.post('/features/:key/activate', (req, res) => {
  */
 router.get('/operations', (_req, res) => {
   res.json(listOperations({ limit: 100 }));
+});
+
+/**
+ * GET /_fleet/api/operations/failures/clustered
+ * Returns failure clusters grouped by reason_code.
+ * ?sinceHours= (default 24) controls the look-back window.
+ */
+router.get('/operations/failures/clustered', (req, res) => {
+  const sinceHours = Number(req.query.sinceHours) || 24;
+  const sinceMs = Date.now() - sinceHours * 60 * 60 * 1000;
+  res.json(listFailureClusters({ sinceMs }));
 });
 
 /**

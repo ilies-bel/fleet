@@ -150,6 +150,34 @@ export function listOperations({ limit = 100 } = {}) {
 }
 
 /**
+ * Return failure clusters grouped by reason_code for the given look-back window.
+ * Rows with NULL ended_at (still in-flight) are excluded.
+ * @param {{ sinceMs?: number }} opts   sinceMs defaults to 24 h ago.
+ * @returns {Array<{reasonCode,count,lastSeenAt,sampleKeys}>}
+ */
+export function listFailureClusters({ sinceMs } = {}) {
+  const since = sinceMs ?? (Date.now() - 24 * 60 * 60 * 1000);
+  return db
+    .prepare(
+      `SELECT reason_code                  AS reasonCode,
+              COUNT(*)                     AS count,
+              MAX(ended_at)                AS lastSeenAt,
+              GROUP_CONCAT(DISTINCT key)   AS sampleKeys
+       FROM operations
+       WHERE outcome = 'failure' AND ended_at >= ?
+       GROUP BY reason_code
+       ORDER BY count DESC`,
+    )
+    .all(since)
+    .map(row => ({
+      reasonCode: row.reasonCode,
+      count: Number(row.count),
+      lastSeenAt: row.lastSeenAt,
+      sampleKeys: row.sampleKeys ? row.sampleKeys.split(',').slice(0, 5) : [],
+    }));
+}
+
+/**
  * Fetch a single operation by id.
  * @param {number} id
  * @returns {{id,kind,key,startedAt,endedAt,outcome,errorMessage,reasonCode} | null}

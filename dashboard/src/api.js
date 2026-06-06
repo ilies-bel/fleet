@@ -123,3 +123,13 @@ export function fetchOperations() {
 export function fetchOperation(id) {
   return request(`/_fleet/api/operations/${id}`);
 }
+
+/**
+ * Fetch failure clusters grouped by reason_code.
+ * @param {{ sinceHours?: number }} opts
+ * @returns {Promise<Array<{reasonCode,count,lastSeenAt,sampleKeys}>>}
+ */
+export function fetchFailureClusters({ sinceHours = 24 } = {}) {
+  const params = sinceHours !== 24 ? `?sinceHours=${sinceHours}` : '';
+  return request(`/_fleet/api/operations/failures/clustered${params}`);
+}

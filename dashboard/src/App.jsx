@@ -7,6 +7,7 @@ import PreviewFrame from './components/PreviewFrame.jsx';
 import LogPanel from './components/LogPanel.jsx';
 import ResourceMonitor from './components/ResourceMonitor.jsx';
 import OperationsList from './components/OperationsList.jsx';
+import FailureClusters from './components/FailureClusters.jsx';
 
 function NavBar({ onDrawerToggle, isNarrow }) {
   const linkStyle = ({ isActive }) => ({
@@ -175,6 +176,46 @@ const activeTitle = activeFeature?.title || activeFeature?.name || '';
   );
 }
 
+function OperationsPage() {
+  const [view, setView] = useState('recent');
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{
+        display: 'flex',
+        gap: '0.4rem',
+        padding: '0.4rem 1rem',
+        borderBottom: '1px solid #222',
+        background: '#000',
+        flexShrink: 0,
+      }}>
+        {[['recent', 'RECENT'], ['clusters', 'CLUSTERS']].map(([v, label]) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            aria-pressed={view === v}
+            style={{
+              background: view === v ? 'var(--color-accent)' : 'transparent',
+              border: '1px solid',
+              borderColor: view === v ? 'var(--color-accent)' : '#444',
+              color: view === v ? '#000' : 'var(--color-muted)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.65rem',
+              letterSpacing: '0.06em',
+              padding: '0.2rem 0.75rem',
+              borderRadius: '3px',
+              cursor: 'pointer',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === 'recent' ? <OperationsList /> : <FailureClusters />}
+    </div>
+  );
+}
+
 export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isNarrow, setIsNarrow] = useState(
@@ -215,7 +256,7 @@ export default function App() {
           />
         } />
         <Route path="/monitor" element={<ResourceMonitor />} />
-        <Route path="/operations" element={<OperationsList />} />
+        <Route path="/operations" element={<OperationsPage />} />
       </Routes>
     </div>
   );
