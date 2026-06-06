@@ -2,21 +2,18 @@
  * Tests for GET /_fleet/api/features/:key/diff
  *
  * Exercises the diff endpoint through a real Express HTTP server on an
- * ephemeral port. child_process.execFile is mocked so no real git binary
+ * ephemeral port. child_process.spawn is mocked so no real git binary
  * is invoked — we are testing the HTTP contract, not git itself.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'http';
 import express from 'express';
+import { EventEmitter } from 'events';
 
 // ── mock child_process before importing api.js ────────────────────────────────
 vi.mock('child_process', () => ({
-  spawn: vi.fn(() => ({
-    stdout: { on: vi.fn() },
-    stderr: { on: vi.fn() },
-    on: vi.fn(),
-  })),
+  spawn: vi.fn(),
   execFile: vi.fn(),
 }));
 
@@ -58,7 +55,7 @@ vi.mock('./host-metrics.js', () => ({
 }));
 
 // ── import after mocks are in place ──────────────────────────────────────────
-import { execFile } from 'child_process';
+import { spawn } from 'child_process';
 import { getFeature } from './registry.js';
 import router from './api.js';
 
@@ -88,6 +85,29 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+// ── helper: create a fake child process that emits stdout then closes ─────────
+
+/**
+ * @param {{ stdout?: string, error?: Error }} opts
+ */
+function makeChildProcess({ stdout = '', error = null } = {}) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = vi.fn();
+
+  setImmediate(() => {
+    if (error) {
+      child.emit('error', error);
+    } else {
+      if (stdout.length > 0) child.stdout.emit('data', Buffer.from(stdout));
+      child.emit('close', 0);
+    }
+  });
+
+  return child;
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('GET /_fleet/api/features/:key/diff', () => {
@@ -107,16 +127,17 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
-    execFile.mockImplementation((cmd, args, opts, cb) => {
-      cb(null, 'diff --git a/foo.js b/foo.js\n+added line\n', '');
-    });
+    const diffOutput = 'diff --git a/foo.js b/foo.js\n+added line\n';
+    spawn.mockImplementation(() => makeChildProcess({ stdout: diffOutput }));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.patch).toBe('diff --git a/foo.js b/foo.js\n+added line\n');
+    expect(body.patch).toBe(diffOutput);
     expect(body.isEmpty).toBe(false);
+    expect(body.truncated).toBe(false);
+    expect(body.originalBytes).toBe(diffOutput.length);
   });
 
   it('returns { patch: "", isEmpty: true } when there are no changes', async () => {
@@ -125,9 +146,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       worktreePath: '/tmp/worktrees/app-clean',
       branch: 'clean',
     });
-    execFile.mockImplementation((cmd, args, opts, cb) => {
-      cb(null, '', '');
-    });
+    spawn.mockImplementation(() => makeChildProcess({ stdout: '' }));
 
     const res = await fetch(`${baseUrl}/features/app-clean/diff`);
 
@@ -143,17 +162,13 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       worktreePath: '/opt/worktrees/app-feat',
       branch: 'feat',
     });
-    execFile.mockImplementation((cmd, args, opts, cb) => {
-      cb(null, '', '');
-    });
+    spawn.mockImplementation(() => makeChildProcess());
 
     await fetch(`${baseUrl}/features/app-feat/diff`);
 
-    expect(execFile).toHaveBeenCalledWith(
+    expect(spawn).toHaveBeenCalledWith(
       'git',
       ['-C', '/opt/worktrees/app-feat', 'diff', 'main...HEAD'],
-      expect.any(Object),
-      expect.any(Function),
     );
   });
 
@@ -177,9 +192,9 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
-    execFile.mockImplementation((cmd, args, opts, cb) => {
-      cb(new Error('fatal: not a git repository'), '', 'fatal: not a git repository');
-    });
+    spawn.mockImplementation(() =>
+      makeChildProcess({ error: new Error('fatal: not a git repository') }),
+    );
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 

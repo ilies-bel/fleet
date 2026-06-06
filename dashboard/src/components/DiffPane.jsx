@@ -64,6 +64,34 @@ const emptyStyle = {
   letterSpacing: '0.05em',
 };
 
+/** Format bytes as MB to one decimal place, e.g. 1048576 → "1.0 MB" */
+const formatMB = b => (b / 1_048_576).toFixed(1) + ' MB';
+
+/**
+ * Parse a unified diff patch, tolerating a truncated trailing hunk.
+ * If parseDiff throws (typically because the patch was cut mid-hunk),
+ * the trailing partial file is dropped by retrying on the patch up to
+ * the last `diff --git` boundary.
+ *
+ * @param {string} patch
+ * @returns {import('react-diff-view').File[]}
+ */
+function parseDiffRobust(patch) {
+  try {
+    return parseDiff(patch);
+  } catch {
+    const lastDiff = patch.lastIndexOf('\ndiff --git ');
+    if (lastDiff > 0) {
+      try {
+        return parseDiff(patch.slice(0, lastDiff));
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+}
+
 /**
  * Renders the full git diff of a feature against main as a polished
  * side-by-side diff using react-diff-view with syntax highlighting.
@@ -73,7 +101,8 @@ const emptyStyle = {
  *  - error   — getDiff rejected; the message is shown inline.
  *  - empty   — branch is identical to main (isEmpty: true, empty patch, or
  *              no parseable files): a centered terminal-style message is shown.
- *  - diff    — one DiffFile block per changed file.
+ *  - diff    — one DiffFile block per changed file, optionally preceded by a
+ *              truncation banner when the gateway capped the output.
  *
  * The fetch is cancellable: re-rendering with a new activeKey aborts the
  * stale in-flight call so its result can't clobber the fresh one.
@@ -84,12 +113,16 @@ export default function DiffPane({ activeKey }) {
   const [patch, setPatch] = useState(null);
   const [isEmpty, setIsEmpty] = useState(false);
   const [error, setError] = useState(null);
+  const [truncated, setTruncated] = useState(false);
+  const [originalBytes, setOriginalBytes] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
     setPatch(null);
     setIsEmpty(false);
+    setTruncated(false);
+    setOriginalBytes(0);
     getDiff(activeKey)
       .then(data => {
         if (cancelled) return;
@@ -97,6 +130,10 @@ export default function DiffPane({ activeKey }) {
           setIsEmpty(true);
         } else {
           setPatch(data.patch);
+          if (data.truncated) {
+            setTruncated(true);
+            setOriginalBytes(data.originalBytes ?? 0);
+          }
         }
       })
       .catch(e => { if (!cancelled) setError(e.message || String(e)); });
@@ -105,7 +142,7 @@ export default function DiffPane({ activeKey }) {
 
   const files = useMemo(() => {
     if (!patch) return [];
-    return parseDiff(patch);
+    return parseDiffRobust(patch);
   }, [patch]);
 
   if (error) {
@@ -144,6 +181,21 @@ export default function DiffPane({ activeKey }) {
 
   return (
     <div className="diff-pane">
+      {truncated && (
+        <div
+          className="diff-truncation-banner"
+          style={{
+            padding: '0.5rem 1rem',
+            background: '#332200',
+            color: '#ffaa00',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.75rem',
+            borderBottom: '1px solid #443300',
+          }}
+        >
+          {`// DIFF TRUNCATED — showing first ${formatMB(1_048_576)} of ${formatMB(originalBytes)}`}
+        </div>
+      )}
       {files.map(file => (
         <DiffFile
           key={(file.oldRevision ?? '') + (file.newRevision ?? '') + (file.newPath ?? file.oldPath ?? '')}

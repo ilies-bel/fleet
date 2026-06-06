@@ -1,4 +1,4 @@
-import { spawn, execFile } from 'child_process';
+import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
@@ -756,17 +756,31 @@ router.post('/cluster/bootstrap', async (req, res) => {
 
 /**
  * GET /_fleet/api/features/:key/diff
- * Returns the full git diff of the feature's worktree against the merge-base
- * of main and the feature branch (three-dot syntax: `git diff main...HEAD`).
+ * Returns the git diff of the feature's worktree against the merge-base of
+ * main and the feature branch (three-dot syntax: `git diff main...HEAD`).
  *
- * Response: { patch: string, isEmpty: boolean }
- *   patch    — raw unified diff output (empty string when there are no changes)
- *   isEmpty  — true when patch is the empty string
+ * Output is capped at DIFF_CAP_BYTES. When the underlying git output exceeds
+ * the cap, the child is killed, the response carries `truncated: true`, and
+ * `originalBytes` reflects how many bytes were streamed before the kill.
+ *
+ * Response: { patch: string, isEmpty: boolean, truncated: boolean, originalBytes: number }
+ *   patch         — raw unified diff output (empty string when there are no changes)
+ *   isEmpty       — true when patch is the empty string
+ *   truncated     — true when git output exceeded DIFF_CAP_BYTES
+ *   originalBytes — total bytes received; equals patch.length when not truncated
  *
  * 404 — feature not registered
  * 422 — feature has no worktreePath (cluster-hosted features, for example)
  * 500 — git command failed
  */
+const DIFF_CAP_BYTES = 1_048_576;
+
+// Mutable shim so tests can swap out the git spawn without touching child_process.
+let _diffSpawnImpl = spawn;
+
+/** @internal — test seam, allows tests to replace the diff spawn without module mocking. */
+export function _setDiffSpawnImpl(fn) { _diffSpawnImpl = fn; }
+
 router.get('/features/:key/diff', async (req, res) => {
   const { key } = req.params;
   const feature = getFeature(key);
@@ -778,18 +792,43 @@ router.get('/features/:key/diff', async (req, res) => {
   }
 
   try {
-    const patch = await new Promise((resolve, reject) => {
-      execFile(
-        'git',
-        ['-C', feature.worktreePath, 'diff', 'main...HEAD'],
-        { maxBuffer: 10 * 1024 * 1024 },
-        (err, stdout) => {
-          if (err) reject(err);
-          else resolve(stdout);
-        },
-      );
+    const result = await new Promise((resolve, reject) => {
+      const chunks = [];
+      let collected = 0;
+      let truncated = false;
+      let originalBytes = 0;
+
+      const child = _diffSpawnImpl('git', ['-C', feature.worktreePath, 'diff', 'main...HEAD']);
+
+      child.stdout.on('data', (chunk) => {
+        originalBytes += chunk.length;
+        if (truncated) return; // draining after cap — discard, keep counting
+        const remaining = DIFF_CAP_BYTES - collected;
+        if (chunk.length <= remaining) {
+          chunks.push(chunk);
+          collected += chunk.length;
+        } else {
+          if (remaining > 0) chunks.push(chunk.slice(0, remaining));
+          collected = DIFF_CAP_BYTES;
+          truncated = true;
+          child.kill('SIGTERM');
+        }
+      });
+
+      child.on('error', reject);
+
+      child.on('close', () => {
+        const patch = Buffer.concat(chunks).toString('utf8');
+        resolve({ patch, truncated, originalBytes: truncated ? originalBytes : patch.length });
+      });
     });
-    res.json({ patch, isEmpty: patch.length === 0 });
+
+    res.json({
+      patch: result.patch,
+      isEmpty: result.patch.length === 0,
+      truncated: result.truncated,
+      originalBytes: result.originalBytes,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
