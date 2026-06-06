@@ -109,6 +109,10 @@ export const INJECTED_PICKER = String.raw`(() => {
   let _hoverHandler = null;
   let _rafId = null;
 
+  // _marked holds {el, rect} pairs so reposition() can update each tint div's
+  // position whenever the viewport scrolls or the window resizes.
+  let _marked = [];
+
   function installHoverHighlight(shadow) {
     const hoverDiv = document.createElement('div');
     hoverDiv.id = 'mars-hover';
@@ -152,6 +156,19 @@ export const INJECTED_PICKER = String.raw`(() => {
       cancelAnimationFrame(_rafId);
       _rafId = null;
     }
+  }
+
+  // Walk _marked and write each element's current bounding rect into its tint
+  // div. Called once after the tint layer is built and registered as both the
+  // scroll (capture) and resize listeners so tints stay aligned on any viewport
+  // change.
+  function reposition() {
+    _marked.forEach(function(item) {
+      var r = item.el.getBoundingClientRect();
+      item.rect.style.transform = 'translate(' + r.left + 'px,' + r.top + 'px)';
+      item.rect.style.width = r.width + 'px';
+      item.rect.style.height = r.height + 'px';
+    });
   }
 
   function onCaptureClick(ev) {
@@ -214,18 +231,23 @@ export const INJECTED_PICKER = String.raw`(() => {
           let els;
           try { els = document.querySelectorAll(note.selector); } catch (_) { return; }
           Array.from(els).forEach(function(el) {
-            const rect = el.getBoundingClientRect();
             const d = document.createElement('div');
             d.style.cssText =
               'position:fixed;top:0;left:0;pointer-events:none;box-sizing:border-box;' +
-              'background:rgba(59,130,246,0.12);box-shadow:inset 0 0 0 1px rgba(59,130,246,0.35);' +
-              'transform:translate(' + rect.left + 'px,' + rect.top + 'px);' +
-              'width:' + rect.width + 'px;height:' + rect.height + 'px';
+              'background:rgba(59,130,246,0.12);box-shadow:inset 0 0 0 1px rgba(59,130,246,0.35)';
             noteTintLayer.appendChild(d);
+            _marked.push({ el: el, rect: d });
           });
         });
+        // Keep tints aligned to their elements on scroll and resize.
+        document.addEventListener('scroll', reposition, { capture: true, passive: true });
+        window.addEventListener('resize', reposition);
+        reposition();
       } else {
         uninstallHoverHighlight();
+        document.removeEventListener('scroll', reposition, { capture: true });
+        window.removeEventListener('resize', reposition);
+        _marked = [];
         shadow.innerHTML = '';
       }
     }
