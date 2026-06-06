@@ -28,3 +28,7 @@ _Avoid_: annotation, comment
 **capture mode**:
 A dashboard preview state in which clicks inside the previewed app are intercepted to record an element's selector as a review note instead of driving the app; off by default, marked on-screen, toggled from the UI or a keyboard shortcut.
 _Avoid_: picker mode, inspect mode
+
+**feature diff**:
+The set of changes in a feature's branch relative to main (git diff main...HEAD), computed read-only against the feature's own git metadata and shown in the dashboard DIFF tab.
+_Avoid_: patch, changeset
