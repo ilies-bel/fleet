@@ -7,15 +7,17 @@
  * via unregister() in beforeEach to stay isolated.
  */
 
-import { test, describe, beforeEach, after } from 'node:test';
+import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import os from 'node:os';
 import express from 'express';
 import cors from 'cors';
 
 import authRouter from './auth.js';
 import apiRouter from './api.js';
 import { getAll, unregister } from './registry.js';
+import { openLogStore, listOperations } from './log-store.js';
 
 // ── App factory ──────────────────────────────────────────────────────────────
 
@@ -276,5 +278,62 @@ describe('Build log endpoints', () => {
     const [l1, l2] = await Promise.all([p1, p2]);
     assert.deepEqual(l1, ['msg-a', 'msg-b']);
     assert.deepEqual(l2, ['msg-a', 'msg-b']);
+  });
+});
+
+// ── Rebuild operation logging ─────────────────────────────────────────────────
+
+describe('Rebuild operation logging', () => {
+  let srv;
+
+  before((t, done) => {
+    // Fresh SQLite file so operations from this suite are isolated.
+    process.env.FLEET_LOG_DB = `${os.tmpdir()}/fleet-rebuild-log-test-${process.pid}.db`;
+    openLogStore();
+    srv = buildApp().listen(0, '127.0.0.1', done);
+  });
+
+  after((t, done) => {
+    for (const f of getAll()) unregister(f.key);
+    if (srv) {
+      if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
+      srv.close(done);
+    } else {
+      done();
+    }
+  });
+
+  test('POST /rebuild records a build operation row; failure when env vars absent', async () => {
+    // Ensure runRebuild throws immediately (no FLEET_PROJECT_ROOT) so the test
+    // is fast and has no real docker dependency.
+    const savedRoot = process.env.FLEET_PROJECT_ROOT;
+    const savedFleet = process.env.FLEET_ROOT;
+    delete process.env.FLEET_PROJECT_ROOT;
+    delete process.env.FLEET_ROOT;
+
+    try {
+      const key = await registerFeature(srv, 'rebuild-log-check');
+
+      const res = await request(srv, {
+        method: 'POST',
+        path: `/_fleet/api/features/${key}/rebuild`,
+      });
+      assert.equal(res.status, 200);
+      assert.ok(res.body.ok, 'response should acknowledge the rebuild was started');
+
+      // Allow the async background operation (fast-failing promise) to settle.
+      await new Promise(r => setTimeout(r, 100));
+
+      const ops = listOperations({ limit: 10 });
+      assert.equal(ops.length, 1, 'exactly one operation row should be recorded');
+      assert.equal(ops[0].kind, 'build');
+      assert.equal(ops[0].key, key);
+      assert.equal(ops[0].outcome, 'failure');
+      assert.ok(ops[0].errorMessage, 'error_message should be set');
+      assert.ok(ops[0].endedAt > 0, 'ended_at should be populated');
+    } finally {
+      if (savedRoot !== undefined) process.env.FLEET_PROJECT_ROOT = savedRoot;
+      if (savedFleet !== undefined) process.env.FLEET_ROOT = savedFleet;
+    }
   });
 });

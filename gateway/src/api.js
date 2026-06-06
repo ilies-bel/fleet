@@ -418,9 +418,14 @@ router.post('/features/:key/rebuild', async (req, res) => {
 
   res.json({ ok: true, message: 'Rebuild started — check logs for progress' });
 
-  runRebuild(key).catch(err => {
-    console.error(`[rebuild] ${key}: ${err.message}`);
-  });
+  const opId = startOperation({ kind: 'build', key });
+  runRebuild(key).then(
+    () => endOperation(opId, { outcome: 'success' }),
+    (err) => {
+      endOperation(opId, { outcome: 'failure', error: err });
+      console.error(`[rebuild] ${key}: ${err.message}`);
+    },
+  );
 });
 
 /**
