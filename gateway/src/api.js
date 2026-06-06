@@ -350,11 +350,16 @@ router.post('/features/:key/sync', async (req, res) => {
   const regenerateSources = req.query.regenerateSources === 'true';
   const containerName = `fleet-${key}`;
 
+  const opId = startOperation({ kind: 'sync', key });
+
   res.json({ ok: true, message: 'Sync started — check logs for progress' });
 
-  runSync(containerName, regenerateSources).catch(err => {
-    console.error(`[sync] ${key}: ${err.message}`);
-  });
+  _runSyncImpl(containerName, regenerateSources)
+    .then(() => endOperation(opId, { outcome: 'success' }))
+    .catch(err => {
+      endOperation(opId, { outcome: 'failure', error: err });
+      console.error(`[sync] ${key}: ${err.message}`);
+    });
 });
 
 /**
@@ -393,6 +398,12 @@ async function runSync(containerName, regenerateSources) {
 
   await dockerExec(containerName, ['bash', '-c', steps.join(' && ')]);
 }
+
+// Mutable shim so tests can swap out runSync without touching Docker.
+let _runSyncImpl = runSync;
+
+/** @internal — test seam, allows tests to replace runSync without mocking docker. */
+export function _setRunSync(fn) { _runSyncImpl = fn; }
 
 /**
  * POST /_fleet/api/features/:key/rebuild
