@@ -1,7 +1,48 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { Diff, Hunk, parseDiff, tokenize } from 'react-diff-view';
+import 'react-diff-view/style/index.css';
 import { getDiff } from '../api.js';
+import { refractor, langFromPath } from './diffLanguage.js';
 
-const preStyle = {
+// react-diff-view v3's tokenize expects refractor.highlight() to return a children
+// array (refractor v3 behaviour). refractor v4 returns a full root node instead.
+// Adapt by unwrapping .children so createRoot() receives the correct shape.
+const r4Adapter = { highlight: (text, lang) => refractor.highlight(text, lang).children };
+
+function DiffFile({ file }) {
+  const tokens = useMemo(() => {
+    const lang = langFromPath(file.newPath || file.oldPath);
+    if (!lang) return undefined;
+    try {
+      return tokenize(file.hunks, { highlight: true, refractor: r4Adapter, language: lang });
+    } catch {
+      return undefined;
+    }
+  }, [file]);
+
+  const headerPath =
+    file.type === 'add'
+      ? file.newPath
+      : file.type === 'delete'
+      ? file.oldPath
+      : `${file.oldPath} → ${file.newPath}`;
+
+  return (
+    <section className="diff-file-block">
+      <header className="diff-file-header">{headerPath}</header>
+      <Diff
+        viewType="split"
+        diffType={file.type}
+        hunks={file.hunks}
+        tokens={tokens}
+      >
+        {hunks => hunks.map(hunk => <Hunk key={hunk.content} hunk={hunk} />)}
+      </Diff>
+    </section>
+  );
+}
+
+const loadingStyle = {
   flex: 1,
   margin: 0,
   padding: '1rem',
@@ -24,10 +65,18 @@ const emptyStyle = {
 };
 
 /**
- * Renders the full git diff of a feature against main inside a <pre> block.
- * When the branch is identical to main (isEmpty: true or patch is empty),
- * renders a centered terminal-style message instead.
- * Calls getDiff(activeKey) once on mount.
+ * Renders the full git diff of a feature against main as a polished
+ * side-by-side diff using react-diff-view with syntax highlighting.
+ *
+ * States:
+ *  - loading — getDiff(activeKey) is in flight.
+ *  - error   — getDiff rejected; the message is shown inline.
+ *  - empty   — branch is identical to main (isEmpty: true, empty patch, or
+ *              no parseable files): a centered terminal-style message is shown.
+ *  - diff    — one DiffFile block per changed file.
+ *
+ * The fetch is cancellable: re-rendering with a new activeKey aborts the
+ * stale in-flight call so its result can't clobber the fresh one.
  *
  * @param {{ activeKey: string }} props
  */
@@ -54,6 +103,11 @@ export default function DiffPane({ activeKey }) {
     return () => { cancelled = true; };
   }, [activeKey]);
 
+  const files = useMemo(() => {
+    if (!patch) return [];
+    return parseDiff(patch);
+  }, [patch]);
+
   if (error) {
     return (
       <div
@@ -74,13 +128,13 @@ export default function DiffPane({ activeKey }) {
 
   if (patch === null && !isEmpty) {
     return (
-      <pre style={{ ...preStyle, color: '#555' }}>
+      <pre style={{ ...loadingStyle, color: '#555' }}>
         Loading diff…
       </pre>
     );
   }
 
-  if (isEmpty) {
+  if (isEmpty || !files.length) {
     return (
       <div style={emptyStyle}>
         // NO CHANGES VS main
@@ -89,8 +143,13 @@ export default function DiffPane({ activeKey }) {
   }
 
   return (
-    <pre style={{ ...preStyle, color: '#ccc' }}>
-      {patch}
-    </pre>
+    <div className="diff-pane">
+      {files.map(file => (
+        <DiffFile
+          key={(file.oldRevision ?? '') + (file.newRevision ?? '') + (file.newPath ?? file.oldPath ?? '')}
+          file={file}
+        />
+      ))}
+    </div>
   );
 }

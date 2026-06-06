@@ -85,21 +85,27 @@ describe('PreviewFrame PREVIEW/DIFF tabs', () => {
     expect(getDiff).not.toHaveBeenCalled();
   });
 
-  // ── Patch text renders inside <pre> after fetch resolves ─────────────────
+  // ── Diff view renders after fetch resolves ───────────────────────────────
 
-  it('renders the patch text inside a <pre> element after getDiff resolves', async () => {
-    getDiff.mockResolvedValue({ patch: 'my unique patch content', isEmpty: false });
+  it('renders the diff-pane container after getDiff resolves with a valid patch', async () => {
+    const validPatch = [
+      'diff --git a/foo.js b/foo.js',
+      'index 1234567..abcdefg 100644',
+      '--- a/foo.js',
+      '+++ b/foo.js',
+      '@@ -1,2 +1,2 @@',
+      ' const x = 1;',
+      '-const y = 2;',
+      '+const y = 3;',
+    ].join('\n');
+    getDiff.mockResolvedValue({ patch: validPatch, isEmpty: false });
     renderFrame({ activePreview: 'app-feat', branch: 'feat', title: 'My Feature' });
 
     fireEvent.click(screen.getByText('[DIFF]'));
 
     await waitFor(() => {
-      expect(screen.getByText('my unique patch content')).toBeInTheDocument();
+      expect(document.querySelector('.diff-pane')).toBeInTheDocument();
     });
-    // Confirm it's inside a <pre>
-    const pre = document.querySelector('pre');
-    expect(pre).toBeInTheDocument();
-    expect(pre.textContent).toContain('my unique patch content');
   });
 
   // ── Switching back to PREVIEW restores the controls ───────────────────────

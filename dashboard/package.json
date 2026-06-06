@@ -10,9 +10,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "gitdiff-parser": "^0.3",
     "react": "^19.0.0",
+    "react-diff-view": "^3",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.14.0"
+    "react-router-dom": "^7.14.0",
+    "refractor": "^4"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

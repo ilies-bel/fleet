@@ -53,13 +53,23 @@ describe('DiffPane — empty state', () => {
 
   // ── isEmpty: false with real patch → normal render, no empty-state ────────
 
-  it('renders patch content and no empty-state message when getDiff returns a non-empty patch', async () => {
-    getDiff.mockResolvedValue({ patch: 'diff --git a/foo.js b/foo.js\n+added line', isEmpty: false });
+  it('renders the rich diff and no empty-state message when getDiff returns a non-empty patch', async () => {
+    const validPatch = [
+      'diff --git a/foo.js b/foo.js',
+      'index 1234567..abcdefg 100644',
+      '--- a/foo.js',
+      '+++ b/foo.js',
+      '@@ -1,2 +1,2 @@',
+      ' const x = 1;',
+      '-const y = 2;',
+      '+const y = 3;',
+    ].join('\n');
+    getDiff.mockResolvedValue({ patch: validPatch, isEmpty: false });
 
     render(<DiffPane activeKey="my-feature" />);
 
     await waitFor(() => {
-      expect(screen.getByText(/diff --git/)).toBeInTheDocument();
+      expect(document.querySelector('.diff-pane')).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/\/\/ NO CHANGES VS main/)).not.toBeInTheDocument();

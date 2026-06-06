@@ -104,6 +104,59 @@ input {
   }
 }
 
+/* ── Diff pane ─────────────────────────────────────────────────────────────── */
+
+/* Container: dark background, scrolls vertically inside the pane */
+.diff-pane {
+  flex: 1;
+  overflow: auto;
+  background: var(--color-bg);
+  font-size: 0.75rem;
+}
+
+/* Per-file section header */
+.diff-file-header {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  padding: 0.3rem 0.75rem;
+  background: #1a1a1a;
+  border-top: 1px solid #333;
+  border-bottom: 1px solid #333;
+  color: var(--color-accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-file-block:first-child .diff-file-header {
+  border-top: none;
+}
+
+/* Override react-diff-view's default light palette to match the dark dashboard */
+.diff-pane .diff {
+  width: 100%;
+  table-layout: fixed;
+  --diff-background-color: var(--color-bg);
+  --diff-text-color: #ccc;
+  --diff-font-family: var(--font-mono);
+  --diff-gutter-insert-background-color: #1a3324;
+  --diff-gutter-insert-text-color: #00cc66;
+  --diff-gutter-delete-background-color: #3a1a1a;
+  --diff-gutter-delete-text-color: #cc4444;
+  --diff-code-insert-background-color: #0d2018;
+  --diff-code-insert-text-color: #ccc;
+  --diff-code-delete-background-color: #2a0d0d;
+  --diff-code-delete-text-color: #ccc;
+  --diff-selection-background-color: #2a4060;
+}
+
+/* Prevent long lines from expanding the page horizontally; wrap within the cell */
+.diff-pane .diff-code {
+  word-break: break-all;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ── Button primitive ──────────────────────────────────────────────────────── */
 .btn {
   font-family: 'JetBrains Mono', monospace;
