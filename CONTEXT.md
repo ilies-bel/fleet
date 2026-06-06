@@ -20,3 +20,7 @@ _Avoid_: run, workflow_run
 
 **failure-reason clustering**:
 Grouping of failed operations by their curated reason code, so repeated failures of the same cause surface as one cluster rather than many separate entries in the Fleet log UI.
+
+**review note**:
+An improvement jotted against the active feature while previewing it: a captured CSS selector (or none) plus free text, scoped to a feature and the page route it was captured on, persisted client-side until the operator deletes it.
+_Avoid_: annotation, comment
