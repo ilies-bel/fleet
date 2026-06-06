@@ -100,7 +100,28 @@ function buildInjectionProxy(upstreamUrl) {
 
         res.end = (chunk) => {
           if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-          const modified = injectPickerScript(Buffer.concat(chunks).toString('utf8'));
+          let rawBuf = Buffer.concat(chunks);
+
+          // Mirror the production decompression guard: if the upstream ignored the
+          // identity hint and sent compressed bytes, decompress before injecting.
+          const contentEncoding = (proxyRes.headers['content-encoding'] || '').toLowerCase().trim();
+          if (contentEncoding === 'gzip' || contentEncoding === 'deflate' || contentEncoding === 'br') {
+            try {
+              if (contentEncoding === 'gzip') rawBuf = zlib.gunzipSync(rawBuf);
+              else if (contentEncoding === 'br') rawBuf = zlib.brotliDecompressSync(rawBuf);
+              else rawBuf = zlib.inflateSync(rawBuf);
+              res.removeHeader('content-encoding');
+            } catch (err) {
+              console.warn('[test-proxy] decompression failed, passing body through unmodified:', err.message);
+              res.removeHeader('transfer-encoding');
+              res.setHeader('content-length', rawBuf.byteLength);
+              res.write = origWrite;
+              res.end = origEnd;
+              return res.end(rawBuf);
+            }
+          }
+
+          const modified = injectPickerScript(rawBuf.toString('utf8'));
           const buf = Buffer.from(modified, 'utf8');
           res.removeHeader('transfer-encoding');
           res.setHeader('content-length', buf.byteLength);
@@ -248,6 +269,149 @@ describe('proxy injection — HTML and non-HTML responses', () => {
             );
             const tag = `<script>${INJECTED_PICKER}</script>`;
             assert.ok(body.includes(tag), 'proxied HTML must contain the injected picker script tag');
+            done();
+          });
+        }).on('error', done);
+      });
+    });
+  });
+
+  // Defense-in-depth tests: upstream ignores the accept-encoding: identity hint.
+  //
+  // The proxyReq hook in both production and the test helper sets identity, but
+  // a misconfigured nginx (gzip_static on, precompressed assets) or a CDN cache
+  // may serve gzip/brotli regardless.  The proxyRes hook must decompress before
+  // injection so the browser gets valid HTML, not compressed bytes.
+
+  test('upstream gzips despite identity hint: proxy decompresses, injects, strips content-encoding', (_t, done) => {
+    const rawBody = '<html><body><h1>Stubborn Gzip App</h1></body></html>';
+
+    // Upstream ALWAYS gzips — ignores accept-encoding: identity.
+    upstream = http.createServer((_req, res) => {
+      zlib.gzip(Buffer.from(rawBody, 'utf8'), (err, compressed) => {
+        if (err) { res.writeHead(500); res.end(); return; }
+        res.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-encoding': 'gzip',
+          'content-length': compressed.byteLength,
+        });
+        res.end(compressed);
+      });
+    });
+
+    upstream.listen(0, '127.0.0.1', () => {
+      const { port: upstreamPort } = upstream.address();
+      const app = express();
+      app.use(buildInjectionProxy(`http://127.0.0.1:${upstreamPort}`));
+      gateway = app.listen(0, '127.0.0.1', () => {
+        const { port: gwPort } = gateway.address();
+        http.get(`http://127.0.0.1:${gwPort}/`, (res) => {
+          assert.equal(res.statusCode, 200);
+          // Proxy re-serves body uncompressed — content-encoding must be absent.
+          assert.ok(
+            !res.headers['content-encoding'],
+            'content-encoding must be removed after proxy decompresses'
+          );
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            const body = Buffer.concat(chunks).toString('utf8');
+            assert.ok(
+              !body.includes('�'),
+              'body must not contain U+FFFD — proxy must decompress before decoding'
+            );
+            const tag = `<script>${INJECTED_PICKER}</script>`;
+            assert.ok(body.includes(tag), 'picker script must be injected into decompressed HTML');
+            assert.ok(body.includes('Stubborn Gzip App'), 'original HTML content must be preserved');
+            done();
+          });
+        }).on('error', done);
+      });
+    });
+  });
+
+  test('upstream sends brotli despite identity hint: proxy decompresses, injects, strips content-encoding', (_t, done) => {
+    const rawBody = '<html><body><h1>Brotli App</h1></body></html>';
+
+    // Upstream ALWAYS brotli-encodes — ignores accept-encoding: identity.
+    upstream = http.createServer((_req, res) => {
+      zlib.brotliCompress(Buffer.from(rawBody, 'utf8'), (err, compressed) => {
+        if (err) { res.writeHead(500); res.end(); return; }
+        res.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-encoding': 'br',
+          'content-length': compressed.byteLength,
+        });
+        res.end(compressed);
+      });
+    });
+
+    upstream.listen(0, '127.0.0.1', () => {
+      const { port: upstreamPort } = upstream.address();
+      const app = express();
+      app.use(buildInjectionProxy(`http://127.0.0.1:${upstreamPort}`));
+      gateway = app.listen(0, '127.0.0.1', () => {
+        const { port: gwPort } = gateway.address();
+        http.get(`http://127.0.0.1:${gwPort}/`, (res) => {
+          assert.equal(res.statusCode, 200);
+          assert.ok(
+            !res.headers['content-encoding'],
+            'content-encoding must be removed after proxy decompresses brotli'
+          );
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            const body = Buffer.concat(chunks).toString('utf8');
+            assert.ok(
+              !body.includes('�'),
+              'body must not contain U+FFFD — proxy must brotli-decompress before decoding'
+            );
+            const tag = `<script>${INJECTED_PICKER}</script>`;
+            assert.ok(body.includes(tag), 'picker script must be injected into brotli-decompressed HTML');
+            assert.ok(body.includes('Brotli App'), 'original HTML content must be preserved');
+            done();
+          });
+        }).on('error', done);
+      });
+    });
+  });
+
+  test('corrupt gzip body from upstream: proxy passes original bytes through without injecting script', (_t, done) => {
+    // Gzip magic header + garbage — gunzipSync will throw.
+    const corruptGzip = Buffer.from([0x1f, 0x8b, 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef, 0x00, 0x00]);
+
+    upstream = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-encoding': 'gzip',
+        'content-length': corruptGzip.byteLength,
+      });
+      res.end(corruptGzip);
+    });
+
+    upstream.listen(0, '127.0.0.1', () => {
+      const { port: upstreamPort } = upstream.address();
+      const app = express();
+      app.use(buildInjectionProxy(`http://127.0.0.1:${upstreamPort}`));
+      gateway = app.listen(0, '127.0.0.1', () => {
+        const { port: gwPort } = gateway.address();
+        http.get(`http://127.0.0.1:${gwPort}/`, (res) => {
+          // Proxy must not crash — it must respond.
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            const body = Buffer.concat(chunks);
+            // Proxy must pass original bytes through unchanged (no injection into garbage).
+            assert.deepStrictEqual(
+              body,
+              corruptGzip,
+              'corrupt compressed body must be passed through byte-for-byte without modification'
+            );
+            // Picker script must NOT be injected into corrupt bytes.
+            assert.ok(
+              !body.includes(Buffer.from('<script>')),
+              'proxy must not inject script tag into corrupt compressed body'
+            );
             done();
           });
         }).on('error', done);

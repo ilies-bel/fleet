@@ -1,3 +1,4 @@
+import zlib from 'node:zlib';
 import { createProxyMiddleware, debugProxyErrorsPlugin, proxyEventsPlugin } from 'http-proxy-middleware';
 import { getActiveFeature, getContainerStatus, getFeature, updateStatus } from './registry.js';
 import { getLocalPort } from './cluster/port-forward.js';
@@ -119,7 +120,35 @@ export function createFeatureProxy() {
 
         res.end = (chunk) => {
           if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-          const modified = injectPickerScript(Buffer.concat(chunks).toString('utf8'));
+          let rawBuf = Buffer.concat(chunks);
+
+          // Defense-in-depth: decompress if the upstream ignored the identity hint
+          // (e.g. nginx gzip_static, a cached precompressed response, or brotli).
+          // Without this, .toString('utf8') on compressed bytes produces U+FFFD corruption
+          // while leaving content-encoding in place — the browser then fails to decompress.
+          const contentEncoding = (proxyRes.headers['content-encoding'] || '').toLowerCase().trim();
+          if (contentEncoding === 'gzip' || contentEncoding === 'deflate' || contentEncoding === 'br') {
+            try {
+              if (contentEncoding === 'gzip') rawBuf = zlib.gunzipSync(rawBuf);
+              else if (contentEncoding === 'br') rawBuf = zlib.brotliDecompressSync(rawBuf);
+              else rawBuf = zlib.inflateSync(rawBuf); // deflate
+              // Body is now plain text — remove the encoding header so the browser
+              // does not attempt to decompress what is already decompressed.
+              res.removeHeader('content-encoding');
+            } catch (err) {
+              // Decompression failed (corrupt body, truncated stream, wrong encoding).
+              // Pass the original buffer through without injection to avoid emitting
+              // UTF-8 garbage decoded from binary compressed bytes.
+              console.warn('[gateway] proxyRes: decompression failed, passing body through unmodified:', err.message);
+              res.removeHeader('transfer-encoding');
+              res.setHeader('content-length', rawBuf.byteLength);
+              res.write = origWrite;
+              res.end = origEnd;
+              return res.end(rawBuf);
+            }
+          }
+
+          const modified = injectPickerScript(rawBuf.toString('utf8'));
           const buf = Buffer.from(modified, 'utf8');
           // Switch from chunked to fixed-length so the browser sees the right size.
           res.removeHeader('transfer-encoding');
