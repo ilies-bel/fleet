@@ -31,7 +31,7 @@ export function createBackendProxy() {
       const resolved = await resolveTarget();
       if (!resolved.ok) return undefined;
       req._fleetFeature = resolved.key;
-      return `http://fleet-${resolved.key}:80`;
+      return `http://fleet-${resolved.key}:8000`;
     },
     changeOrigin: true,
     ejectPlugins: true,

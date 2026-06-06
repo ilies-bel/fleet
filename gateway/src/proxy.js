@@ -203,7 +203,7 @@ export async function resolveTarget({ getPort = getLocalPort } = {}) {
     if (feature && feature.status !== 'up') {
       updateStatus(selected, 'up', null);
     }
-    return { ok: true, key: selected, url: `http://fleet-${selected}:80` };
+    return { ok: true, key: selected, url: `http://fleet-${selected}:8000` };
   }
   // Sync registry so the dashboard reflects reality.
   // Guard against the TOCTOU race: `selected` was captured at the top of
