@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import './ReviewNotesPanel.css';
 
 /**
@@ -5,15 +6,36 @@ import './ReviewNotesPanel.css';
  *
  * Lists all review notes for the active worktree, grouped by route.
  * Notes without a route (general notes) appear under a "General" section.
+ * Provides an "Add general note" composer that works without capture mode.
  *
- * @param {{ notes: Array, worktree: string|null, removeNote: Function, clearForWorktree: Function }} props
+ * @param {{ notes: Array, worktree: string|null, addNote: Function, removeNote: Function, clearForWorktree: Function }} props
  */
-export default function ReviewNotesPanel({ notes, worktree, removeNote, clearForWorktree }) {
+export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote, clearForWorktree }) {
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerText, setComposerText] = useState('');
+
   function handleClearAll() {
     if (!worktree) return;
     if (window.confirm('Clear all review notes for this feature?')) {
       clearForWorktree(worktree);
     }
+  }
+
+  function handleSave() {
+    if (!composerText.trim()) return;
+    addNote(worktree, {
+      refKind: 'general',
+      selector: null,
+      route: null,
+      text: composerText.trim(),
+    });
+    setComposerText('');
+    setComposerOpen(false);
+  }
+
+  function handleCancel() {
+    setComposerText('');
+    setComposerOpen(false);
   }
 
   // Group notes by route; notes without a route go under 'General'.
@@ -82,6 +104,40 @@ export default function ReviewNotesPanel({ notes, worktree, removeNote, clearFor
             </div>
           ))
         )}
+
+        <div className="review-notes-panel__composer">
+          {composerOpen ? (
+            <>
+              <textarea
+                className="review-notes-panel__composer-textarea"
+                value={composerText}
+                onChange={e => setComposerText(e.target.value)}
+                placeholder="Add a general note…"
+              />
+              <div className="review-notes-panel__composer-actions">
+                <button
+                  className="review-notes-panel__composer-save"
+                  onClick={handleSave}
+                >
+                  Save
+                </button>
+                <button
+                  className="review-notes-panel__composer-cancel"
+                  onClick={handleCancel}
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              className="review-notes-panel__add-btn"
+              onClick={() => setComposerOpen(true)}
+            >
+              Add general note
+            </button>
+          )}
+        </div>
       </div>
     </aside>
   );
