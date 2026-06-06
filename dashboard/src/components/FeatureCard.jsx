@@ -156,7 +156,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
               flexShrink: 0,
               animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
             }}>
-              {presentation.dotLabel}
+              {'●'}
             </span>
           )}
           <span style={{

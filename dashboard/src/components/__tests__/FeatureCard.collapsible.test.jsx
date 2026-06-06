@@ -85,12 +85,22 @@ describe('FeatureCard — collapsible', () => {
     expect(toggle.tagName).toBe('BUTTON');
   });
 
-  // ── Compact header shows lifecycle status when collapsed ──────────────────
+  // ── Collapsed header: dot only, no status word ───────────────────────────
 
-  it('compact header shows the lifecycle status label when collapsed', () => {
+  it('collapsed header shows only the dot glyph, not the status word', () => {
     renderCard({ status: 'building', title: undefined });
     fireEvent.click(screen.getByRole('button', { name: /collapse alpha/i }));
-    // status chip is visible in the compact header
-    expect(screen.getByText(/● BUILDING/)).toBeInTheDocument();
+    // (a) status word must NOT be present
+    expect(screen.queryByText(/BUILDING/)).not.toBeInTheDocument();
+    // (a) colored dot IS present
+    expect(screen.getByText('●')).toBeInTheDocument();
+  });
+
+  // ── Expanded body: full status label visible ──────────────────────────────
+
+  it('expanded body shows the full status label including the status word', () => {
+    renderCard({ status: 'building', title: undefined });
+    // card is expanded by default — full label must be present
+    expect(screen.getByText(/● BUILDING/i)).toBeInTheDocument();
   });
 });
