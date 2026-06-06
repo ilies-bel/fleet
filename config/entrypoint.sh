@@ -108,7 +108,7 @@ if [ "${NEEDS_DB}" = "true" ]; then
   cat >> "${SUPERVISORD_CONF}" <<SUPEREOF
 
 [program:postgresql]
-command=/usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main
+command=/usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main -k /tmp
 autostart=true
 autorestart=true
 priority=10
