@@ -1,6 +1,23 @@
 import { createProxyMiddleware, debugProxyErrorsPlugin, proxyEventsPlugin } from 'http-proxy-middleware';
 import { getActiveFeature, getContainerStatus, getFeature, updateStatus } from './registry.js';
 import { getLocalPort } from './cluster/port-forward.js';
+import { INJECTED_PICKER } from './injected-picker.js';
+
+/**
+ * Insert the picker bootstrap <script> tag before </body>, or append it at the
+ * end of the document when </body> is absent (some apps omit closing tags).
+ *
+ * Exported so tests can verify the HTML transformation without spinning up a
+ * full feature registry.  Called from the proxyRes hook inside createFeatureProxy.
+ *
+ * @param {string} html  Full HTML document string.
+ * @returns {string}     Modified HTML with the picker script injected.
+ */
+export function injectPickerScript(html) {
+  const tag = `<script>${INJECTED_PICKER}</script>`;
+  const idx = html.indexOf('</body>');
+  return idx !== -1 ? html.slice(0, idx) + tag + html.slice(idx) : html + tag;
+}
 
 /**
  * Thrown by resolveTarget when a cluster feature has no active port-forward.
@@ -67,13 +84,43 @@ export function createFeatureProxy() {
       proxyReq: (proxyReq, req) => {
         if (req._fleetFeature) proxyReq.setHeader('X-Fleet-Feature', req._fleetFeature);
       },
-      proxyRes: (proxyRes) => {
+      proxyRes: (proxyRes, _req, res) => {
         // Prevent browser from caching responses across feature switches
         proxyRes.headers['cache-control'] = 'no-store';
         delete proxyRes.headers['etag'];
         delete proxyRes.headers['last-modified'];
         // Allow the dashboard to iframe this response and inject the picker script
         stripFramingHeaders(proxyRes.headers);
+
+        // Buffer text/html responses and inject the picker bootstrap script.
+        // Non-HTML responses are passed through untouched.
+        const contentType = proxyRes.headers['content-type'] || '';
+        if (!contentType.startsWith('text/html')) return;
+
+        // Headers are already copied to res by http-proxy's setHeaders pass, but
+        // writeHead hasn't fired yet (that's implicit on first res.write/end call).
+        // Remove content-length; we recompute it after injection.
+        res.removeHeader('content-length');
+        const chunks = [];
+        const origWrite = res.write.bind(res);
+        const origEnd = res.end.bind(res);
+
+        res.write = (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          return true;
+        };
+
+        res.end = (chunk) => {
+          if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          const modified = injectPickerScript(Buffer.concat(chunks).toString('utf8'));
+          const buf = Buffer.from(modified, 'utf8');
+          // Switch from chunked to fixed-length so the browser sees the right size.
+          res.removeHeader('transfer-encoding');
+          res.setHeader('content-length', buf.byteLength);
+          res.write = origWrite;
+          res.end = origEnd;
+          return res.end(buf);
+        };
       },
       error: (_err, _req, resOrSocket) => {
         // For WebSocket upgrades, http-proxy passes the raw net.Socket here
