@@ -5,7 +5,8 @@
  * startOperation  — record the start of an operation; returns the row id.
  * endOperation    — update outcome/ended_at/reason_code for a previously started row.
  * listOperations  — query recent rows in camelCase form.
- * getOperation    — fetch a single row by id, or null if not found.
+ * appendEvent     — append a timestamped event to an operation's timeline.
+ * getOperation    — return an operation row (incl. reasonCode) plus its events array, or null if not found.
  */
 
 import Database from 'better-sqlite3';
@@ -49,15 +50,18 @@ export function openLogStore() {
       error_message TEXT,
       reason_code   TEXT
     );
+    CREATE INDEX IF NOT EXISTS idx_operations_started_at
+      ON operations(started_at DESC);
     CREATE TABLE IF NOT EXISTS operation_events (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       operation_id INTEGER NOT NULL,
       ts           INTEGER NOT NULL,
-      type         TEXT    NOT NULL,
-      data         TEXT
+      level        TEXT,
+      message      TEXT,
+      FOREIGN KEY(operation_id) REFERENCES operations(id)
     );
-    CREATE INDEX IF NOT EXISTS idx_operations_started_at
-      ON operations(started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_op_events_op_ts
+      ON operation_events(operation_id, ts ASC);
   `);
 
   // Forward-compatible migration: add reason_code to databases created before
@@ -177,20 +181,6 @@ export function listFailureClusters({ sinceMs } = {}) {
     }));
 }
 
-/**
- * Fetch a single operation by id.
- * @param {number} id
- * @returns {{id,kind,key,startedAt,endedAt,outcome,errorMessage,reasonCode} | null}
- */
-export function getOperation(id) {
-  const row = db
-    .prepare(
-      'SELECT id, kind, key, started_at, ended_at, outcome, error_message, reason_code FROM operations WHERE id = ?',
-    )
-    .get(id);
-  return row ? rowToOperation(row) : null;
-}
-
 /** @internal — resets prune rate-limit clock and counter; call in test beforeEach. */
 export function __resetPruneClock() {
   lastPruneAt = 0;
@@ -200,4 +190,48 @@ export function __resetPruneClock() {
 /** @internal — returns the raw DB handle; test use only. */
 export function __getDb() {
   return db;
+}
+
+/**
+ * Append a timestamped event to an operation's timeline.
+ * @param {number} operationId  The id returned by startOperation.
+ * @param {{ message: string, level?: string }} opts
+ */
+export function appendEvent(operationId, { message, level = 'info' } = {}) {
+  db
+    .prepare(
+      'INSERT INTO operation_events (operation_id, ts, level, message) VALUES (?, ?, ?, ?)',
+    )
+    .run(operationId, Date.now(), level, message);
+}
+
+/**
+ * Return an operation row (including reasonCode) plus its events ordered by ts ASC.
+ * Returns null if the operation does not exist.
+ * @param {number} id
+ * @returns {{ operation: {id,kind,key,startedAt,endedAt,outcome,errorMessage,reasonCode}, events: Array<{id,ts,level,message}> } | null}
+ */
+export function getOperation(id) {
+  const row = db
+    .prepare(
+      `SELECT id, kind, key, started_at, ended_at, outcome, error_message, reason_code
+       FROM operations WHERE id = ?`,
+    )
+    .get(id);
+
+  if (!row) return null;
+
+  const events = db
+    .prepare(
+      `SELECT id, ts, level, message
+       FROM operation_events
+       WHERE operation_id = ?
+       ORDER BY ts ASC, id ASC`,
+    )
+    .all(id);
+
+  return {
+    operation: rowToOperation(row),
+    events: events.map(e => ({ id: e.id, ts: e.ts, level: e.level, message: e.message })),
+  };
 }

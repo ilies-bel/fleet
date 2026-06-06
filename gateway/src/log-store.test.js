@@ -22,6 +22,7 @@ import {
   endOperation,
   listOperations,
   listFailureClusters,
+  appendEvent,
   getOperation,
   __resetPruneClock,
   __pruneCount,
@@ -238,15 +239,64 @@ describe('log-store', () => {
     assert.equal(op, null);
   });
 
-  test('getOperation returns a single operation by id including reasonCode', () => {
+  test('getOperation returns the operation (including reasonCode) plus its events', () => {
     const id = startOperation({ kind: 'activate', key: 'proj-feat' });
     const err = new DockerSocketError('socket gone');
     endOperation(id, { outcome: 'failure', error: err });
 
-    const op = getOperation(id);
-    assert.ok(op !== null, 'getOperation should return the row');
-    assert.equal(op.id, id);
-    assert.equal(op.kind, 'activate');
-    assert.equal(op.reasonCode, 'docker:socket-unavailable');
+    const result = getOperation(id);
+    assert.ok(result !== null, 'getOperation should return the row');
+    assert.equal(result.operation.id, id);
+    assert.equal(result.operation.kind, 'activate');
+    assert.equal(result.operation.reasonCode, 'docker:socket-unavailable');
+    assert.ok(Array.isArray(result.events), 'events should be an array');
+  });
+
+  test('appendEvent + getOperation round-trip: events are retrievable ordered by ts ASC', () => {
+    const id = startOperation({ kind: 'sync', key: 'proj-feat' });
+    appendEvent(id, { message: 'sync started' });
+    appendEvent(id, { message: 'running build', level: 'info' });
+    appendEvent(id, { message: 'sync complete' });
+    endOperation(id, { outcome: 'success' });
+
+    const result = getOperation(id);
+
+    assert.ok(result !== null, 'getOperation should return a result');
+    assert.equal(result.operation.id, id);
+    assert.equal(result.operation.kind, 'sync');
+    assert.equal(result.operation.key, 'proj-feat');
+    assert.equal(result.operation.outcome, 'success');
+
+    assert.equal(result.events.length, 3, 'three events should be stored');
+
+    const [first, second, third] = result.events;
+    assert.equal(first.message, 'sync started');
+    assert.equal(second.message, 'running build');
+    assert.equal(third.message, 'sync complete');
+
+    // Ordered by ts ASC — each event's ts should be >= the previous
+    assert.ok(first.ts <= second.ts, 'events should be in ASC timestamp order');
+    assert.ok(second.ts <= third.ts, 'events should be in ASC timestamp order');
+
+    // level defaults to 'info' when not specified
+    assert.equal(first.level, 'info');
+    assert.equal(second.level, 'info');
+  });
+
+  test('getOperation returns empty events array for an operation with no events', () => {
+    const id = startOperation({ kind: 'activate', key: 'proj-x' });
+    const result = getOperation(id);
+
+    assert.ok(result !== null);
+    assert.equal(result.events.length, 0, 'no events appended — events array should be empty');
+  });
+
+  test('appendEvent supports custom level values', () => {
+    const id = startOperation({ kind: 'activate', key: 'proj-y' });
+    appendEvent(id, { message: 'warning message', level: 'warn' });
+
+    const result = getOperation(id);
+    assert.equal(result.events[0].level, 'warn');
+    assert.equal(result.events[0].message, 'warning message');
   });
 });

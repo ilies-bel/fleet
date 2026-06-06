@@ -4,8 +4,11 @@ import { fetchOperations } from '../api.js';
 /**
  * Renders a table of recent gateway operations (activate events etc.)
  * polled from GET /_fleet/api/operations every 5 s.
+ *
+ * @param {{ onSelect?: (id: number) => void }} props
+ *   onSelect — called with the operation id when a row is clicked.
  */
-export default function OperationsList() {
+export default function OperationsList({ onSelect }) {
   const [operations, setOperations] = useState([]);
 
   useEffect(() => {
@@ -40,7 +43,14 @@ export default function OperationsList() {
         </thead>
         <tbody>
           {operations.map(op => (
-            <tr key={op.id} style={{ borderBottom: '1px solid #1a1a1a' }}>
+            <tr
+              key={op.id}
+              onClick={onSelect ? () => onSelect(op.id) : undefined}
+              style={{
+                borderBottom: '1px solid #1a1a1a',
+                cursor: onSelect ? 'pointer' : 'default',
+              }}
+            >
               <td style={tdStyle}>{op.kind}</td>
               <td style={tdStyle}>{op.key}</td>
               <td style={tdStyle}>{op.startedAt ? new Date(op.startedAt).toISOString() : '—'}</td>

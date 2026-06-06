@@ -2,98 +2,144 @@ import { useState, useEffect } from 'react';
 import { fetchOperation } from '../api.js';
 
 /**
- * Renders a detail view for a single gateway operation, fetched by id.
+ * Renders the header and full event timeline for a single operation.
  * Prominently surfaces the reasonCode when the operation failed.
  *
- * @param {{ operationId: number | null }} props
+ * @param {{ id: number, onBack: () => void }} props
  */
-export default function OperationDetail({ operationId }) {
-  const [op, setOp] = useState(null);
+export default function OperationDetail({ id, onBack }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!operationId) { setOp(null); return; }
-    fetchOperation(operationId)
-      .then(setOp)
-      .catch(() => {/* gateway may be starting */});
-  }, [operationId]);
-
-  if (!op) return null;
+    setData(null);
+    setError(null);
+    fetchOperation(id)
+      .then(setData)
+      .catch(err => setError(err.message));
+  }, [id]);
 
   return (
-    <div style={{
-      padding: '1rem',
-      fontFamily: 'var(--font-mono)',
-      fontSize: '0.8rem',
-      color: 'var(--color-text)',
-    }}>
-      <div style={{ marginBottom: '0.75rem', color: 'var(--color-muted)', fontSize: '0.65rem', letterSpacing: '0.06em' }}>
-        OPERATION #{op.id}
-      </div>
+    <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text)' }}>
+      <button
+        onClick={onBack}
+        style={{
+          background: 'none',
+          border: '1px solid #333',
+          color: 'var(--color-muted)',
+          cursor: 'pointer',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.72rem',
+          padding: '0.25rem 0.6rem',
+          marginBottom: '1rem',
+        }}
+      >
+        ← Back
+      </button>
 
-      {/* Prominently show reasonCode when the operation failed */}
-      {op.outcome === 'failure' && op.reasonCode && (
-        <div style={{ marginBottom: '1rem' }}>
-          <span
-            className={`badge badge-${op.reasonCode.split(':')[0]}`}
-            style={reasonBadgeStyle(op.reasonCode)}
-          >
-            {op.reasonCode}
-          </span>
+      {error && (
+        <div style={{ color: '#f44336', marginBottom: '1rem' }}>
+          Error: {error}
         </div>
       )}
 
-      <dl style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '0.4rem 1rem', margin: 0 }}>
-        <dt style={dtStyle}>Kind</dt>
-        <dd style={ddStyle}>{op.kind}</dd>
+      {!data && !error && (
+        <div style={{ color: 'var(--color-muted)' }}>Loading…</div>
+      )}
 
-        <dt style={dtStyle}>Key</dt>
-        <dd style={ddStyle}>{op.key}</dd>
+      {data && (
+        <>
+          <div style={{ marginBottom: '1.25rem', borderBottom: '1px solid #222', paddingBottom: '0.75rem' }}>
+            <div style={{ color: 'var(--color-accent)', fontWeight: 'bold', marginBottom: '0.4rem' }}>
+              {data.operation.kind} — {data.operation.key}
+            </div>
 
-        <dt style={dtStyle}>Outcome</dt>
-        <dd style={{ ...ddStyle, color: outcomeColor(op.outcome) }}>{op.outcome ?? '…'}</dd>
+            {/* Prominently show reasonCode when the operation failed */}
+            {data.operation.outcome === 'failure' && data.operation.reasonCode && (
+              <div style={{ marginBottom: '0.5rem' }}>
+                <span
+                  className={`badge badge-${data.operation.reasonCode.split(':')[0]}`}
+                  style={reasonBadgeStyle(data.operation.reasonCode)}
+                >
+                  {data.operation.reasonCode}
+                </span>
+              </div>
+            )}
 
-        {op.reasonCode && (
-          <>
-            <dt style={dtStyle}>Reason</dt>
-            <dd style={ddStyle}>
-              <span
-                className={`badge badge-${op.reasonCode.split(':')[0]}`}
-                style={reasonBadgeStyle(op.reasonCode)}
-              >
-                {op.reasonCode}
+            <div style={{ color: 'var(--color-muted)', marginBottom: '0.2rem' }}>
+              <span style={{ marginRight: '1.5rem' }}>
+                Started: {data.operation.startedAt ? new Date(data.operation.startedAt).toISOString() : '—'}
               </span>
-            </dd>
-          </>
-        )}
+              <span style={{ marginRight: '1.5rem' }}>
+                Ended: {data.operation.endedAt ? new Date(data.operation.endedAt).toISOString() : '—'}
+              </span>
+              <span style={{ color: outcomeColor(data.operation.outcome) }}>
+                {data.operation.outcome ?? '…'}
+              </span>
+            </div>
+            {data.operation.errorMessage && (
+              <div style={{ color: '#f44336', marginTop: '0.3rem' }}>
+                {data.operation.errorMessage}
+              </div>
+            )}
+          </div>
 
-        <dt style={dtStyle}>Started</dt>
-        <dd style={ddStyle}>{op.startedAt ? new Date(op.startedAt).toISOString() : '—'}</dd>
-
-        <dt style={dtStyle}>Ended</dt>
-        <dd style={ddStyle}>{op.endedAt ? new Date(op.endedAt).toISOString() : '—'}</dd>
-
-        {op.errorMessage && (
-          <>
-            <dt style={dtStyle}>Error</dt>
-            <dd style={{ ...ddStyle, color: '#f44336' }}>{op.errorMessage}</dd>
-          </>
-        )}
-      </dl>
+          {data.events.length === 0 ? (
+            <div style={{ color: '#555' }}>No events recorded for this operation.</div>
+          ) : (
+            <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {data.events.map(event => (
+                <li
+                  key={event.id}
+                  style={{
+                    display: 'flex',
+                    gap: '1rem',
+                    padding: '0.35rem 0',
+                    borderBottom: '1px solid #111',
+                    alignItems: 'baseline',
+                  }}
+                >
+                  <span style={{ color: '#555', flexShrink: 0, minWidth: '5rem' }}>
+                    +{relativeMs(data.operation.startedAt, event.ts)}
+                  </span>
+                  <span style={{ color: levelColor(event.level), flexShrink: 0, minWidth: '3rem' }}>
+                    {event.level ?? 'info'}
+                  </span>
+                  <span>{event.message}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-const dtStyle = {
-  color: 'var(--color-muted)',
-  fontSize: '0.65rem',
-  letterSpacing: '0.06em',
-  paddingTop: '0.1rem',
-  margin: 0,
-};
+function outcomeColor(outcome) {
+  if (outcome === 'success') return '#4caf50';
+  if (outcome === 'failure') return '#f44336';
+  return 'var(--color-muted)';
+}
 
-const ddStyle = {
-  margin: 0,
-};
+function levelColor(level) {
+  if (level === 'warn') return '#ff9800';
+  if (level === 'error') return '#f44336';
+  return 'var(--color-muted)';
+}
+
+/**
+ * Format the offset from operationStart to eventTs as a human-readable string.
+ * @param {number|null} operationStart
+ * @param {number} eventTs
+ * @returns {string}
+ */
+function relativeMs(operationStart, eventTs) {
+  if (!operationStart) return `${eventTs}ms`;
+  const delta = eventTs - operationStart;
+  if (delta < 1000) return `${delta}ms`;
+  return `${(delta / 1000).toFixed(1)}s`;
+}
 
 const REASON_PREFIX_COLORS = { docker: '#ff9800', build: '#f44336', registry: '#9c27b0', sync: '#2196f3' };
 
@@ -110,10 +156,4 @@ function reasonBadgeStyle(reasonCode) {
     letterSpacing: '0.04em',
     whiteSpace: 'nowrap',
   };
-}
-
-function outcomeColor(outcome) {
-  if (outcome === 'success') return '#4caf50';
-  if (outcome === 'failure') return '#f44336';
-  return 'var(--color-muted)';
 }

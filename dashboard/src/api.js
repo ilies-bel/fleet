@@ -116,9 +116,10 @@ export function fetchOperations() {
 }
 
 /**
- * Fetch a single operation by id.
- * @param {number} id
- * @returns {Promise<{id,kind,key,startedAt,endedAt,outcome,errorMessage,reasonCode}>}
+ * Fetch a single operation with its full event timeline.
+ * The operation object includes reasonCode for failed operations.
+ * @param {number} id  Operation id
+ * @returns {Promise<{operation:{id,kind,key,startedAt,endedAt,outcome,errorMessage,reasonCode}, events:Array<{id,ts,level,message}>}>}
  */
 export function fetchOperation(id) {
   return request(`/_fleet/api/operations/${id}`);

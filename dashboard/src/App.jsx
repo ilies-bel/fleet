@@ -8,6 +8,7 @@ import LogPanel from './components/LogPanel.jsx';
 import ResourceMonitor from './components/ResourceMonitor.jsx';
 import OperationsList from './components/OperationsList.jsx';
 import FailureClusters from './components/FailureClusters.jsx';
+import OperationDetail from './components/OperationDetail.jsx';
 
 function NavBar({ onDrawerToggle, isNarrow }) {
   const linkStyle = ({ isActive }) => ({
@@ -176,8 +177,18 @@ const activeTitle = activeFeature?.title || activeFeature?.name || '';
   );
 }
 
+/**
+ * Operations tab: a RECENT/CLUSTERS view switcher, with drill-into-detail
+ * from the recent list. A single selectedId state drives the detail swap;
+ * no router lib needed.
+ */
 function OperationsPage() {
   const [view, setView] = useState('recent');
+  const [selectedId, setSelectedId] = useState(null);
+
+  if (selectedId !== null) {
+    return <OperationDetail id={selectedId} onBack={() => setSelectedId(null)} />;
+  }
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -211,7 +222,7 @@ function OperationsPage() {
           </button>
         ))}
       </div>
-      {view === 'recent' ? <OperationsList /> : <FailureClusters />}
+      {view === 'recent' ? <OperationsList onSelect={setSelectedId} /> : <FailureClusters />}
     </div>
   );
 }

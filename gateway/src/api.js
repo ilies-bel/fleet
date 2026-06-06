@@ -7,7 +7,7 @@ import { dockerExec, dockerLogs, stopContainer, startContainer, getContainerStat
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
 import { getHostMetrics } from './host-metrics.js';
-import { startOperation, endOperation, listOperations, listFailureClusters, getOperation } from './log-store.js';
+import { startOperation, endOperation, listOperations, listFailureClusters, appendEvent, getOperation } from './log-store.js';
 import { tagError, FAILURE_REASONS } from './failure-reasons.js';
 
 const router = Router();
@@ -61,8 +61,10 @@ router.post('/features/:key/activate', (req, res) => {
     return res.status(404).json({ error: 'Feature not registered' });
   }
   const opId = startOperation({ kind: 'activate', key });
+  appendEvent(opId, { message: 'activate started' });
   try {
     setActiveFeature(key);
+    appendEvent(opId, { message: 'proxy target updated' });
     endOperation(opId, { outcome: 'success' });
     res.json({ ok: true, active: key });
   } catch (err) {
@@ -93,14 +95,19 @@ router.get('/operations/failures/clustered', (req, res) => {
 
 /**
  * GET /_fleet/api/operations/:id
- * Returns a single operation by id, including reasonCode.
+ * Returns the operation row (including reasonCode) plus its events array:
+ * { operation, events:[...] }. 404 when the operation does not exist.
  */
 router.get('/operations/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid operation id' });
-  const op = getOperation(id);
-  if (!op) return res.status(404).json({ error: 'Operation not found' });
-  res.json(op);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid operation id' });
+  }
+  const result = getOperation(id);
+  if (!result) {
+    return res.status(404).json({ error: 'Operation not found' });
+  }
+  res.json(result);
 });
 
 /**
@@ -117,7 +124,9 @@ router.delete('/features/:key', async (req, res) => {
   // startOperation before unregister so the log row survives even if the
   // registry entry is removed as part of this operation.
   const opId = startOperation({ kind: 'remove', key });
+  appendEvent(opId, { message: 'remove started' });
   try {
+    appendEvent(opId, { message: 'stopping container' });
     await stopFeature(feature);
   } catch (err) {
     if (err instanceof DockerSocketError) {
@@ -136,6 +145,7 @@ router.delete('/features/:key', async (req, res) => {
     // 404 from Docker is fine — container was already gone, proceed with unregister
   }
   unregister(key);
+  appendEvent(opId, { message: 'feature unregistered' });
   endOperation(opId, { outcome: 'success' });
   res.json({ ok: true });
 });
@@ -148,8 +158,10 @@ router.post('/features/:key/stop', async (req, res) => {
   const { key } = req.params;
   if (!getFeature(key)) return res.status(404).json({ error: 'Feature not registered' });
   const opId = startOperation({ kind: 'stop', key });
+  appendEvent(opId, { message: 'stop started' });
   try {
     await stopContainer(`fleet-${key}`);
+    appendEvent(opId, { message: 'container stopped' });
     endOperation(opId, { outcome: 'success' });
     res.json({ ok: true });
   } catch (err) {
@@ -377,12 +389,12 @@ router.post('/features/:key/sync', async (req, res) => {
 
   const regenerateSources = req.query.regenerateSources === 'true';
   const containerName = `fleet-${key}`;
-
   const opId = startOperation({ kind: 'sync', key });
+  appendEvent(opId, { message: 'sync started' });
 
   res.json({ ok: true, message: 'Sync started — check logs for progress' });
 
-  _runSyncImpl(containerName, regenerateSources)
+  _runSyncImpl(containerName, regenerateSources, opId)
     .then(() => endOperation(opId, { outcome: 'success' }))
     .catch(err => {
       endOperation(opId, { outcome: 'failure', error: err });
@@ -395,8 +407,9 @@ router.post('/features/:key/sync', async (req, res) => {
  *   git pull → [jOOQ codegen] → mvn build → copy JAR → supervisorctl restart
  * @param {string} containerName
  * @param {boolean} regenerateSources
+ * @param {number} opId  Operation id from startOperation — events and outcome are written here.
  */
-async function runSync(containerName, regenerateSources) {
+async function runSync(containerName, regenerateSources, opId) {
   const info = await inspectContainer(containerName);
   if (!info) throw new Error(`Container '${containerName}' not found`);
 
@@ -417,6 +430,7 @@ async function runSync(containerName, regenerateSources) {
     'git pull --ff-only',
   ];
   if (regenerateSources) {
+    appendEvent(opId, { message: 'regenerating jOOQ sources' });
     steps.push('mvn compile -Pjooq-codegen -q');
   }
   steps.push(buildCmd);
@@ -424,7 +438,9 @@ async function runSync(containerName, regenerateSources) {
   steps.push(`ls target/*.jar && cp target/*.jar ${artifactPath}`);
   steps.push('supervisorctl restart all');
 
+  appendEvent(opId, { message: 'running rsync: git pull and build' });
   await dockerExec(containerName, ['bash', '-c', steps.join(' && ')]);
+  appendEvent(opId, { message: 'sync complete' });
 }
 
 // Mutable shim so tests can swap out runSync without touching Docker.
