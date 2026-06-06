@@ -1,13 +1,32 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import DiffPane from './DiffPane.jsx';
+import { PROXY_ORIGIN } from '../lib/captureProtocol.js';
 
 // Port 3000 is the transparent proxy — always the same URL regardless of which feature is active.
 const PROXY_URL = 'http://localhost:3000/';
 
-export default function PreviewFrame({ activePreview, branch, previewKey, title }) {
+export default function PreviewFrame({ activePreview, branch, previewKey, title, isCapture, onToggleCapture }) {
   const iframeRef = useRef(null);
   const [viewMode, setViewMode] = useState('preview');
-  const [isCapture, setIsCapture] = useState(false);
+
+  // Sync capture state into the iframe whenever it changes.
+  useEffect(() => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'mars.capture.activate', active: isCapture },
+      PROXY_URL
+    );
+  }, [isCapture]);
+
+  // Forward keyboard shortcut fired inside the iframe back into the toggle path.
+  useEffect(() => {
+    function onMessage(event) {
+      if (event.origin !== PROXY_ORIGIN) return;
+      if (!event.data || event.data.type !== 'mars.capture.keydown') return;
+      onToggleCapture?.();
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [onToggleCapture]);
 
   if (!activePreview) {
     return (
@@ -75,14 +94,7 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title 
           <>
             <button
               aria-pressed={isCapture}
-              onClick={() => {
-                const next = !isCapture;
-                setIsCapture(next);
-                iframeRef.current?.contentWindow?.postMessage(
-                  { type: 'mars.capture.activate', active: next },
-                  PROXY_URL
-                );
-              }}
+              onClick={onToggleCapture}
               style={isCapture ? captureActiveBtn : toolbarBtn}
             >
               Capture

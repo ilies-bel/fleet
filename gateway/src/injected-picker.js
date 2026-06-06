@@ -209,4 +209,16 @@ export const INJECTED_PICKER = String.raw`(() => {
       }
     }
   });
+
+  // Forward Cmd/Ctrl+Shift+K pressed inside the iframe to the parent dashboard
+  // so the capture shortcut works regardless of where the operator's focus is.
+  window.addEventListener('keydown', function(event) {
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      parent.postMessage(
+        { type: 'mars.capture.keydown' },
+        EXPECTED_DASHBOARD_ORIGIN || '*'
+      );
+    }
+  });
 })();`;

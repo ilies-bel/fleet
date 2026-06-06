@@ -71,6 +71,8 @@ function FeaturesPage({ drawerOpen, onDrawerClose }) {
   const [previewKey, setPreviewKey] = useState(0);
 const [logFeature, setLogFeature] = useState(null);
   const [startingFeatures, setStartingFeatures] = useState(new Set());
+  const [isCapture, setIsCapture] = useState(false);
+  const toggleCapture = useCallback(() => setIsCapture(prev => !prev), []);
 
   // Key the user just clicked [ACTIVATE] on; suppresses poll-driven
   // reconciliation until the gateway confirms this is the active feature.
@@ -108,6 +110,11 @@ const [logFeature, setLogFeature] = useState(null);
   useEffect(() => {
     function onKey(e) {
       if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        toggleCapture();
+        return;
+      }
       const n = e.key >= '1' && e.key <= '9' ? Number(e.key) : 0;
       if (!n) return;
       const target = features[n - 1];
@@ -117,7 +124,7 @@ const [logFeature, setLogFeature] = useState(null);
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [features]);
+  }, [features, toggleCapture]);
 
   function handleRemoved(key) {
     if (pendingActivateRef.current === key) pendingActivateRef.current = null;
@@ -165,6 +172,8 @@ const activeTitle = activeFeature?.title || activeFeature?.name || '';
         branch={activeBranch}
         previewKey={previewKey}
         title={activeTitle}
+        isCapture={isCapture}
+        onToggleCapture={toggleCapture}
       />
 
       {logFeature && (
