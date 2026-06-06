@@ -2,7 +2,8 @@
  * Tests for log-store.js.
  *
  * Verifies observable behaviour: round-trip insert, outcome recording,
- * error message persistence, and DESC ordering.
+ * error message persistence, DESC ordering, retention pruning, and
+ * prune rate-limiting.
  *
  * Uses Node.js built-in test runner (node:test).
  * FLEET_LOG_DB is overridden to a per-test tmp file so each test starts clean.
@@ -14,16 +15,28 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { openLogStore, startOperation, endOperation, listOperations } from './log-store.js';
+import {
+  openLogStore,
+  startOperation,
+  endOperation,
+  listOperations,
+  __resetPruneClock,
+  __pruneCount,
+  __getDb,
+} from './log-store.js';
 
 const tmpDir = mkdtempSync(join(tmpdir(), 'fleet-log-test-'));
 let dbIdx = 0;
 
 describe('log-store', () => {
   beforeEach(() => {
+    // Clear retention override so each test starts with the default (30 days).
+    delete process.env.FLEET_LOG_RETENTION_DAYS;
     // Fresh SQLite file per test so state does not leak between tests.
     process.env.FLEET_LOG_DB = join(tmpDir, `test-${++dbIdx}.db`);
     openLogStore();
+    // Reset prune rate-limit clock and counter.
+    __resetPruneClock();
   });
 
   test('round-trip: startOperation inserts a row retrievable by listOperations', () => {
@@ -84,5 +97,54 @@ describe('log-store', () => {
 
     const ops = listOperations({ limit: 2 });
     assert.equal(ops.length, 2, 'limit=2 should return exactly 2 rows');
+  });
+
+  test('retention: startOperation prunes operations older than FLEET_LOG_RETENTION_DAYS', () => {
+    // 0.0001 days ≈ 8.64 seconds — gives a very short cutoff window for testing.
+    process.env.FLEET_LOG_RETENTION_DAYS = '0.0001';
+    process.env.FLEET_LOG_DB = join(tmpDir, `test-${++dbIdx}.db`);
+    openLogStore();
+    __resetPruneClock();
+
+    const cutoffMs = 0.0001 * 86_400_000; // ~8640 ms
+    const pastCutoff = Date.now() - cutoffMs - 5_000; // clearly before cutoff
+
+    // Insert two backdated rows directly so we control started_at.
+    const rawDb = __getDb();
+    const old1 = Number(
+      rawDb
+        .prepare('INSERT INTO operations (kind, key, started_at) VALUES (?, ?, ?)')
+        .run('prune-test', 'old-1', pastCutoff).lastInsertRowid,
+    );
+    const old2 = Number(
+      rawDb
+        .prepare('INSERT INTO operations (kind, key, started_at) VALUES (?, ?, ?)')
+        .run('prune-test', 'old-2', pastCutoff).lastInsertRowid,
+    );
+
+    // Insert a fresh row (started_at = now, well within retention window).
+    const freshId = Number(
+      rawDb
+        .prepare('INSERT INTO operations (kind, key, started_at) VALUES (?, ?, ?)')
+        .run('prune-test', 'fresh', Date.now()).lastInsertRowid,
+    );
+
+    // Trigger pruning via startOperation.
+    startOperation({ kind: 'prune-test', key: 'trigger' });
+
+    const remaining = listOperations({ limit: 100 });
+    const remainingIds = remaining.map(op => op.id);
+
+    assert.ok(!remainingIds.includes(old1), 'backdated row 1 should be pruned');
+    assert.ok(!remainingIds.includes(old2), 'backdated row 2 should be pruned');
+    assert.ok(remainingIds.includes(freshId), 'fresh row should survive pruning');
+  });
+
+  test('rate limit: prune runs at most once per 60 s across consecutive startOperation calls', () => {
+    // beforeEach reset the clock, so the first call will trigger a prune.
+    startOperation({ kind: 'rate-test', key: 'call-1' }); // prune runs
+    startOperation({ kind: 'rate-test', key: 'call-2' }); // within 60 s — prune skipped
+
+    assert.equal(__pruneCount, 1, 'prune should fire exactly once for two back-to-back calls');
   });
 });
