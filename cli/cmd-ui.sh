@@ -16,7 +16,8 @@ _ui_help() {
   echo ""
   echo -e "${GREEN}fleet ui${RESET} — manage the Fleet dashboard UI"
   echo ""
-  echo "Usage: fleet ui <action> [--dev]"
+  echo "Usage: fleet ui [start|restart|stop] [--dev] [--port <n>]"
+  echo "  (action defaults to 'start' when omitted)"
   echo ""
   echo "Actions:"
   echo -e "  ${BLUE}start${RESET}    Build dashboard and (re)start the gateway container (prod)"
@@ -24,7 +25,8 @@ _ui_help() {
   echo -e "  ${BLUE}stop${RESET}     Stop the gateway container (prod)"
   echo ""
   echo "Flags:"
-  echo -e "  ${BLUE}--dev${RESET}    Run Vite hot-reload dev server in the foreground (start/restart only)"
+  echo -e "  ${BLUE}--dev${RESET}       Run Vite hot-reload dev server in the foreground (start/restart only)"
+  echo -e "  ${BLUE}--port <n>${RESET}  Override the dashboard port (Vite port in --dev; admin/gateway port in prod)"
   echo ""
   echo "Prod mode (default):"
   echo "  Rebuilds the dashboard into gateway/public, then rebuilds and recreates"
@@ -35,8 +37,11 @@ _ui_help() {
   echo "  Vite proxies /_fleet/ to the gateway. Press Ctrl-C to stop."
   echo ""
   echo "Examples:"
+  echo "  fleet ui                     # prod: rebuild dashboard + (re)start gateway (default)"
   echo "  fleet ui start               # prod: rebuild dashboard + (re)start gateway"
   echo "  fleet ui start --dev         # dev:  foreground Vite hot-reload"
+  echo "  fleet ui --port 4100         # prod: start with admin port 4100"
+  echo "  fleet ui start --dev --port 5180  # dev: Vite on port 5180"
   echo "  fleet ui restart             # prod: rebuild dashboard + recreate gateway"
   echo "  fleet ui stop                # prod: stop gateway container"
   echo ""
@@ -46,22 +51,46 @@ _ui_help() {
 # ─── Arg parsing ─────────────────────────────────────────────────────────────
 ACTION=""
 DEV=false
+PORT=""
 
-for _arg in "$@"; do
-  case "${_arg}" in
-    --help|-h)          _ui_help 0 ;;
-    --dev)              DEV=true ;;
-    start|restart|stop) ACTION="${_arg}" ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --help|-h)
+      _ui_help 0
+      ;;
+    --dev)
+      DEV=true
+      shift
+      ;;
+    --port)
+      if [ -z "${2:-}" ] || ! printf '%s' "${2}" | grep -qE '^[0-9]+$'; then
+        echo -e "${RED}[fleet] ERROR:${RESET} --port requires a numeric argument" >&2
+        _ui_help 1
+      fi
+      PORT="$2"
+      shift 2
+      ;;
+    --port=*)
+      PORT="${1#*=}"
+      if ! printf '%s' "${PORT}" | grep -qE '^[0-9]+$'; then
+        echo -e "${RED}[fleet] ERROR:${RESET} --port requires a numeric argument" >&2
+        _ui_help 1
+      fi
+      shift
+      ;;
+    start|restart|stop)
+      ACTION="$1"
+      shift
+      ;;
     *)
-      echo -e "${RED}[fleet] ERROR:${RESET} Unknown argument: ${_arg}" >&2
+      echo -e "${RED}[fleet] ERROR:${RESET} Unknown argument: $1" >&2
       _ui_help 1
       ;;
   esac
 done
 
 if [ -z "${ACTION}" ]; then
-  echo "Usage: fleet ui <start|restart|stop> [--dev]" >&2
-  exit 1
+  ACTION=start
 fi
 
 # ─── Dev mode ────────────────────────────────────────────────────────────────
@@ -72,7 +101,11 @@ if [ "${DEV}" = true ]; then
   fi
   # start or restart — run Vite in the foreground; exec so signals pass through
   info "Starting Vite dev server (dashboard/)..."
-  (cd "${FLEET_ROOT}/dashboard" && npm install --silent >/dev/null 2>&1; exec npm run dev)
+  if [ -n "${PORT}" ]; then
+    (cd "${FLEET_ROOT}/dashboard" && npm install --silent >/dev/null 2>&1; exec npm run dev -- --port "${PORT}")
+  else
+    (cd "${FLEET_ROOT}/dashboard" && npm install --silent >/dev/null 2>&1; exec npm run dev)
+  fi
   exit 0
 fi
 
@@ -82,6 +115,7 @@ load_fleet_toml
 PROXY_PORT="${FLEET_PORT_PROXY}"
 ADMIN_PORT="${FLEET_PORT_ADMIN}"
 BACKEND_PORT="${BACKEND_PORT:-8080}"
+[ -n "${PORT}" ] && ADMIN_PORT="${PORT}"
 
 if [ "${ACTION}" = "stop" ]; then
   info "Stopping fleet-gateway container..."
