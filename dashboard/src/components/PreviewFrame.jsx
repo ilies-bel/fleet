@@ -7,6 +7,7 @@ const PROXY_URL = 'http://localhost:3000/';
 export default function PreviewFrame({ activePreview, branch, previewKey, title }) {
   const iframeRef = useRef(null);
   const [viewMode, setViewMode] = useState('preview');
+  const [isCapture, setIsCapture] = useState(false);
 
   if (!activePreview) {
     return (
@@ -73,6 +74,20 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title 
         {viewMode === 'preview' && (
           <>
             <button
+              aria-pressed={isCapture}
+              onClick={() => {
+                const next = !isCapture;
+                setIsCapture(next);
+                iframeRef.current?.contentWindow?.postMessage(
+                  { type: 'mars.capture.activate', active: next },
+                  PROXY_URL
+                );
+              }}
+              style={isCapture ? captureActiveBtn : toolbarBtn}
+            >
+              Capture
+            </button>
+            <button
               onClick={() => window.open(PROXY_URL, '_blank')}
               style={toolbarBtn}
             >
@@ -125,4 +140,10 @@ const activeTabBtn = {
   ...toolbarBtn,
   borderColor: 'var(--color-accent)',
   color: 'var(--color-accent)',
+};
+
+const captureActiveBtn = {
+  ...toolbarBtn,
+  border: '1px solid #e06c75',
+  color: '#e06c75',
 };
