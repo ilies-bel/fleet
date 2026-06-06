@@ -3,8 +3,9 @@
  *
  * openLogStore()  — call once at gateway boot before mounting the router.
  * startOperation  — record the start of an operation; returns the row id.
- * endOperation    — update outcome/ended_at for a previously started row.
+ * endOperation    — update outcome/ended_at/reason_code for a previously started row.
  * listOperations  — query recent rows in camelCase form.
+ * getOperation    — fetch a single row by id, or null if not found.
  */
 
 import Database from 'better-sqlite3';
@@ -26,6 +27,8 @@ export let __pruneCount = 0;
  * Reads process.env.FLEET_LOG_DB; defaults to /var/lib/fleet/log.db.
  * Reads process.env.FLEET_LOG_RETENTION_DAYS as a positive number; defaults to 30.
  * Safe to call multiple times (idempotent table creation via IF NOT EXISTS).
+ * Runs a forward-compatible migration to add the reason_code column when
+ * opening a database that predates this change.
  */
 export function openLogStore() {
   const dbPath = process.env.FLEET_LOG_DB ?? '/var/lib/fleet/log.db';
@@ -43,7 +46,8 @@ export function openLogStore() {
       started_at    INTEGER NOT NULL,
       ended_at      INTEGER,
       outcome       TEXT,
-      error_message TEXT
+      error_message TEXT,
+      reason_code   TEXT
     );
     CREATE TABLE IF NOT EXISTS operation_events (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +59,14 @@ export function openLogStore() {
     CREATE INDEX IF NOT EXISTS idx_operations_started_at
       ON operations(started_at DESC);
   `);
+
+  // Forward-compatible migration: add reason_code to databases created before
+  // this column existed. PRAGMA table_info is the safest way to detect the gap.
+  const cols = db.prepare('PRAGMA table_info(operations)').all();
+  const hasReasonCode = cols.some(c => c.name === 'reason_code');
+  if (!hasReasonCode) {
+    db.exec('ALTER TABLE operations ADD COLUMN reason_code TEXT');
+  }
 }
 
 /**
@@ -86,42 +98,69 @@ export function startOperation({ kind, key }) {
 
 /**
  * Finalise an operation row with its outcome.
+ * Reads err.reasonCode (set by DockerSocketError/DockerContainerError constructors
+ * or by tagError()) and persists it to the reason_code column.
+ *
  * @param {number} id
  * @param {{ outcome: string, error?: Error | null }} opts
  */
 export function endOperation(id, { outcome, error = null } = {}) {
   const endedAt = Date.now();
   const errorMessage = error?.message ?? null;
+  const reasonCode = error?.reasonCode ?? null;
   db
     .prepare(
-      'UPDATE operations SET ended_at = ?, outcome = ?, error_message = ? WHERE id = ?',
+      'UPDATE operations SET ended_at = ?, outcome = ?, error_message = ?, reason_code = ? WHERE id = ?',
     )
-    .run(endedAt, outcome, errorMessage, id);
+    .run(endedAt, outcome, errorMessage, reasonCode, id);
+}
+
+/**
+ * Map a raw SQLite row to the public camelCase shape.
+ * @param {object} row
+ */
+function rowToOperation(row) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    key: row.key,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    outcome: row.outcome,
+    errorMessage: row.error_message,
+    reasonCode: row.reason_code,
+  };
 }
 
 /**
  * Return recent operations ordered by started_at DESC.
  * @param {{ limit?: number }} opts
- * @returns {Array<{id,kind,key,startedAt,endedAt,outcome,errorMessage}>}
+ * @returns {Array<{id,kind,key,startedAt,endedAt,outcome,errorMessage,reasonCode}>}
  */
 export function listOperations({ limit = 100 } = {}) {
   return db
     .prepare(
-      `SELECT id, kind, key, started_at, ended_at, outcome, error_message
+      `SELECT id, kind, key, started_at, ended_at, outcome, error_message, reason_code
        FROM operations
        ORDER BY started_at DESC, id DESC
        LIMIT ?`,
     )
     .all(limit)
-    .map(row => ({
-      id: row.id,
-      kind: row.kind,
-      key: row.key,
-      startedAt: row.started_at,
-      endedAt: row.ended_at,
-      outcome: row.outcome,
-      errorMessage: row.error_message,
-    }));
+    .map(rowToOperation);
+}
+
+/**
+ * Fetch a single operation by id.
+ * @param {number} id
+ * @returns {{id,kind,key,startedAt,endedAt,outcome,errorMessage,reasonCode} | null}
+ */
+export function getOperation(id) {
+  const row = db
+    .prepare(
+      'SELECT id, kind, key, started_at, ended_at, outcome, error_message, reason_code FROM operations WHERE id = ?',
+    )
+    .get(id);
+  return row ? rowToOperation(row) : null;
 }
 
 /** @internal — resets prune rate-limit clock and counter; call in test beforeEach. */

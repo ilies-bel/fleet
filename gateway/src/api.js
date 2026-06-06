@@ -7,7 +7,8 @@ import { dockerExec, dockerLogs, stopContainer, startContainer, getContainerStat
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
 import { getHostMetrics } from './host-metrics.js';
-import { startOperation, endOperation, listOperations } from './log-store.js';
+import { startOperation, endOperation, listOperations, getOperation } from './log-store.js';
+import { tagError, FAILURE_REASONS } from './failure-reasons.js';
 
 const router = Router();
 const startedAt = Date.now();
@@ -65,6 +66,7 @@ router.post('/features/:key/activate', (req, res) => {
     endOperation(opId, { outcome: 'success' });
     res.json({ ok: true, active: key });
   } catch (err) {
+    tagError(err, FAILURE_REASONS.REGISTRY_NOT_REGISTERED);
     endOperation(opId, { outcome: 'failure', error: err });
     res.status(400).json({ error: err.message });
   }
@@ -76,6 +78,18 @@ router.post('/features/:key/activate', (req, res) => {
  */
 router.get('/operations', (_req, res) => {
   res.json(listOperations({ limit: 100 }));
+});
+
+/**
+ * GET /_fleet/api/operations/:id
+ * Returns a single operation by id, including reasonCode.
+ */
+router.get('/operations/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid operation id' });
+  const op = getOperation(id);
+  if (!op) return res.status(404).json({ error: 'Operation not found' });
+  res.json(op);
 });
 
 /**

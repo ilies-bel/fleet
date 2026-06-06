@@ -63,11 +63,11 @@ function demuxDockerStream(buf) {
 }
 
 export class DockerSocketError extends Error {
-  constructor(msg) { super(msg); this.name = 'DockerSocketError'; }
+  constructor(msg) { super(msg); this.name = 'DockerSocketError'; this.reasonCode = 'docker:socket-unavailable'; }
 }
 
 export class DockerContainerError extends Error {
-  constructor(msg, status) { super(msg); this.name = 'DockerContainerError'; this.status = status; }
+  constructor(msg, status) { super(msg); this.name = 'DockerContainerError'; this.status = status; if (status === 404) this.reasonCode = 'docker:container-not-found'; }
 }
 
 /**

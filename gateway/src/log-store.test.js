@@ -2,8 +2,9 @@
  * Tests for log-store.js.
  *
  * Verifies observable behaviour: round-trip insert, outcome recording,
- * error message persistence, DESC ordering, retention pruning, and
- * prune rate-limiting.
+ * error message persistence, DESC ordering, retention pruning,
+ * prune rate-limiting, reason_code persistence, and integration with
+ * DockerSocketError / tagError.
  *
  * Uses Node.js built-in test runner (node:test).
  * FLEET_LOG_DB is overridden to a per-test tmp file so each test starts clean.
@@ -20,10 +21,13 @@ import {
   startOperation,
   endOperation,
   listOperations,
+  getOperation,
   __resetPruneClock,
   __pruneCount,
   __getDb,
 } from './log-store.js';
+import { DockerSocketError } from './docker.js';
+import { tagError } from './failure-reasons.js';
 
 const tmpDir = mkdtempSync(join(tmpdir(), 'fleet-log-test-'));
 let dbIdx = 0;
@@ -55,9 +59,10 @@ describe('log-store', () => {
     assert.equal(op.endedAt, null, 'endedAt should be null before endOperation');
     assert.equal(op.outcome, null, 'outcome should be null before endOperation');
     assert.equal(op.errorMessage, null, 'errorMessage should be null before endOperation');
+    assert.equal(op.reasonCode, null, 'reasonCode should be null before endOperation');
   });
 
-  test('endOperation with success sets endedAt, outcome=success, errorMessage=null', () => {
+  test('endOperation with success sets endedAt, outcome=success, errorMessage=null, reasonCode=null', () => {
     const id = startOperation({ kind: 'activate', key: 'proj-feat' });
     endOperation(id, { outcome: 'success' });
 
@@ -65,6 +70,7 @@ describe('log-store', () => {
     assert.equal(op.outcome, 'success');
     assert.ok(op.endedAt > 0, 'endedAt should be a positive timestamp after endOperation');
     assert.equal(op.errorMessage, null);
+    assert.equal(op.reasonCode, null);
   });
 
   test('endOperation with failure records error.message', () => {
@@ -146,5 +152,44 @@ describe('log-store', () => {
     startOperation({ kind: 'rate-test', key: 'call-2' }); // within 60 s — prune skipped
 
     assert.equal(__pruneCount, 1, 'prune should fire exactly once for two back-to-back calls');
+  });
+
+  test('DockerSocketError from stubbed activate flow writes reason_code=docker:socket-unavailable', () => {
+    // Simulates the activate route catching a DockerSocketError and forwarding it to endOperation.
+    // DockerSocketError constructor sets reasonCode automatically.
+    const id = startOperation({ kind: 'activate', key: 'proj-feat' });
+    const err = new DockerSocketError('Docker socket unavailable');
+    endOperation(id, { outcome: 'failure', error: err });
+
+    const [op] = listOperations({ limit: 1 });
+    assert.equal(op.reasonCode, 'docker:socket-unavailable');
+  });
+
+  test('tagError(err, build:failed) flows through to the row', () => {
+    // Simulates a rebuild catch tagging an error with build:failed before endOperation.
+    const id = startOperation({ kind: 'rebuild', key: 'proj-feat' });
+    const err = new Error('mvn exited with code 1');
+    tagError(err, 'build:failed');
+    endOperation(id, { outcome: 'failure', error: err });
+
+    const [op] = listOperations({ limit: 1 });
+    assert.equal(op.reasonCode, 'build:failed');
+  });
+
+  test('getOperation returns null for unknown id', () => {
+    const op = getOperation(999999);
+    assert.equal(op, null);
+  });
+
+  test('getOperation returns a single operation by id including reasonCode', () => {
+    const id = startOperation({ kind: 'activate', key: 'proj-feat' });
+    const err = new DockerSocketError('socket gone');
+    endOperation(id, { outcome: 'failure', error: err });
+
+    const op = getOperation(id);
+    assert.ok(op !== null, 'getOperation should return the row');
+    assert.equal(op.id, id);
+    assert.equal(op.kind, 'activate');
+    assert.equal(op.reasonCode, 'docker:socket-unavailable');
   });
 });

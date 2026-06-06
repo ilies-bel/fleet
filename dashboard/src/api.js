@@ -109,8 +109,17 @@ export function getHostStats() {
 
 /**
  * Fetch recent gateway operations (activate events etc.) from the log store.
- * @returns {Promise<Array<{id,kind,key,startedAt,endedAt,outcome,errorMessage}>>}
+ * @returns {Promise<Array<{id,kind,key,startedAt,endedAt,outcome,errorMessage,reasonCode}>>}
  */
 export function fetchOperations() {
   return request('/_fleet/api/operations');
+}
+
+/**
+ * Fetch a single operation by id.
+ * @param {number} id
+ * @returns {Promise<{id,kind,key,startedAt,endedAt,outcome,errorMessage,reasonCode}>}
+ */
+export function fetchOperation(id) {
+  return request(`/_fleet/api/operations/${id}`);
 }

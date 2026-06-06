@@ -35,6 +35,7 @@ export default function OperationsList() {
             <th style={thStyle}>Started</th>
             <th style={thStyle}>Ended</th>
             <th style={thStyle}>Outcome</th>
+            <th style={thStyle}>Reason</th>
           </tr>
         </thead>
         <tbody>
@@ -45,11 +46,16 @@ export default function OperationsList() {
               <td style={tdStyle}>{op.startedAt ? new Date(op.startedAt).toISOString() : '—'}</td>
               <td style={tdStyle}>{op.endedAt ? new Date(op.endedAt).toISOString() : '—'}</td>
               <td style={{ ...tdStyle, color: outcomeColor(op.outcome) }}>{op.outcome ?? '…'}</td>
+              <td style={tdStyle}>
+                {op.outcome === 'failure' && op.reasonCode
+                  ? <span className={`badge badge-${op.reasonCode.split(':')[0]}`} style={reasonBadgeStyle(op.reasonCode)}>{op.reasonCode}</span>
+                  : null}
+              </td>
             </tr>
           ))}
           {operations.length === 0 && (
             <tr>
-              <td colSpan={5} style={{ ...tdStyle, color: '#555', textAlign: 'center', padding: '1.5rem 0' }}>
+              <td colSpan={6} style={{ ...tdStyle, color: '#555', textAlign: 'center', padding: '1.5rem 0' }}>
                 no operations recorded
               </td>
             </tr>
@@ -78,4 +84,21 @@ function outcomeColor(outcome) {
   if (outcome === 'success') return '#4caf50';
   if (outcome === 'failure') return '#f44336';
   return 'var(--color-muted)';
+}
+
+const REASON_PREFIX_COLORS = { docker: '#ff9800', build: '#f44336', registry: '#9c27b0', sync: '#2196f3' };
+
+function reasonBadgeStyle(reasonCode) {
+  const prefix = reasonCode?.split(':')[0];
+  return {
+    display: 'inline-block',
+    padding: '0.1rem 0.4rem',
+    borderRadius: '3px',
+    fontSize: '0.65rem',
+    fontWeight: '600',
+    background: REASON_PREFIX_COLORS[prefix] ?? '#555',
+    color: '#fff',
+    letterSpacing: '0.03em',
+    whiteSpace: 'nowrap',
+  };
 }
