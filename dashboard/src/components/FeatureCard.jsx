@@ -5,7 +5,7 @@ import { Button } from './Button.jsx';
 import FeatureConfigModal from './FeatureConfigModal.jsx';
 
 export default function FeatureCard({ feature, isActive, isPreview, isStarting, onActivate, onRemoved, onLogs }) {
-  const { key, name, branch, title, project } = feature;
+  const { key, name, branch, title } = feature;
   const [health, setHealth] = useState('checking');
   const [confirming, setConfirming] = useState(false);
   const [syncConfirm, setSyncConfirm] = useState(false);
@@ -171,20 +171,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           }}>
             {displayName}
           </span>
-          {project && (
-            <span style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.58rem',
-              color: '#888',
-              background: '#111',
-              border: '1px solid #2a2a2a',
-              padding: '1px 5px',
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-            }}>
-              {project}
-            </span>
-          )}
+
         </button>
         <button
           ref={configTriggerRef}
