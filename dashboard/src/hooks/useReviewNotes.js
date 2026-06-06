@@ -1,7 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+
+const STORAGE_KEY = 'fleet.reviewNotes.v1';
 
 /**
- * In-memory store of review notes, keyed by worktree name.
+ * Per-worktree review notes, persisted to localStorage under 'fleet.reviewNotes.v1'.
  *
  * Each note has the shape:
  *   { id, refKind, selector, label, route, text, createdAt }
@@ -11,7 +13,24 @@ import { useState, useCallback } from 'react';
  * @returns {{ notesByWorktree: Object.<string, Array>, addNote: Function, removeNote: Function, clearForWorktree: Function }}
  */
 export function useReviewNotes() {
-  const [notesByWorktree, setNotesByWorktree] = useState({});
+  const [notesByWorktree, setNotesByWorktree] = useState(() => {
+    try {
+      if (typeof localStorage === 'undefined') return {};
+      return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(notesByWorktree));
+      }
+    } catch {
+      /* ignore persistence errors (e.g. storage full / SSR) */
+    }
+  }, [notesByWorktree]);
 
   const addNote = useCallback((worktree, note) => {
     const newNote = {
