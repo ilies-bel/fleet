@@ -1,5 +1,5 @@
 import { createProxyMiddleware, debugProxyErrorsPlugin, proxyEventsPlugin } from 'http-proxy-middleware';
-import { resolveTarget, stoppedContainerBody } from './proxy.js';
+import { resolveTarget, stoppedContainerBody, stripFramingHeaders } from './proxy.js';
 
 /**
  * Transparent proxy middleware for BACKEND_PORT (default 8080).
@@ -48,6 +48,8 @@ export function createBackendProxy() {
         proxyRes.headers['cache-control'] = 'no-store';
         delete proxyRes.headers['etag'];
         delete proxyRes.headers['last-modified'];
+        // Allow the dashboard to iframe this response and inject the picker script
+        stripFramingHeaders(proxyRes.headers);
       },
       error: (_err, _req, resOrSocket) => {
         if (resOrSocket && typeof resOrSocket.status === 'function') {

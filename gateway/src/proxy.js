@@ -72,6 +72,8 @@ export function createFeatureProxy() {
         proxyRes.headers['cache-control'] = 'no-store';
         delete proxyRes.headers['etag'];
         delete proxyRes.headers['last-modified'];
+        // Allow the dashboard to iframe this response and inject the picker script
+        stripFramingHeaders(proxyRes.headers);
       },
       error: (_err, _req, resOrSocket) => {
         // For WebSocket upgrades, http-proxy passes the raw net.Socket here
@@ -216,6 +218,36 @@ export async function resolveTarget({ getPort = getLocalPort } = {}) {
     updateStatus(selected, 'stopped');
   }
   return { ok: false, body: stoppedContainerBody(selected) };
+}
+
+/**
+ * Strip response headers that prevent the app from being iframed in the preview
+ * panel or block the injected picker script.
+ *
+ * - Removes X-Frame-Options (case-insensitive) so the browser allows embedding.
+ * - Removes Content-Security-Policy and Content-Security-Policy-Report-Only so
+ *   frame-ancestors restrictions and unsafe-inline blocks are gone.
+ *
+ * Node's HTTP stack normalises header names to lowercase, but iterating with
+ * a toLowerCase() guard handles any case that might arrive from a mock or
+ * non-standard upstream.
+ *
+ * Called from both the feature proxy and the backend proxy proxyRes hooks —
+ * two callers justify the extraction.
+ *
+ * @param {Record<string, string | string[] | undefined>} headers
+ */
+export function stripFramingHeaders(headers) {
+  for (const key of Object.keys(headers)) {
+    const lower = key.toLowerCase();
+    if (
+      lower === 'x-frame-options' ||
+      lower === 'content-security-policy' ||
+      lower === 'content-security-policy-report-only'
+    ) {
+      delete headers[key];
+    }
+  }
 }
 
 /**
