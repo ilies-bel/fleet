@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { buildReviewPrompt } from '../lib/buildReviewPrompt.js';
 import './ReviewNotesPanel.css';
 
 /**
@@ -13,6 +14,17 @@ import './ReviewNotesPanel.css';
 export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote, clearForWorktree }) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerText, setComposerText] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(buildReviewPrompt(worktree, notes));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // silently ignore clipboard errors (e.g. permission denied)
+    }
+  }
 
   function handleClearAll() {
     if (!worktree) return;
@@ -56,6 +68,14 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
     <aside className="review-notes-panel" aria-label="Review notes">
       <div className="review-notes-panel__header">
         <h3 className="review-notes-panel__title">Review Notes</h3>
+        <button
+          className="review-notes-panel__copy-btn"
+          onClick={handleCopy}
+          disabled={notes.length === 0}
+          aria-label="Copy review notes as prompt"
+        >
+          {copied ? 'Copied ✓' : 'Copy as prompt'}
+        </button>
         {notes.length > 0 && (
           <button
             className="review-notes-panel__clear-btn"
