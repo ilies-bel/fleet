@@ -10,6 +10,8 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app/gateway
 COPY gateway/package*.json ./
+# better-sqlite3 has no prebuilt musl/arm64 binary; node-gyp compile needs toolchain
+RUN apk add --no-cache python3 make g++
 RUN npm install --omit=dev
 COPY gateway/ ./
 
