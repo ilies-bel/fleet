@@ -378,6 +378,7 @@ out = {
     "port_proxy":          str(ports.get("proxy", "")),
     "port_admin":          str(ports.get("admin", "")),
     "port_db":             str(ports.get("db", "")),
+    "port_nginx":          str(ports.get("nginx", "")),
     "stacks_json":    json.dumps([
         {
             "type": s.get("type",""),
@@ -464,6 +465,7 @@ PYEOF
   FLEET_PORT_PROXY=$(_get port_proxy)
   FLEET_PORT_ADMIN=$(_get port_admin)
   FLEET_PORT_DB=$(_get port_db)
+  FLEET_PORT_NGINX=$(_get port_nginx)
   FLEET_STACKS_JSON=$(_get stacks_json)
   FLEET_SERVICES_JSON=$(_get services_json)
   FLEET_PEERS_JSON=$(_get peers_json)
@@ -475,7 +477,7 @@ PYEOF
   FLEET_HOOK_POST_RM=$(_get hook_post_rm)
 
   export FLEET_PROJECT_NAME FLEET_PROJECT_ROOT FLEET_WORKTREE_PATH \
-         FLEET_PORT_PROXY FLEET_PORT_ADMIN FLEET_PORT_DB \
+         FLEET_PORT_PROXY FLEET_PORT_ADMIN FLEET_PORT_DB FLEET_PORT_NGINX \
          FLEET_STACKS_JSON FLEET_SERVICES_JSON FLEET_PEERS_JSON FLEET_SIDECARS_JSON FLEET_SHARED_JSON \
          FLEET_HOOK_PRE_ADD FLEET_HOOK_POST_ADD FLEET_HOOK_PRE_RM FLEET_HOOK_POST_RM
 }

@@ -67,6 +67,10 @@ if [ "${NEEDS_DB}" = "true" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   # Start temporarily to provision the database
   /usr/lib/postgresql/16/bin/pg_ctl start -D "${PG_DATA}" -w -t 30 -o '-k /tmp'
 
+  # The superuser created by initdb is named after the OS user that ran it.
+  # Without useradd, whoami may fail — fall back to the numeric UID.
+  export PGUSER="$(id -un 2>/dev/null || echo "$UID")"
+  export PGDATABASE=postgres
   # Idempotent: DB_NAME/DB_USER may already exist (e.g. the built-in `postgres`
   # superuser when DB_USER=postgres, or a re-provision). Guard so `set -e` does
   # not abort the whole entrypoint on a benign "already exists".
@@ -104,7 +108,7 @@ if [ "${NEEDS_DB}" = "true" ]; then
   cat >> "${SUPERVISORD_CONF}" <<SUPEREOF
 
 [program:postgresql]
-command=/usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main
+command=/usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main -k /tmp
 autostart=true
 autorestart=true
 priority=10

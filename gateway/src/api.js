@@ -35,7 +35,7 @@ router.get('/features/:key/health', async (req, res) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
 
-    const response = await fetch(`http://fleet-${key}:80/`, {
+    const response = await fetch(`http://fleet-${key}:8000/`, {
       method: 'HEAD',
       signal: controller.signal,
     });
@@ -263,7 +263,7 @@ router.post('/features/:key/reconcile', async (req, res) => {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 4000);
-      const response = await fetch(`http://fleet-${key}:80/`, { method: 'HEAD', signal: controller.signal });
+      const response = await fetch(`http://fleet-${key}:8000/`, { method: 'HEAD', signal: controller.signal });
       clearTimeout(timeout);
       healthy = response.ok;
     } catch {
@@ -514,7 +514,7 @@ async function runRebuild(key) {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
-        const response = await fetch(`http://fleet-${key}:80/`, {
+        const response = await fetch(`http://fleet-${key}:8000/`, {
           method: 'HEAD',
           signal: controller.signal,
         });
