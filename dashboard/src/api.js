@@ -138,7 +138,14 @@ export function fetchFailureClusters({ sinceHours = 24 } = {}) {
 /**
  * Fetch the full git diff of a feature's worktree against the merge-base of main.
  * @param {string} key  Composite key: "<project>-<name>"
- * @returns {Promise<{ patch: string, isEmpty: boolean }>}
+ * @returns {Promise<{
+ *   status: 'ok' | 'no-changes' | 'unavailable',
+ *   patch: string,
+ *   isEmpty: boolean,
+ *   truncated?: boolean,
+ *   originalBytes?: number,
+ *   reason?: string,
+ * }>}
  */
 export function getDiff(key) {
   return request(`/_fleet/api/features/${key}/diff`);

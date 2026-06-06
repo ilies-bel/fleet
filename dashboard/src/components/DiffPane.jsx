@@ -64,6 +64,18 @@ const emptyStyle = {
   letterSpacing: '0.05em',
 };
 
+const unavailableStyle = {
+  flex: 1,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'var(--color-bg)',
+  fontFamily: 'var(--font-mono)',
+  color: '#555',
+  fontSize: '0.85rem',
+  letterSpacing: '0.03em',
+};
+
 /** Format bytes as MB to one decimal place, e.g. 1048576 → "1.0 MB" */
 const formatMB = b => (b / 1_048_576).toFixed(1) + ' MB';
 
@@ -97,12 +109,14 @@ function parseDiffRobust(patch) {
  * side-by-side diff using react-diff-view with syntax highlighting.
  *
  * States:
- *  - loading — getDiff(activeKey) is in flight.
- *  - error   — getDiff rejected; the message is shown inline.
- *  - empty   — branch is identical to main (isEmpty: true, empty patch, or
- *              no parseable files): a centered terminal-style message is shown.
- *  - diff    — one DiffFile block per changed file, optionally preceded by a
- *              truncation banner when the gateway capped the output.
+ *  - loading     — getDiff(activeKey) is in flight.
+ *  - error       — getDiff rejected; the message is shown inline.
+ *  - no-changes  — branch is identical to main (status: 'no-changes'): a
+ *                  centered terminal-style message is shown.
+ *  - unavailable — git metadata not accessible in the container (status:
+ *                  'unavailable'): a calm panel with a short reason is shown.
+ *  - diff        — one DiffFile block per changed file, optionally preceded by
+ *                  a truncation banner when the gateway capped the output.
  *
  * The fetch is cancellable: re-rendering with a new activeKey aborts the
  * stale in-flight call so its result can't clobber the fresh one.
@@ -111,7 +125,8 @@ function parseDiffRobust(patch) {
  */
 export default function DiffPane({ activeKey }) {
   const [patch, setPatch] = useState(null);
-  const [isEmpty, setIsEmpty] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [reason, setReason] = useState('');
   const [error, setError] = useState(null);
   const [truncated, setTruncated] = useState(false);
   const [originalBytes, setOriginalBytes] = useState(0);
@@ -120,15 +135,17 @@ export default function DiffPane({ activeKey }) {
     let cancelled = false;
     setError(null);
     setPatch(null);
-    setIsEmpty(false);
+    setStatus(null);
+    setReason('');
     setTruncated(false);
     setOriginalBytes(0);
     getDiff(activeKey)
       .then(data => {
         if (cancelled) return;
-        if (data.isEmpty || !data.patch) {
-          setIsEmpty(true);
-        } else {
+        setStatus(data.status ?? (data.isEmpty || !data.patch ? 'no-changes' : 'ok'));
+        if (data.status === 'unavailable') {
+          setReason(data.reason ?? '');
+        } else if (data.patch && !data.isEmpty) {
           setPatch(data.patch);
           if (data.truncated) {
             setTruncated(true);
@@ -163,7 +180,7 @@ export default function DiffPane({ activeKey }) {
     );
   }
 
-  if (patch === null && !isEmpty) {
+  if (status === null) {
     return (
       <pre style={{ ...loadingStyle, color: '#555' }}>
         Loading diff…
@@ -171,7 +188,15 @@ export default function DiffPane({ activeKey }) {
     );
   }
 
-  if (isEmpty || !files.length) {
+  if (status === 'unavailable') {
+    return (
+      <div className="diff-pane-unavailable" style={unavailableStyle}>
+        {'// Diff unavailable — ' + (reason || 'unknown reason')}
+      </div>
+    );
+  }
+
+  if (status === 'no-changes' || !files.length) {
     return (
       <div style={emptyStyle}>
         // NO CHANGES VS main

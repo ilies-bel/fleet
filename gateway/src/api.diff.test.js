@@ -57,7 +57,7 @@ vi.mock('./host-metrics.js', () => ({
 
 // ── import after mocks are in place ──────────────────────────────────────────
 import { getFeature } from './registry.js';
-import { dockerExecStream } from './docker.js';
+import { dockerExec, dockerExecStream } from './docker.js';
 import router from './api.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -99,6 +99,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: probe succeeds (git is available inside the container).
+  dockerExec.mockResolvedValue('true\n');
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -114,7 +116,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body).toEqual({ error: 'Feature not registered' });
   });
 
-  it('returns { patch, isEmpty: false } when git diff produces output', async () => {
+  it('returns { status: "ok", patch, isEmpty: false } when git diff produces output', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
       worktreePath: '/tmp/worktrees/app-feat',
@@ -127,13 +129,14 @@ describe('GET /_fleet/api/features/:key/diff', () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.status).toBe('ok');
     expect(body.patch).toBe(diffOutput);
     expect(body.isEmpty).toBe(false);
     expect(body.truncated).toBe(false);
     expect(body.originalBytes).toBe(diffOutput.length);
   });
 
-  it('returns { patch: "", isEmpty: true, truncated: false, originalBytes: 0 } when there are no changes', async () => {
+  it('returns { status: "no-changes", patch: "", isEmpty: true, truncated: false, originalBytes: 0 } when there are no changes', async () => {
     getFeature.mockReturnValue({
       key: 'app-clean',
       worktreePath: '/tmp/worktrees/app-clean',
@@ -145,7 +148,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ patch: '', isEmpty: true, truncated: false, originalBytes: 0 });
+    expect(body).toEqual({ status: 'no-changes', patch: '', isEmpty: true, truncated: false, originalBytes: 0 });
   });
 
   it('invokes dockerExecStream with --no-optional-locks and three-dot merge-base syntax', async () => {
@@ -178,18 +181,58 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body.error).toMatch(/worktree/i);
   });
 
-  it('returns 500 when dockerExecStream rejects', async () => {
+  it('returns 500 when dockerExecStream rejects after a successful probe', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
-    dockerExecStream.mockRejectedValue(new Error('fatal: not a git repository'));
+    // Probe succeeds (already set in beforeEach); diff stream fails unexpectedly.
+    dockerExecStream.mockRejectedValue(new Error('docker exec stream error'));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toMatch(/not a git repository/i);
+    expect(body.error).toMatch(/docker exec stream error/i);
+  });
+
+  it('returns 200 { status: "unavailable" } when the probe exec throws (container not running)', async () => {
+    getFeature.mockReturnValue({
+      key: 'app-feat',
+      worktreePath: '/tmp/worktrees/app-feat',
+      branch: 'feat',
+    });
+    dockerExec.mockRejectedValue(new Error("Container 'fleet-app-feat' is not running"));
+
+    const res = await fetch(`${baseUrl}/features/app-feat/diff`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('unavailable');
+    expect(typeof body.reason).toBe('string');
+    expect(body.reason.length).toBeGreaterThan(0);
+    expect(body.patch).toBe('');
+    expect(body.isEmpty).toBe(true);
+    expect(body.truncated).toBe(false);
+    expect(body.originalBytes).toBe(0);
+  });
+
+  it('returns 200 { status: "unavailable" } when the probe output does not contain "true" (not a git repo)', async () => {
+    getFeature.mockReturnValue({
+      key: 'app-feat',
+      worktreePath: '/tmp/worktrees/app-feat',
+      branch: 'feat',
+    });
+    dockerExec.mockResolvedValue('fatal: not a git repository\n');
+
+    const res = await fetch(`${baseUrl}/features/app-feat/diff`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('unavailable');
+    expect(body.reason).toBe('not a git repository');
+    expect(body.patch).toBe('');
+    expect(body.isEmpty).toBe(true);
   });
 });

@@ -26,8 +26,8 @@ describe('DiffPane — empty state', () => {
 
   // ── Tracer bullet: empty state text appears when patch is empty ───────────
 
-  it('shows "// NO CHANGES VS main" when getDiff resolves with isEmpty: true', async () => {
-    getDiff.mockResolvedValue({ patch: '', isEmpty: true });
+  it('shows "// NO CHANGES VS main" when getDiff resolves with status: "no-changes"', async () => {
+    getDiff.mockResolvedValue({ status: 'no-changes', patch: '', isEmpty: true });
 
     render(<DiffPane activeKey="my-feature" />);
 
@@ -39,7 +39,7 @@ describe('DiffPane — empty state', () => {
   // ── No <pre> patch block in the empty case ────────────────────────────────
 
   it('renders zero <Diff> (pre) blocks when the branch has no changes', async () => {
-    getDiff.mockResolvedValue({ patch: '', isEmpty: true });
+    getDiff.mockResolvedValue({ status: 'no-changes', patch: '', isEmpty: true });
 
     render(<DiffPane activeKey="my-feature" />);
 
@@ -51,7 +51,7 @@ describe('DiffPane — empty state', () => {
     expect(document.querySelector('pre')).not.toBeInTheDocument();
   });
 
-  // ── isEmpty: false with real patch → normal render, no empty-state ────────
+  // ── status: "ok" with real patch → normal render, no empty-state ─────────
 
   it('renders the rich diff and no empty-state message when getDiff returns a non-empty patch', async () => {
     const validPatch = [
@@ -64,7 +64,7 @@ describe('DiffPane — empty state', () => {
       '-const y = 2;',
       '+const y = 3;',
     ].join('\n');
-    getDiff.mockResolvedValue({ patch: validPatch, isEmpty: false });
+    getDiff.mockResolvedValue({ status: 'ok', patch: validPatch, isEmpty: false });
 
     render(<DiffPane activeKey="my-feature" />);
 
@@ -78,7 +78,7 @@ describe('DiffPane — empty state', () => {
   // ── getDiff called with correct key ──────────────────────────────────────
 
   it('calls getDiff with the provided activeKey', () => {
-    getDiff.mockResolvedValue({ patch: '', isEmpty: true });
+    getDiff.mockResolvedValue({ status: 'no-changes', patch: '', isEmpty: true });
 
     render(<DiffPane activeKey="feature-xyz" />);
 

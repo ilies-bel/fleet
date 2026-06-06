@@ -789,11 +789,19 @@ router.post('/cluster/bootstrap', async (req, res) => {
  * ensures the index lock is never taken, so the command cannot collide with
  * in-progress edits.
  *
+ * A probe step runs `git rev-parse --is-inside-work-tree` first. If that exec
+ * fails (container not running, Docker socket error) or the stdout does not
+ * contain "true" (not a git repository), the endpoint responds 200 with
+ * `status: 'unavailable'` and a short human-readable reason rather than 500.
+ *
  * Output is capped at DIFF_CAP_BYTES. When the underlying git output exceeds
  * the cap, the response carries `truncated: true` and `originalBytes` reflects
  * the full byte count before truncation.
  *
- * Response: { patch: string, isEmpty: boolean, truncated: boolean, originalBytes: number }
+ * Response: { status: 'ok'|'no-changes'|'unavailable', patch: string, isEmpty: boolean, truncated: boolean, originalBytes: number }
+ *   status        — 'ok' when patch is non-empty, 'no-changes' when branch matches main,
+ *                   'unavailable' when git is not accessible inside the container
+ *   reason        — present only when status is 'unavailable'; short human-readable explanation
  *   patch         — raw unified diff output (empty string when there are no changes)
  *   isEmpty       — true when patch is the empty string
  *   truncated     — true when git output exceeded DIFF_CAP_BYTES
@@ -801,15 +809,19 @@ router.post('/cluster/bootstrap', async (req, res) => {
  *
  * 404 — feature not registered
  * 422 — feature has no worktreePath (cluster-hosted features, for example)
- * 500 — git command or Docker exec failed
+ * 500 — unexpected error after a successful git availability probe
  */
 const DIFF_CAP_BYTES = 1_048_576;
 
-// Mutable shim so tests can swap out dockerExecStream without module mocking.
+// Mutable shims so tests can swap out docker implementations without module mocking.
 let _dockerExecStreamImpl = dockerExecStream;
+let _dockerExecImpl = dockerExec;
 
 /** @internal — test seam, allows tests to replace the dockerExecStream implementation. */
 export function _setDockerExecStreamImpl(fn) { _dockerExecStreamImpl = fn; }
+
+/** @internal — test seam, allows tests to replace the dockerExec implementation (probe step). */
+export function _setDockerExecImpl(fn) { _dockerExecImpl = fn; }
 
 router.get('/features/:key/diff', async (req, res) => {
   const { key } = req.params;
@@ -822,6 +834,34 @@ router.get('/features/:key/diff', async (req, res) => {
   }
 
   const containerName = `fleet-${key}`;
+
+  // Probe: verify git is available inside the container before streaming the diff.
+  let probeOut;
+  try {
+    probeOut = await _dockerExecImpl(containerName, [
+      'git', '-C', '/app', 'rev-parse', '--is-inside-work-tree',
+    ]);
+  } catch (err) {
+    return res.json({
+      status: 'unavailable',
+      reason: err.message || 'container exec failed',
+      patch: '',
+      isEmpty: true,
+      truncated: false,
+      originalBytes: 0,
+    });
+  }
+  if (!probeOut || !probeOut.trim().includes('true')) {
+    return res.json({
+      status: 'unavailable',
+      reason: 'not a git repository',
+      patch: '',
+      isEmpty: true,
+      truncated: false,
+      originalBytes: 0,
+    });
+  }
+
   try {
     const { stdout, abort } = await _dockerExecStreamImpl(containerName, [
       'git', '--no-optional-locks', '-C', '/app', 'diff', 'main...HEAD',
@@ -838,7 +878,9 @@ router.get('/features/:key/diff', async (req, res) => {
         if (responded) return;
         responded = true;
         const patch = Buffer.concat(chunks).toString('utf8');
-        res.json({ patch, isEmpty: patch.length === 0, truncated, originalBytes });
+        const isEmpty = patch.length === 0;
+        const status = isEmpty ? 'no-changes' : 'ok';
+        res.json({ status, patch, isEmpty, truncated, originalBytes });
         resolve();
       };
 
