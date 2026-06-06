@@ -6,9 +6,9 @@
  * real cluster.  The backend dispatch tests verify that startFeature() routes
  * to the cluster or Docker backend based on feature.host.
  *
- * Short timeouts (podPollTimeoutMs: 100, supervisordPollTimeoutMs: 100) are
- * passed to every startClusterFeature() call so timeout-failure tests run
- * in milliseconds rather than minutes.
+ * Polling intervals are 0 throughout so tests complete on the first iteration.
+ * Timeout values are generous (5 s) so retry tests have wall-clock headroom;
+ * tests that intentionally trigger a timeout use their own inline config.
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
@@ -28,12 +28,17 @@ import {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/** Polling options that make every timeout fire quickly in tests. */
+/**
+ * Polling options used by the happy-path and error-step tests.
+ * Intervals are 0 so iterations are immediate; timeouts are generous so that
+ * multi-iteration retry tests never race a wall-clock deadline on a loaded CI
+ * machine.  Tests that must trigger a timeout pass their own inline config.
+ */
 const FAST = {
   podPollIntervalMs: 0,
-  podPollTimeoutMs: 100,
+  podPollTimeoutMs: 5_000,
   supervisordPollIntervalMs: 0,
-  supervisordPollTimeoutMs: 100,
+  supervisordPollTimeoutMs: 5_000,
 };
 
 /**
@@ -216,10 +221,11 @@ describe('startClusterFeature — failures reject with ClusterLifecycleError', (
   });
 
   test('wait-running timeout rejects with step "wait-running"', async () => {
-    // getPodStatus always returns Pending — timeout triggers failure
+    // getPodStatus always returns Pending — timeout triggers failure.
+    // Use a tight podPollTimeoutMs so the test finishes quickly.
     _setOcImpl(makeOc({ getPodStatus: async () => 'Pending' }));
     await assert.rejects(
-      startClusterFeature(makeFeature(), FAST),
+      startClusterFeature(makeFeature(), { ...FAST, podPollTimeoutMs: 100 }),
       (err) => {
         assert.ok(err instanceof ClusterLifecycleError);
         assert.equal(err.step, 'wait-running');
@@ -281,7 +287,9 @@ describe('startClusterFeature — failures reject with ClusterLifecycleError', (
   });
 
   test('wait-supervisord timeout rejects with step "wait-supervisord"', async () => {
-    // supervisorctl status always fails — timeout triggers failure
+    // supervisorctl status always fails — timeout triggers failure.
+    // Use a tight supervisordPollTimeoutMs so the test finishes quickly;
+    // podPollTimeoutMs is left generous so the pod reaches Running first.
     _setOcImpl(makeOc({
       exec: async (_pod, _ns, argv) => {
         if (argv[0] === 'supervisorctl') throw new Error('supervisord not running');
@@ -289,7 +297,7 @@ describe('startClusterFeature — failures reject with ClusterLifecycleError', (
       },
     }));
     await assert.rejects(
-      startClusterFeature(makeFeature(), FAST),
+      startClusterFeature(makeFeature(), { ...FAST, supervisordPollTimeoutMs: 100 }),
       (err) => {
         assert.ok(err instanceof ClusterLifecycleError);
         assert.equal(err.step, 'wait-supervisord');
