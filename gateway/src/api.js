@@ -136,10 +136,13 @@ router.delete('/features/:key', async (req, res) => {
 router.post('/features/:key/stop', async (req, res) => {
   const { key } = req.params;
   if (!getFeature(key)) return res.status(404).json({ error: 'Feature not registered' });
+  const opId = startOperation({ kind: 'stop', key });
   try {
     await stopContainer(`fleet-${key}`);
+    endOperation(opId, { outcome: 'success' });
     res.json({ ok: true });
   } catch (err) {
+    endOperation(opId, { outcome: 'failure', error: err });
     if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
     if (err instanceof DockerContainerError) return res.status(err.status === 404 ? 404 : 503).json({ error: err.message });
     res.status(500).json({ error: err.message });
