@@ -1,21 +1,45 @@
 /**
  * Tests for the 1 MB cap on GET /_fleet/api/features/:key/diff
  *
- * Uses Node's built-in test runner (node --test). No module-level mocking is
- * needed: a test seam (_setDiffSpawnImpl) lets tests inject a fake git process,
- * and the real registry module is used to register a throwaway test feature.
+ * Uses Vitest. No module-level mocking is needed: a test seam
+ * (_setDockerExecStreamImpl) lets tests inject a fake streaming exec, and
+ * the real registry module is used to register a throwaway test feature.
  *
  * Run with:
- *   cd gateway && node --test src/api.diff-truncation.test.js
+ *   cd gateway && npx vitest run src/api.diff-truncation.test.js
  */
 
-import { describe, it, before, after } from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
-import { spawn } from 'node:child_process';
 import express from 'express';
-import { _setDiffSpawnImpl, default as router } from './api.js';
+
+// ── mock child_process (api.js imports spawn for other routes) ────────────────
+vi.mock('child_process', () => ({
+  spawn: vi.fn(),
+  execFile: vi.fn(),
+}));
+
+// ── mock heavy docker collaborators — not needed for this test ────────────────
+vi.mock('./docker.js', () => ({
+  dockerExec: vi.fn(),
+  dockerExecStream: vi.fn(),
+  dockerLogs: vi.fn(),
+  stopContainer: vi.fn(),
+  startContainer: vi.fn(),
+  getContainerStats: vi.fn(),
+  inspectContainer: vi.fn(),
+  DockerSocketError: class DockerSocketError extends Error {},
+  DockerContainerError: class DockerContainerError extends Error {},
+}));
+
+vi.mock('./cluster/bootstrap.js', () => ({ bootstrap: vi.fn() }));
+vi.mock('./backend.js', () => ({ stopFeature: vi.fn() }));
+vi.mock('./host-metrics.js', () => ({ getHostMetrics: vi.fn() }));
+
+// ── import after mocks ────────────────────────────────────────────────────────
+import { _setDockerExecStreamImpl, default as router } from './api.js';
+import { dockerExecStream } from './docker.js';
 import { register, unregister } from './registry.js';
 
 const DIFF_CAP_BYTES = 1_048_576;
@@ -28,7 +52,7 @@ const TEST_KEY = `${TEST_PROJECT}-${TEST_NAME}`;
 let server;
 let baseUrl;
 
-before(async () => {
+beforeAll(async () => {
   const app = express();
   app.use(express.json());
   app.use('/_fleet/api', router);
@@ -44,39 +68,45 @@ before(async () => {
   register(TEST_PROJECT, TEST_NAME, 'test-branch', '/tmp/trunc-test-worktree');
 });
 
-after(async () => {
+afterAll(async () => {
   unregister(TEST_KEY);
-  _setDiffSpawnImpl(spawn); // restore real spawn
+  _setDockerExecStreamImpl(dockerExecStream); // restore real impl
   await new Promise((resolve) => server.close(resolve));
 });
 
-// ── Helper: fake child process that emits chunks then closes ──────────────────
+// ── Helper: fake streaming exec that emits chunks then closes ─────────────────
 
 /**
- * Creates a fake child process that emits the given chunks as stdout data
- * events, then fires close. When kill() is called, emission stops and close
- * fires on the next tick.
+ * Creates a fake streaming exec result with a stdout EventEmitter that emits
+ * the given chunks as data events then fires end/close. When abort() is called,
+ * emission stops and close fires on the next tick — the in-flight git process
+ * is considered terminated.
  *
  * @param {Array<Buffer|string>} chunks
+ * @returns {{ stdout: EventEmitter, abort: () => void }}
  */
-function makeFakeChild(chunks) {
-  const child = new EventEmitter();
-  child.stdout = new EventEmitter();
-  let killed = false;
+function makeFakeStream(chunks) {
+  const stdout = new EventEmitter();
+  let aborted = false;
 
-  child.kill = () => { killed = true; };
+  const abort = () => { aborted = true; };
 
   setImmediate(function emitNext(remaining) {
-    if (killed || remaining.length === 0) {
-      child.emit('close', killed ? 143 : 0);
+    if (aborted) {
+      stdout.emit('close');
+      return;
+    }
+    if (remaining.length === 0) {
+      stdout.emit('end');
+      stdout.emit('close');
       return;
     }
     const chunk = remaining[0];
-    child.stdout.emit('data', Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    stdout.emit('data', Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     setImmediate(emitNext, remaining.slice(1));
   }, [...chunks]);
 
-  return child;
+  return { stdout, abort };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -85,36 +115,26 @@ describe('GET /features/:key/diff — 1 MB cap', () => {
   it('truncates a 2 MB patch to <= 1 MB and sets truncated=true', async () => {
     // 2 MB of ASCII 'A' bytes — byte length == string length, so patch.length is predictable
     const twoMB = Buffer.alloc(2 * 1024 * 1024, 65);
-    _setDiffSpawnImpl(() => makeFakeChild([twoMB]));
+    _setDockerExecStreamImpl(() => Promise.resolve(makeFakeStream([twoMB])));
 
     const res = await fetch(`${baseUrl}/features/${TEST_KEY}/diff`);
-    assert.equal(res.status, 200, `unexpected status ${res.status}`);
+    expect(res.status).toBe(200);
 
     const body = await res.json();
-    assert.equal(body.truncated, true, 'truncated should be true for a 2 MB patch');
-    assert.ok(
-      body.patch.length <= DIFF_CAP_BYTES,
-      `patch.length ${body.patch.length} should be <= cap ${DIFF_CAP_BYTES}`,
-    );
-    assert.ok(
-      body.originalBytes > DIFF_CAP_BYTES,
-      `originalBytes ${body.originalBytes} should exceed the cap for a 2 MB input`,
-    );
+    expect(body.truncated).toBe(true);
+    expect(body.patch.length).toBeLessThanOrEqual(DIFF_CAP_BYTES);
+    expect(body.originalBytes).toBeGreaterThan(DIFF_CAP_BYTES);
   });
 
   it('does not set truncated for a below-cap patch', async () => {
     const smallPatch = 'diff --git a/foo.js b/foo.js\n+small change\n';
-    _setDiffSpawnImpl(() => makeFakeChild([smallPatch]));
+    _setDockerExecStreamImpl(() => Promise.resolve(makeFakeStream([smallPatch])));
 
     const res = await fetch(`${baseUrl}/features/${TEST_KEY}/diff`);
-    assert.equal(res.status, 200, `unexpected status ${res.status}`);
+    expect(res.status).toBe(200);
 
     const body = await res.json();
-    assert.equal(body.truncated, false, 'truncated should be false for a small patch');
-    assert.equal(
-      body.originalBytes,
-      smallPatch.length,
-      'originalBytes should equal patch length for below-cap patches',
-    );
+    expect(body.truncated).toBe(false);
+    expect(body.originalBytes).toBe(smallPatch.length);
   });
 });

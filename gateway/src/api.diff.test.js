@@ -2,12 +2,13 @@
  * Tests for GET /_fleet/api/features/:key/diff
  *
  * Exercises the diff endpoint through a real Express HTTP server on an
- * ephemeral port. dockerExec is mocked so no real Docker daemon or git
+ * ephemeral port. dockerExecStream is mocked so no real Docker daemon or git
  * binary is invoked — we are testing the HTTP contract, not git itself.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'http';
+import { PassThrough } from 'node:stream';
 import express from 'express';
 
 // ── mock child_process before importing api.js (api.js uses spawn in other routes) ──
@@ -32,6 +33,7 @@ vi.mock('./registry.js', () => ({
 
 vi.mock('./docker.js', () => ({
   dockerExec: vi.fn(),
+  dockerExecStream: vi.fn(),
   dockerLogs: vi.fn(),
   stopContainer: vi.fn(),
   startContainer: vi.fn(),
@@ -55,8 +57,23 @@ vi.mock('./host-metrics.js', () => ({
 
 // ── import after mocks are in place ──────────────────────────────────────────
 import { getFeature } from './registry.js';
-import { dockerExec } from './docker.js';
+import { dockerExecStream } from './docker.js';
 import router from './api.js';
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Wrap a string in a PassThrough stream so the streaming diff handler can
+ * consume it like a real docker exec response.
+ * @param {string} str
+ * @returns {import('stream').PassThrough}
+ */
+function makeStream(str) {
+  const pt = new PassThrough();
+  if (str) pt.write(Buffer.from(str, 'utf8'));
+  pt.end();
+  return pt;
+}
 
 // ── test server lifecycle ─────────────────────────────────────────────────────
 let server;
@@ -104,7 +121,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       branch: 'feat',
     });
     const diffOutput = 'diff --git a/foo.js b/foo.js\n+added line\n';
-    dockerExec.mockResolvedValue(diffOutput);
+    dockerExecStream.mockResolvedValue({ stdout: makeStream(diffOutput), abort: vi.fn() });
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
@@ -122,7 +139,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       worktreePath: '/tmp/worktrees/app-clean',
       branch: 'clean',
     });
-    dockerExec.mockResolvedValue('');
+    dockerExecStream.mockResolvedValue({ stdout: makeStream(''), abort: vi.fn() });
 
     const res = await fetch(`${baseUrl}/features/app-clean/diff`);
 
@@ -131,17 +148,17 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body).toEqual({ patch: '', isEmpty: true, truncated: false, originalBytes: 0 });
   });
 
-  it('invokes dockerExec with --no-optional-locks and three-dot merge-base syntax', async () => {
+  it('invokes dockerExecStream with --no-optional-locks and three-dot merge-base syntax', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
       worktreePath: '/opt/worktrees/app-feat',
       branch: 'feat',
     });
-    dockerExec.mockResolvedValue('');
+    dockerExecStream.mockResolvedValue({ stdout: makeStream(''), abort: vi.fn() });
 
     await fetch(`${baseUrl}/features/app-feat/diff`);
 
-    expect(dockerExec).toHaveBeenCalledWith(
+    expect(dockerExecStream).toHaveBeenCalledWith(
       'fleet-app-feat',
       ['git', '--no-optional-locks', '-C', '/app', 'diff', 'main...HEAD'],
     );
@@ -161,13 +178,13 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body.error).toMatch(/worktree/i);
   });
 
-  it('returns 500 when dockerExec rejects', async () => {
+  it('returns 500 when dockerExecStream rejects', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
-    dockerExec.mockRejectedValue(new Error('fatal: not a git repository'));
+    dockerExecStream.mockRejectedValue(new Error('fatal: not a git repository'));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 

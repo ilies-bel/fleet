@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
 import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
-import { dockerExec, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
+import { dockerExec, dockerExecStream, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
 import { getHostMetrics } from './host-metrics.js';
@@ -805,11 +805,11 @@ router.post('/cluster/bootstrap', async (req, res) => {
  */
 const DIFF_CAP_BYTES = 1_048_576;
 
-// Mutable shim so tests can swap out dockerExec without module mocking.
-let _dockerExecImpl = dockerExec;
+// Mutable shim so tests can swap out dockerExecStream without module mocking.
+let _dockerExecStreamImpl = dockerExecStream;
 
-/** @internal — test seam, allows tests to replace the dockerExec implementation. */
-export function _setDockerExecImpl(fn) { _dockerExecImpl = fn; }
+/** @internal — test seam, allows tests to replace the dockerExecStream implementation. */
+export function _setDockerExecStreamImpl(fn) { _dockerExecStreamImpl = fn; }
 
 router.get('/features/:key/diff', async (req, res) => {
   const { key } = req.params;
@@ -823,26 +823,48 @@ router.get('/features/:key/diff', async (req, res) => {
 
   const containerName = `fleet-${key}`;
   try {
-    const output = await _dockerExecImpl(containerName, [
+    const { stdout, abort } = await _dockerExecStreamImpl(containerName, [
       'git', '--no-optional-locks', '-C', '/app', 'diff', 'main...HEAD',
     ]);
 
-    const rawBytes = Buffer.byteLength(output, 'utf8');
-    let patch;
-    let truncated = false;
+    await new Promise((resolve, reject) => {
+      const chunks = [];
+      let collected = 0;
+      let truncated = false;
+      let originalBytes = 0;
+      let responded = false;
 
-    if (rawBytes > DIFF_CAP_BYTES) {
-      patch = Buffer.from(output, 'utf8').slice(0, DIFF_CAP_BYTES).toString('utf8');
-      truncated = true;
-    } else {
-      patch = output;
-    }
+      const finish = () => {
+        if (responded) return;
+        responded = true;
+        const patch = Buffer.concat(chunks).toString('utf8');
+        res.json({ patch, isEmpty: patch.length === 0, truncated, originalBytes });
+        resolve();
+      };
 
-    res.json({
-      patch,
-      isEmpty: patch.length === 0,
-      truncated,
-      originalBytes: truncated ? rawBytes : patch.length,
+      stdout.on('data', (chunk) => {
+        originalBytes += chunk.length;
+        if (truncated) return;
+        const avail = DIFF_CAP_BYTES - collected;
+        if (chunk.length <= avail) {
+          chunks.push(chunk);
+          collected += chunk.length;
+        } else {
+          chunks.push(chunk.slice(0, avail));
+          collected = DIFF_CAP_BYTES;
+          truncated = true;
+          abort();
+          finish();
+        }
+      });
+
+      stdout.on('end', finish);
+      stdout.on('close', finish);
+      stdout.on('error', (err) => {
+        if (responded) return;
+        responded = true;
+        reject(err);
+      });
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
