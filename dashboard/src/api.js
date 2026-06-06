@@ -134,3 +134,12 @@ export function fetchFailureClusters({ sinceHours = 24 } = {}) {
   const params = sinceHours !== 24 ? `?sinceHours=${sinceHours}` : '';
   return request(`/_fleet/api/operations/failures/clustered${params}`);
 }
+
+/**
+ * Fetch the full git diff of a feature's worktree against the merge-base of main.
+ * @param {string} key  Composite key: "<project>-<name>"
+ * @returns {Promise<{ patch: string, isEmpty: boolean }>}
+ */
+export function getDiff(key) {
+  return request(`/_fleet/api/features/${key}/diff`);
+}

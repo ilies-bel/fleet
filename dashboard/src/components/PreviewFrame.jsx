@@ -1,10 +1,12 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+import DiffPane from './DiffPane.jsx';
 
 // Port 3000 is the transparent proxy — always the same URL regardless of which feature is active.
 const PROXY_URL = 'http://localhost:3000/';
 
 export default function PreviewFrame({ activePreview, branch, previewKey, title }) {
   const iframeRef = useRef(null);
+  const [viewMode, setViewMode] = useState('preview');
 
   if (!activePreview) {
     return (
@@ -34,9 +36,24 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title 
         display: 'flex',
         alignItems: 'center',
         padding: '0 0.75rem',
-        gap: '1rem',
+        gap: '0.5rem',
         flexShrink: 0,
       }}>
+        {/* View-mode tabs — left-aligned */}
+        <button
+          onClick={() => setViewMode('preview')}
+          style={viewMode === 'preview' ? activeTabBtn : toolbarBtn}
+        >
+          [PREVIEW]
+        </button>
+        <button
+          onClick={() => setViewMode('diff')}
+          style={viewMode === 'diff' ? activeTabBtn : toolbarBtn}
+        >
+          [DIFF]
+        </button>
+
+        {/* Feature title — expands to fill available space */}
         <span
           title={`${activePreview} // ${branch}`}
           style={{
@@ -51,21 +68,27 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title 
         >
           {title || activePreview}
         </span>
-        <button
-          onClick={() => window.open(PROXY_URL, '_blank')}
-          style={toolbarBtn}
-        >
-          [↗ OPEN IN TAB]
-        </button>
-        <button
-          onClick={() => { if (iframeRef.current) iframeRef.current.src = PROXY_URL; }}
-          style={toolbarBtn}
-        >
-          [↺ REFRESH]
-        </button>
+
+        {/* Preview-only controls — hidden while in DIFF view */}
+        {viewMode === 'preview' && (
+          <>
+            <button
+              onClick={() => window.open(PROXY_URL, '_blank')}
+              style={toolbarBtn}
+            >
+              [↗ OPEN IN TAB]
+            </button>
+            <button
+              onClick={() => { if (iframeRef.current) iframeRef.current.src = PROXY_URL; }}
+              style={toolbarBtn}
+            >
+              [↺ REFRESH]
+            </button>
+          </>
+        )}
       </div>
 
-      {/* Preview iframe — key prop forces remount (full reload) when active feature changes */}
+      {/* Preview iframe — always mounted; hidden in diff mode so state is preserved */}
       <iframe
         key={previewKey}
         ref={iframeRef}
@@ -75,9 +98,13 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title 
           border: 'none',
           width: '100%',
           background: '#fff',
+          display: viewMode === 'preview' ? 'flex' : 'none',
         }}
         title={`Preview: ${activePreview}`}
       />
+
+      {/* Diff pane — only mounted when diff mode is active */}
+      {viewMode === 'diff' && <DiffPane activeKey={activePreview} />}
     </div>
   );
 }
@@ -92,4 +119,10 @@ const toolbarBtn = {
   cursor: 'pointer',
   borderRadius: 0,
   whiteSpace: 'nowrap',
+};
+
+const activeTabBtn = {
+  ...toolbarBtn,
+  borderColor: 'var(--color-accent)',
+  color: 'var(--color-accent)',
 };

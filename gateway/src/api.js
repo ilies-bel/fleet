@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
@@ -749,6 +749,47 @@ router.post('/cluster/bootstrap', async (req, res) => {
   try {
     await bootstrap(namespace.trim());
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /_fleet/api/features/:key/diff
+ * Returns the full git diff of the feature's worktree against the merge-base
+ * of main and the feature branch (three-dot syntax: `git diff main...HEAD`).
+ *
+ * Response: { patch: string, isEmpty: boolean }
+ *   patch    — raw unified diff output (empty string when there are no changes)
+ *   isEmpty  — true when patch is the empty string
+ *
+ * 404 — feature not registered
+ * 422 — feature has no worktreePath (cluster-hosted features, for example)
+ * 500 — git command failed
+ */
+router.get('/features/:key/diff', async (req, res) => {
+  const { key } = req.params;
+  const feature = getFeature(key);
+  if (!feature) {
+    return res.status(404).json({ error: 'Feature not registered' });
+  }
+  if (!feature.worktreePath) {
+    return res.status(422).json({ error: 'Feature has no worktree path' });
+  }
+
+  try {
+    const patch = await new Promise((resolve, reject) => {
+      execFile(
+        'git',
+        ['-C', feature.worktreePath, 'diff', 'main...HEAD'],
+        { maxBuffer: 10 * 1024 * 1024 },
+        (err, stdout) => {
+          if (err) reject(err);
+          else resolve(stdout);
+        },
+      );
+    });
+    res.json({ patch, isEmpty: patch.length === 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
