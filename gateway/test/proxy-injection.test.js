@@ -9,6 +9,7 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import zlib from 'node:zlib';
 import express from 'express';
 import { createProxyMiddleware, debugProxyErrorsPlugin, proxyEventsPlugin } from 'http-proxy-middleware';
 
@@ -75,6 +76,14 @@ function buildInjectionProxy(upstreamUrl) {
     ejectPlugins: true,
     plugins: [debugProxyErrorsPlugin, proxyEventsPlugin],
     on: {
+      proxyReq: (proxyReq) => {
+        // Mirror the production proxy: force identity encoding so the upstream
+        // returns plain text/html.  Without this, a browser-like Accept-Encoding:
+        // gzip in the test client would reach the upstream, which would gzip the
+        // response, and the proxyRes hook below would corrupt it by calling
+        // .toString('utf8') on compressed bytes.
+        proxyReq.setHeader('accept-encoding', 'identity');
+      },
       proxyRes: (proxyRes, _req, res) => {
         const contentType = proxyRes.headers['content-type'] || '';
         if (!contentType.startsWith('text/html')) return; // non-HTML: pass through untouched
@@ -168,6 +177,77 @@ describe('proxy injection — HTML and non-HTML responses', () => {
           res.on('end', () => {
             assert.equal(body, payload, 'JSON body must pass through untouched');
             assert.ok(!body.includes('<script>'), 'JSON response must not gain a script tag');
+            done();
+          });
+        }).on('error', done);
+      });
+    });
+  });
+
+  // Regression test for the gzip-corruption bug.
+  //
+  // Before the fix: the proxy forwarded the client's Accept-Encoding: gzip to
+  // the upstream; the upstream gzipped its response; the proxyRes hook called
+  // .toString('utf8') on the compressed bytes, producing U+FFFD corruption
+  // while leaving content-encoding: gzip in place.  The browser tried to gunzip
+  // garbage and rendered a blank page.
+  //
+  // After the fix: the proxyReq hook overrides to accept-encoding: identity, so
+  // the upstream returns plain text, and injection proceeds correctly.
+  test('gzip-capable upstream: body is browser-decodable HTML containing the picker script', (_t, done) => {
+    const rawBody = '<html><body><h1>Gzip App</h1></body></html>';
+
+    // Upstream honours Accept-Encoding — gzip when asked, plain text otherwise.
+    // This mirrors real nginx behaviour.
+    upstream = http.createServer((req, res) => {
+      const acceptEncoding = req.headers['accept-encoding'] || '';
+      if (acceptEncoding.includes('gzip')) {
+        zlib.gzip(Buffer.from(rawBody, 'utf8'), (err, compressed) => {
+          if (err) { res.writeHead(500); res.end(); return; }
+          res.writeHead(200, {
+            'content-type': 'text/html; charset=utf-8',
+            'content-encoding': 'gzip',
+            'content-length': compressed.byteLength,
+          });
+          res.end(compressed);
+        });
+      } else {
+        res.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-length': Buffer.byteLength(rawBody),
+        });
+        res.end(rawBody);
+      }
+    });
+
+    upstream.listen(0, '127.0.0.1', () => {
+      const { port: upstreamPort } = upstream.address();
+      const app = express();
+      app.use(buildInjectionProxy(`http://127.0.0.1:${upstreamPort}`));
+      gateway = app.listen(0, '127.0.0.1', () => {
+        const { port: gwPort } = gateway.address();
+        // Send Accept-Encoding: gzip exactly as a real browser would.
+        // Without the fix the proxy forwards this header; the upstream gzips;
+        // .toString('utf8') on compressed bytes produces U+FFFD garbage.
+        const options = {
+          hostname: '127.0.0.1',
+          port: gwPort,
+          path: '/',
+          headers: { 'accept-encoding': 'gzip' },
+        };
+        http.get(options, (res) => {
+          assert.equal(res.statusCode, 200);
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            const body = Buffer.concat(chunks).toString('utf8');
+            // U+FFFD appears when gzip magic bytes (e.g. 0x8b) are mis-decoded as UTF-8.
+            assert.ok(
+              !body.includes('�'),
+              'body must not contain U+FFFD replacement chars — would indicate gzip bytes mis-decoded as UTF-8'
+            );
+            const tag = `<script>${INJECTED_PICKER}</script>`;
+            assert.ok(body.includes(tag), 'proxied HTML must contain the injected picker script tag');
             done();
           });
         }).on('error', done);

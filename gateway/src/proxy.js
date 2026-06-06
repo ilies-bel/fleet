@@ -82,6 +82,13 @@ export function createFeatureProxy() {
     plugins: [debugProxyErrorsPlugin, proxyEventsPlugin],
     on: {
       proxyReq: (proxyReq, req) => {
+        // Force identity encoding so HTML arrives uncompressed.  The proxyRes
+        // injection hook does Buffer.concat(chunks).toString('utf8'); if the
+        // upstream returned gzip those bytes would be decoded as UTF-8,
+        // producing U+FFFD corruption while leaving content-encoding: gzip in
+        // place — the browser then tries to gunzip garbage and fails.
+        // Trade-off: slightly larger transfer for HTML; negligible for preview use.
+        proxyReq.setHeader('accept-encoding', 'identity');
         if (req._fleetFeature) proxyReq.setHeader('X-Fleet-Feature', req._fleetFeature);
       },
       proxyRes: (proxyRes, _req, res) => {
