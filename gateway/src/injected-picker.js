@@ -11,13 +11,70 @@
  * the check falls through to the '*' fallback that still requires the correct
  * message type prefix — future slices can tighten this further.
  */
+
+/**
+ * Compute a stable CSS reference for a DOM element using a four-step fallback:
+ *   1. id present          → { refKind: 'id',     selector: '#id',                label: id }
+ *   2. data-testid present → { refKind: 'testid', selector: '[data-testid="…"]',  label: value }
+ *   3. aria-label present  → { refKind: 'aria',   selector: '[aria-label="…"]',   label: value }
+ *   4. otherwise           → { refKind: 'css',    selector: shortest unique path, label: tagName }
+ *
+ * Uses el.ownerDocument for uniqueness checks so it works in both a browser
+ * context (where ownerDocument === document) and in synthetic DOM environments
+ * (linkedom, jsdom) used by unit tests.
+ *
+ * @param {Element} el
+ * @returns {{ refKind: 'id'|'testid'|'aria'|'css', selector: string, label: string }}
+ */
+export function computeRef(el) {
+  if (el.id) {
+    return { refKind: 'id', selector: '#' + el.id, label: el.id };
+  }
+  const testid = el.getAttribute('data-testid');
+  if (testid) {
+    return { refKind: 'testid', selector: '[data-testid="' + testid + '"]', label: testid };
+  }
+  const ariaLabel = el.getAttribute('aria-label');
+  if (ariaLabel) {
+    return { refKind: 'aria', selector: '[aria-label="' + ariaLabel + '"]', label: ariaLabel };
+  }
+
+  // Build shortest unique CSS path walking up toward body.
+  const ownerDoc = el.ownerDocument;
+  const parts = [];
+  let current = el;
+  while (current && current.tagName) {
+    const tag = current.tagName.toLowerCase();
+    const parent = current.parentElement;
+    // Stop at body — body alone is always unique enough as an anchor.
+    if (!parent || tag === 'body') {
+      parts.unshift(tag);
+      break;
+    }
+    const sameTagSiblings = Array.from(parent.children).filter(
+      function(c) { return c.tagName === current.tagName; }
+    );
+    const idx = sameTagSiblings.indexOf(current) + 1;
+    parts.unshift(tag + ':nth-of-type(' + idx + ')');
+    const candidate = parts.join(' > ');
+    if (ownerDoc.querySelectorAll(candidate).length === 1) {
+      break;
+    }
+    current = parent;
+  }
+  const selector = parts.join(' > ');
+  return { refKind: 'css', selector: selector, label: el.tagName.toLowerCase() };
+}
+
 export const INJECTED_PICKER = String.raw`(() => {
-  const state = { active: false };
+  const state = { active: false, captureRoot: null };
 
   // Resolve expected dashboard origin dynamically so no port is hardcoded.
   // ancestorOrigins[0] is the immediate parent frame's origin (Chromium/WebKit).
   const EXPECTED_DASHBOARD_ORIGIN =
     (window.location.ancestorOrigins && window.location.ancestorOrigins[0]) || '';
+
+  ${computeRef.toString()}
 
   // Closed shadow root — cached in closure; attachShadow may only be called once
   // per element, so we hold the reference here for subsequent activate/deactivate
@@ -32,6 +89,9 @@ export const INJECTED_PICKER = String.raw`(() => {
       host.id = 'mars-capture-root';
       document.documentElement.appendChild(host);
     }
+    // Expose the overlay host so onCaptureClick can ignore clicks that land on
+    // the picker UI rather than treating them as element selections.
+    state.captureRoot = host;
     _shadow = host.attachShadow({ mode: 'closed' });
     return _shadow;
   }
@@ -94,6 +154,26 @@ export const INJECTED_PICKER = String.raw`(() => {
     }
   }
 
+  function onCaptureClick(ev) {
+    // Ignore clicks that land on the capture-root overlay host (the banner /
+    // hover-highlight UI) so the operator can interact with it without
+    // accidentally picking it as a target element.
+    if (state.captureRoot &&
+        (ev.target === state.captureRoot || state.captureRoot.contains(ev.target))) {
+      return;
+    }
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    const ref = computeRef(ev.target);
+    window.parent.postMessage({
+      type: 'mars.capture.elementPicked',
+      refKind: ref.refKind,
+      selector: ref.selector,
+      route: location.pathname + location.search,
+      label: ref.label,
+    }, EXPECTED_DASHBOARD_ORIGIN || '*');
+  }
+
   window.addEventListener('message', function(event) {
     // Ignore messages whose type does not start with 'mars.capture.'
     if (
@@ -110,7 +190,15 @@ export const INJECTED_PICKER = String.raw`(() => {
     }
 
     if (event.data.type === 'mars.capture.activate') {
+      const wasActive = state.active;
       state.active = !!event.data.active;
+      // Register or tear down the capture-phase click listener.
+      if (state.active && !wasActive) {
+        document.addEventListener('click', onCaptureClick, { capture: true });
+      } else if (!state.active && wasActive) {
+        document.removeEventListener('click', onCaptureClick, { capture: true });
+      }
+      // Capture-mode visuals: shadow-DOM banner + hover-highlight overlay.
       const shadow = ensureRoot();
       if (state.active) {
         renderBanner(shadow);
