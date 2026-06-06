@@ -1,0 +1,118 @@
+.review-notes-panel {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0a0a0a;
+  border-left: 1px solid #222;
+  overflow: hidden;
+}
+
+.review-notes-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #222;
+  flex-shrink: 0;
+}
+
+.review-notes-panel__title {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.review-notes-panel__clear-btn {
+  background: none;
+  border: 1px solid #333;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.review-notes-panel__clear-btn:hover {
+  color: #e05252;
+  border-color: #e05252;
+}
+
+.review-notes-panel__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0;
+}
+
+.review-notes-panel__empty {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: #444;
+  padding: 1rem 0.75rem;
+  text-align: center;
+}
+
+.review-notes-panel__group-heading {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  color: var(--color-accent, #00ff9d);
+  text-transform: uppercase;
+  margin: 0.5rem 0.75rem 0.25rem;
+}
+
+.review-notes-panel__note-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.3rem 0.75rem;
+  border-bottom: 1px solid #111;
+}
+
+.review-notes-panel__note-row:last-child {
+  border-bottom: none;
+}
+
+.review-notes-panel__note-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.review-notes-panel__note-meta {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 0.2rem;
+}
+
+.review-notes-panel__note-text {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: #ccc;
+  word-break: break-word;
+}
+
+.review-notes-panel__delete-btn {
+  background: none;
+  border: none;
+  color: #444;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: color 0.1s;
+}
+
+.review-notes-panel__delete-btn:hover {
+  color: #e05252;
+}

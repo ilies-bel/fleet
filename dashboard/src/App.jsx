@@ -10,6 +10,7 @@ import OperationsList from './components/OperationsList.jsx';
 import FailureClusters from './components/FailureClusters.jsx';
 import OperationDetail from './components/OperationDetail.jsx';
 import { useReviewNotes } from './hooks/useReviewNotes.js';
+import ReviewNotesPanel from './components/ReviewNotesPanel.jsx';
 
 function NavBar({ onDrawerToggle, isNarrow }) {
   const linkStyle = ({ isActive }) => ({
@@ -178,6 +179,15 @@ const activeTitle = activeFeature?.title || activeFeature?.name || '';
         onToggleCapture={toggleCapture}
         addNote={addNote}
       />
+
+      {activePreview && (
+        <ReviewNotesPanel
+          notes={notesByWorktree[activePreview] ?? []}
+          worktree={activePreview}
+          removeNote={removeNote}
+          clearForWorktree={clearForWorktree}
+        />
+      )}
 
       {logFeature && (
         <LogPanel
