@@ -835,23 +835,56 @@ router.get('/features/:key/diff', async (req, res) => {
 
   const containerName = `fleet-${key}`;
 
-  // Probe: verify git is available inside the container before streaming the diff.
-  let probeOut;
+  // Resolve source directories from the container's env (same pattern as runSync).
+  // Feature repos are mounted at /app/<subdir>, not at /app itself.
+  let sourceDirs;
   try {
-    probeOut = await _dockerExecImpl(containerName, [
-      'git', '-C', '/app', 'rev-parse', '--is-inside-work-tree',
-    ]);
+    const info = await inspectContainer(containerName);
+    if (!info) {
+      return res.json({
+        status: 'unavailable',
+        reason: 'container not found',
+        patch: '',
+        isEmpty: true,
+        truncated: false,
+        originalBytes: 0,
+      });
+    }
+    const envMap = Object.fromEntries(
+      (info.Config?.Env ?? []).map(e => {
+        const idx = e.indexOf('=');
+        return idx === -1 ? [e, ''] : [e.slice(0, idx), e.slice(idx + 1)];
+      }),
+    );
+    const candidates = [envMap.BACKEND_DIR, envMap.FRONTEND_DIR].filter(Boolean);
+    sourceDirs = candidates.length > 0 ? candidates.map(d => `/app/${d}`) : ['/app'];
   } catch (err) {
     return res.json({
       status: 'unavailable',
-      reason: err.message || 'container exec failed',
+      reason: err.message || 'container inspect failed',
       patch: '',
       isEmpty: true,
       truncated: false,
       originalBytes: 0,
     });
   }
-  if (!probeOut || !probeOut.trim().includes('true')) {
+
+  // Probe each source dir; keep only the ones that contain a git repo.
+  const repoDirs = [];
+  for (const dir of sourceDirs) {
+    try {
+      const probeOut = await _dockerExecImpl(containerName, [
+        'git', '-C', dir, 'rev-parse', '--is-inside-work-tree',
+      ]);
+      if (probeOut && probeOut.trim().includes('true')) {
+        repoDirs.push(dir);
+      }
+    } catch {
+      // Not a git repo or exec unavailable — skip.
+    }
+  }
+
+  if (repoDirs.length === 0) {
     return res.json({
       status: 'unavailable',
       reason: 'not a git repository',
@@ -862,52 +895,74 @@ router.get('/features/:key/diff', async (req, res) => {
     });
   }
 
+  // Stream and assemble the diff, respecting DIFF_CAP_BYTES across all repos.
+  // When multiple repos are present each gets a section header so paths are unambiguous.
   try {
-    const { stdout, abort } = await _dockerExecStreamImpl(containerName, [
-      'git', '--no-optional-locks', '-C', '/app', 'diff', 'main...HEAD',
-    ]);
+    const multiRepo = repoDirs.length > 1;
+    const patchParts = [];
+    let globalCollected = 0;
+    let truncated = false;
+    let originalBytes = 0;
 
-    await new Promise((resolve, reject) => {
-      const chunks = [];
-      let collected = 0;
-      let truncated = false;
-      let originalBytes = 0;
-      let responded = false;
+    for (const dir of repoDirs) {
+      if (truncated) break;
 
-      const finish = () => {
-        if (responded) return;
-        responded = true;
-        const patch = Buffer.concat(chunks).toString('utf8');
-        const isEmpty = patch.length === 0;
-        const status = isEmpty ? 'no-changes' : 'ok';
-        res.json({ status, patch, isEmpty, truncated, originalBytes });
-        resolve();
-      };
+      const { stdout, abort } = await _dockerExecStreamImpl(containerName, [
+        'git', '--no-optional-locks', '-C', dir, 'diff', 'main...HEAD',
+      ]);
 
-      stdout.on('data', (chunk) => {
-        originalBytes += chunk.length;
-        if (truncated) return;
-        const avail = DIFF_CAP_BYTES - collected;
-        if (chunk.length <= avail) {
-          chunks.push(chunk);
-          collected += chunk.length;
-        } else {
-          chunks.push(chunk.slice(0, avail));
-          collected = DIFF_CAP_BYTES;
-          truncated = true;
-          abort();
-          finish();
-        }
+      const repoPatch = await new Promise((resolve, reject) => {
+        const chunks = [];
+        let localCollected = globalCollected;
+        let partOriginalBytes = 0;
+        let didTruncate = false;
+        let responded = false;
+
+        const finish = () => {
+          if (responded) return;
+          responded = true;
+          resolve({ text: Buffer.concat(chunks).toString('utf8'), partOriginalBytes, didTruncate });
+        };
+
+        stdout.on('data', (chunk) => {
+          partOriginalBytes += chunk.length;
+          if (didTruncate) return;
+          const avail = DIFF_CAP_BYTES - localCollected;
+          if (chunk.length <= avail) {
+            chunks.push(chunk);
+            localCollected += chunk.length;
+          } else {
+            if (avail > 0) chunks.push(chunk.slice(0, avail));
+            localCollected = DIFF_CAP_BYTES;
+            didTruncate = true;
+            abort();
+            finish();
+          }
+        });
+
+        stdout.on('end', finish);
+        stdout.on('close', finish);
+        stdout.on('error', (err) => {
+          if (responded) return;
+          responded = true;
+          reject(err);
+        });
       });
 
-      stdout.on('end', finish);
-      stdout.on('close', finish);
-      stdout.on('error', (err) => {
-        if (responded) return;
-        responded = true;
-        reject(err);
-      });
-    });
+      originalBytes += repoPatch.partOriginalBytes;
+      globalCollected += Buffer.byteLength(repoPatch.text, 'utf8');
+      if (repoPatch.didTruncate) truncated = true;
+
+      if (repoPatch.text.length > 0) {
+        const header = multiRepo ? `# === ${dir.replace('/app/', '')} ===\n` : '';
+        patchParts.push(header + repoPatch.text);
+      }
+    }
+
+    const patch = patchParts.join('');
+    const isEmpty = patch.length === 0;
+    const status = isEmpty ? 'no-changes' : 'ok';
+    res.json({ status, patch, isEmpty, truncated, originalBytes });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

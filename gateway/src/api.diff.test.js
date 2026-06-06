@@ -57,7 +57,7 @@ vi.mock('./host-metrics.js', () => ({
 
 // ── import after mocks are in place ──────────────────────────────────────────
 import { getFeature } from './registry.js';
-import { dockerExec, dockerExecStream } from './docker.js';
+import { dockerExec, dockerExecStream, inspectContainer } from './docker.js';
 import router from './api.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -101,6 +101,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default: probe succeeds (git is available inside the container).
   dockerExec.mockResolvedValue('true\n');
+  // Default: container has BACKEND_DIR=backend so the handler resolves /app/backend.
+  inspectContainer.mockResolvedValue({ Config: { Env: ['BACKEND_DIR=backend'] } });
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -161,10 +163,50 @@ describe('GET /_fleet/api/features/:key/diff', () => {
 
     await fetch(`${baseUrl}/features/app-feat/diff`);
 
+    // BACKEND_DIR=backend (default from beforeEach) resolves to /app/backend.
     expect(dockerExecStream).toHaveBeenCalledWith(
       'fleet-app-feat',
-      ['git', '--no-optional-locks', '-C', '/app', 'diff', 'main...HEAD'],
+      ['git', '--no-optional-locks', '-C', '/app/backend', 'diff', 'main...HEAD'],
     );
+  });
+
+  it('uses BACKEND_DIR from container env: resolves git -C to /app/backend', async () => {
+    getFeature.mockReturnValue({
+      key: 'app-feat',
+      worktreePath: '/tmp/worktrees/app-feat',
+      branch: 'feat',
+    });
+    inspectContainer.mockResolvedValue({ Config: { Env: ['BACKEND_DIR=backend'] } });
+    dockerExecStream.mockResolvedValue({ stdout: makeStream(''), abort: vi.fn() });
+
+    await fetch(`${baseUrl}/features/app-feat/diff`);
+
+    expect(dockerExec).toHaveBeenCalledWith(
+      'fleet-app-feat',
+      ['git', '-C', '/app/backend', 'rev-parse', '--is-inside-work-tree'],
+    );
+    expect(dockerExecStream).toHaveBeenCalledWith(
+      'fleet-app-feat',
+      ['git', '--no-optional-locks', '-C', '/app/backend', 'diff', 'main...HEAD'],
+    );
+  });
+
+  it('returns 200 { status: "unavailable" } when inspectContainer returns null (container not found)', async () => {
+    getFeature.mockReturnValue({
+      key: 'app-feat',
+      worktreePath: '/tmp/worktrees/app-feat',
+      branch: 'feat',
+    });
+    inspectContainer.mockResolvedValue(null);
+
+    const res = await fetch(`${baseUrl}/features/app-feat/diff`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('unavailable');
+    expect(body.reason).toMatch(/container not found/i);
+    expect(body.patch).toBe('');
+    expect(body.isEmpty).toBe(true);
   });
 
   it('returns 422 when the feature has no worktreePath', async () => {
