@@ -37,22 +37,38 @@ export default function DiffPane({ activeKey }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    setPatch(null);
+    setIsEmpty(false);
     getDiff(activeKey)
       .then(data => {
+        if (cancelled) return;
         if (data.isEmpty || !data.patch) {
           setIsEmpty(true);
         } else {
           setPatch(data.patch);
         }
       })
-      .catch(err => setError(err.message));
+      .catch(e => { if (!cancelled) setError(e.message || String(e)); });
+    return () => { cancelled = true; };
   }, [activeKey]);
 
   if (error) {
     return (
-      <pre style={{ ...preStyle, color: '#f55' }}>
-        {error}
-      </pre>
+      <div
+        className="diff-pane-error"
+        style={{
+          flex: 1,
+          padding: '1rem',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.8rem',
+          color: '#ff5555',
+          background: 'var(--color-bg)',
+        }}
+      >
+        {'// DIFF UNAVAILABLE: ' + error}
+      </div>
     );
   }
 
