@@ -19,6 +19,30 @@ export const INJECTED_PICKER = String.raw`(() => {
   const EXPECTED_DASHBOARD_ORIGIN =
     (window.location.ancestorOrigins && window.location.ancestorOrigins[0]) || '';
 
+  // Closed shadow root — cached in closure; attachShadow may only be called once
+  // per element, so we hold the reference here for subsequent activate/deactivate
+  // calls.
+  let _shadow = null;
+
+  function ensureRoot() {
+    if (_shadow) return _shadow;
+    let host = document.getElementById('mars-capture-root');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'mars-capture-root';
+      document.documentElement.appendChild(host);
+    }
+    _shadow = host.attachShadow({ mode: 'closed' });
+    return _shadow;
+  }
+
+  function renderBanner(shadow) {
+    shadow.innerHTML =
+      '<div style="position:fixed;top:0;left:0;right:0;background:#0b3;color:#fff;' +
+      'font:14px system-ui;padding:6px 10px;pointer-events:none;z-index:2147483647">' +
+      'Capture mode — click an element to mark it</div>';
+  }
+
   window.addEventListener('message', function(event) {
     // Ignore messages whose type does not start with 'mars.capture.'
     if (
@@ -36,8 +60,12 @@ export const INJECTED_PICKER = String.raw`(() => {
 
     if (event.data.type === 'mars.capture.activate') {
       state.active = !!event.data.active;
-      console.log('mars.capture.activate received', state.active);
-      // Element picker visuals — implemented by later slices.
+      const shadow = ensureRoot();
+      if (state.active) {
+        renderBanner(shadow);
+      } else {
+        shadow.innerHTML = '';
+      }
     }
   });
 })();`;
