@@ -65,6 +65,10 @@ adminApp.use('/_fleet/api', apiRouter);
 // Feature registration + OAuth relay (called by scripts and OAuth providers)
 adminApp.use('/', authRouter);
 
+// Terminal JSON-404 guard: any /_fleet/api path not matched by apiRouter
+// returns a proper 404 JSON response instead of falling through to the SPA.
+adminApp.use('/_fleet/api', (req, res) => res.status(404).json({ error: 'Not found', path: req.path }));
+
 // Dashboard static files + SPA fallback
 const dashboardDist = join(__dirname, '..', 'public');
 const indexHtml = join(dashboardDist, 'index.html');
