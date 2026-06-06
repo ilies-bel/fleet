@@ -89,20 +89,29 @@ router.delete('/features/:key', async (req, res) => {
   if (!feature) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
+  // startOperation before unregister so the log row survives even if the
+  // registry entry is removed as part of this operation.
+  const opId = startOperation({ kind: 'remove', key });
   try {
     await stopFeature(feature);
   } catch (err) {
-    if (err instanceof DockerSocketError) return res.status(503).json({ error: err.message });
+    if (err instanceof DockerSocketError) {
+      endOperation(opId, { outcome: 'failure', error: err });
+      return res.status(503).json({ error: err.message });
+    }
     if (err instanceof DockerContainerError && err.status !== 404) {
+      endOperation(opId, { outcome: 'failure', error: err });
       return res.status(503).json({ error: err.message });
     }
     if (feature.host) {
       // oc command failures are fatal — pod or service may still exist
+      endOperation(opId, { outcome: 'failure', error: err });
       return res.status(503).json({ error: err.message });
     }
     // 404 from Docker is fine — container was already gone, proceed with unregister
   }
   unregister(key);
+  endOperation(opId, { outcome: 'success' });
   res.json({ ok: true });
 });
 
