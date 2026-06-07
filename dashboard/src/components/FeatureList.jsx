@@ -104,7 +104,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
     <div style={{
       width: collapsed ? '48px' : '280px',
       flexShrink: 0,
-      borderRight: '1px solid #222',
+      borderRight: '1px solid var(--color-border)',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
@@ -112,7 +112,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
     }}>
       <div style={{
         padding: 'var(--space-2)',
-        borderBottom: '1px solid #222',
+        borderBottom: '1px solid var(--color-border)',
         fontFamily: 'var(--font-mono)',
         fontSize: '0.65rem',
         color: 'var(--color-muted)',
@@ -146,7 +146,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
             height: '20px',
             transition: 'color 0.1s, background 0.1s',
           }}
-          onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = '#161616'; }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'var(--color-surface-raised)'; }}
           onMouseLeave={e => { e.currentTarget.style.color = ''; e.currentTarget.style.background = ''; }}
         >
           {collapsed ? '›' : '‹'}
@@ -157,7 +157,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
         <>
           <div style={{
             padding: 'var(--space-15) var(--space-2)',
-            borderBottom: '1px solid #1a1a1a',
+            borderBottom: '1px solid var(--color-surface-header)',
             display: 'flex',
             flexDirection: 'column',
             gap: '0.35rem', /* off-scale: 0.35rem micro-gap has no exact token */
@@ -194,7 +194,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
                       fontSize: '0.58rem',
                       padding: '1px 4px',
                       background: active ? '#0e1f0e' : 'transparent',
-                      color: active ? 'var(--color-accent)' : '#888',
+                      color: active ? 'var(--color-accent)' : 'var(--color-ink-dim)',
                       border: `1px solid ${active ? 'var(--color-accent)' : '#2a2a2a'}`,
                       cursor: 'pointer',
                       letterSpacing: '0.05em',
@@ -238,7 +238,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
                       alignSelf: 'flex-start',
                       background: 'transparent',
                       border: '1px solid #2a2a2a',
-                      color: '#888',
+                      color: 'var(--color-ink-dim)',
                       fontFamily: 'var(--font-mono)',
                       fontSize: '0.6rem',
                       letterSpacing: '0.05em',
@@ -264,9 +264,9 @@ export default function FeatureList({ features, activePreview, startingFeatures,
                       paddingLeft: 'var(--space-3)',
                       fontFamily: 'var(--font-mono)',
                       fontSize: '0.6rem',
-                      color: '#888',
+                      color: 'var(--color-ink-dim)',
                       letterSpacing: '0.08em',
-                      borderBottom: '1px solid #1a1a1a',
+                      borderBottom: '1px solid var(--color-surface-header)',
                       background: '#080808',
                     }}>
                       // {proj || 'unknown'}

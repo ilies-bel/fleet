@@ -60,7 +60,7 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
       <div style={{
         height: '40px',
         background: '#0d0d0d',
-        borderBottom: '1px solid #222',
+        borderBottom: '1px solid var(--color-border)',
         display: 'flex',
         alignItems: 'center',
         padding: '0 var(--space-3)',
@@ -105,7 +105,7 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
               aria-pressed={isCapture}
               onClick={onToggleCapture}
               style={isCapture
-                ? { ...toolbarBtn, background: '#00ff88', color: '#000', borderColor: '#00ff88' }
+                ? { ...toolbarBtn, background: 'var(--color-accent)', color: 'var(--color-bg-black)', borderColor: 'var(--color-accent)' }
                 : toolbarBtn
               }
             >
@@ -153,8 +153,8 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
 
 const toolbarBtn = {
   background: 'transparent',
-  border: '1px solid #333',
-  color: '#888',
+  border: '1px solid var(--color-border-strong)',
+  color: 'var(--color-ink-dim)',
   fontFamily: 'var(--font-mono)',
   fontSize: '0.7rem',
   padding: '2px 8px',

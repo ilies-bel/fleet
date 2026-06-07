@@ -95,8 +95,8 @@ export default function ConfirmModal({ open, title, message, confirmLabel, onCon
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
         style={{
-          background: '#1a1a1a',
-          border: '1px solid #333',
+          background: 'var(--color-surface-header)',
+          border: '1px solid var(--color-border-strong)',
           padding: 'var(--space-6)',
           minWidth: '280px',
           maxWidth: '400px',
@@ -109,7 +109,7 @@ export default function ConfirmModal({ open, title, message, confirmLabel, onCon
           style={{
             margin: '0 0 var(--space-3) 0',
             fontSize: '0.85rem',
-            color: '#eee',
+            color: 'var(--color-ink)',
             fontFamily: 'var(--font-mono)',
           }}
         >

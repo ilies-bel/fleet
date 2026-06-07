@@ -45,8 +45,8 @@ export default function StatusBar() {
       className="status-bar"
       style={{
         minHeight: '40px',
-        background: '#000',
-        borderBottom: '1px solid #222',
+        background: 'var(--color-bg-black)',
+        borderBottom: '1px solid var(--color-border)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',

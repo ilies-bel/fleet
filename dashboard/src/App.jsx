@@ -31,8 +31,8 @@ function NavBar({ onDrawerToggle, isNarrow }) {
   return (
     <div style={{
       height: '34px',
-      background: '#000',
-      borderBottom: '1px solid #222',
+      background: 'var(--color-bg-black)',
+      borderBottom: '1px solid var(--color-border)',
       display: 'flex',
       alignItems: 'stretch',
       flexShrink: 0,
@@ -44,7 +44,7 @@ function NavBar({ onDrawerToggle, isNarrow }) {
           style={{
             background: 'none',
             border: 'none',
-            borderRight: '1px solid #222',
+            borderRight: '1px solid var(--color-border)',
             cursor: 'pointer',
             padding: '0 var(--space-3)',
             color: 'var(--color-muted)',
@@ -221,8 +221,8 @@ function OperationsPage() {
         display: 'flex',
         gap: 'var(--space-15)',
         padding: 'var(--space-15) var(--space-4)',
-        borderBottom: '1px solid #222',
-        background: '#000',
+        borderBottom: '1px solid var(--color-border)',
+        background: 'var(--color-bg-black)',
         flexShrink: 0,
       }}>
         {[['recent', 'RECENT'], ['clusters', 'CLUSTERS']].map(([v, label]) => (
@@ -232,7 +232,7 @@ function OperationsPage() {
             onClick={() => setView(v)}
             aria-pressed={view === v}
             style={view === v
-              ? { background: 'var(--color-accent)', color: '#000', fontSize: '0.65rem', letterSpacing: '0.06em', padding: 'var(--space-05) var(--space-3)' }
+              ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)', fontSize: '0.65rem', letterSpacing: '0.06em', padding: 'var(--space-05) var(--space-3)' }
               : { color: 'var(--color-muted)', borderColor: '#444', fontSize: '0.65rem', letterSpacing: '0.06em', padding: 'var(--space-05) var(--space-3)' }
             }
           >

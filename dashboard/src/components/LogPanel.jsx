@@ -7,8 +7,8 @@ const SOURCES = ['build', 'backend', 'nginx', 'postgresql', 'supervisord', 'all'
 /** Color for each named source in the ALL view */
 const SOURCE_COLOR = {
   backend:     'var(--color-accent)',
-  nginx:       '#66d9ef',
-  postgresql:  '#e6a700',
+  nginx:       'var(--color-source-nginx)',
+  postgresql:  'var(--color-source-postgresql)',
   supervisord: 'var(--color-muted)',
 };
 
@@ -198,8 +198,8 @@ export default function LogPanel({ featureName, onClose }) {
           width: '860px',
           maxWidth: '95vw',
           height: '80dvh',
-          background: '#0a0a0a',
-          border: '1px solid #333',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border-strong)',
           display: 'flex',
           flexDirection: 'column',
           fontFamily: 'var(--font-mono)',
@@ -208,7 +208,7 @@ export default function LogPanel({ featureName, onClose }) {
         {/* Header */}
         <div style={{
           padding: 'var(--space-2) var(--space-3)',
-          borderBottom: '1px solid #222',
+          borderBottom: '1px solid var(--color-border)',
           display: 'flex',
           alignItems: 'center',
           gap: 'var(--space-2)',
@@ -229,7 +229,7 @@ export default function LogPanel({ featureName, onClose }) {
                 style={{
                   fontSize: '0.65rem',
                   padding: '2px 6px',
-                  ...(s === source ? { background: '#00ff88', color: '#000' } : {}),
+                  ...(s === source ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' } : {}),
                 }}
               >
                 [{s.toUpperCase()}]
@@ -248,7 +248,7 @@ export default function LogPanel({ featureName, onClose }) {
             style={{
               fontSize: '0.68rem',
               padding: '2px 7px',
-              ...(autoTail ? { background: '#00ff88', color: '#000' } : {}),
+              ...(autoTail ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' } : {}),
             }}
           >
             {autoTail ? '[TAIL]' : '[PAUSED]'}
@@ -306,7 +306,7 @@ export default function LogPanel({ featureName, onClose }) {
             overflowY: 'auto',
             overscrollBehavior: 'contain',
             background: '#050505',
-            border: '1px solid #1a1a1a',
+            border: '1px solid var(--color-surface-header)',
             margin: 'var(--space-2) var(--space-3) 0',
           }}>
             {source === 'all'
@@ -332,7 +332,7 @@ export default function LogPanel({ featureName, onClose }) {
         {/* Footer */}
         <div style={{
           padding: 'var(--space-15) var(--space-3)',
-          borderTop: '1px solid #222',
+          borderTop: '1px solid var(--color-border)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',

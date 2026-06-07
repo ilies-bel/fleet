@@ -32,7 +32,7 @@ export default function OperationDetail({ id, onBack }) {
       </Button>
 
       {error && (
-        <div style={{ color: '#ff4444', marginBottom: 'var(--space-4)' }}>
+        <div style={{ color: 'var(--color-danger)', marginBottom: 'var(--space-4)' }}>
           Error: {error}
         </div>
       )}
@@ -43,7 +43,7 @@ export default function OperationDetail({ id, onBack }) {
 
       {data && (
         <>
-          <div style={{ marginBottom: '1.25rem', /* off-scale: 1.25rem between var(--space-4) and var(--space-6) */ borderBottom: '1px solid #222', paddingBottom: 'var(--space-3)' }}>
+          <div style={{ marginBottom: '1.25rem', /* off-scale: 1.25rem between var(--space-4) and var(--space-6) */ borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-3)' }}>
             <div style={{ color: 'var(--color-accent)', fontWeight: 'bold', marginBottom: 'var(--space-15)' }}>
               {data.operation.kind} — {data.operation.key}
             </div>
@@ -72,7 +72,7 @@ export default function OperationDetail({ id, onBack }) {
               </span>
             </div>
             {data.operation.errorMessage && (
-              <div style={{ color: '#ff4444', marginTop: '0.3rem' /* off-scale: 0.3rem has no exact token */ }}>
+              <div style={{ color: 'var(--color-danger)', marginTop: '0.3rem' /* off-scale: 0.3rem has no exact token */ }}>
                 {data.operation.errorMessage}
               </div>
             )}
@@ -89,7 +89,7 @@ export default function OperationDetail({ id, onBack }) {
                     display: 'flex',
                     gap: 'var(--space-4)',
                     padding: '0.35rem 0', /* off-scale: 0.35rem vertical has no exact token */
-                    borderBottom: '1px solid #111',
+                    borderBottom: '1px solid var(--color-surface)',
                     alignItems: 'baseline',
                   }}
                 >
@@ -111,14 +111,14 @@ export default function OperationDetail({ id, onBack }) {
 }
 
 function outcomeColor(outcome) {
-  if (outcome === 'success') return '#00ff88';
-  if (outcome === 'failure') return '#ff4444';
+  if (outcome === 'success') return 'var(--color-accent)';
+  if (outcome === 'failure') return 'var(--color-danger)';
   return 'var(--color-muted)';
 }
 
 function levelColor(level) {
-  if (level === 'warn') return '#ffaa00';
-  if (level === 'error') return '#ff4444';
+  if (level === 'warn') return 'var(--color-warning)';
+  if (level === 'error') return 'var(--color-danger)';
   return 'var(--color-muted)';
 }
 
@@ -135,7 +135,7 @@ function relativeMs(operationStart, eventTs) {
   return `${(delta / 1000).toFixed(1)}s`;
 }
 
-const REASON_PREFIX_COLORS = { docker: '#ffaa00', build: '#ff4444', registry: '#ffaa00', sync: '#00aaff' };
+const REASON_PREFIX_COLORS = { docker: 'var(--color-warning)', build: 'var(--color-danger)', registry: 'var(--color-warning)', sync: 'var(--color-transient)' };
 
 function reasonBadgeStyle(reasonCode) {
   const prefix = reasonCode?.split(':')[0];
@@ -144,7 +144,7 @@ function reasonBadgeStyle(reasonCode) {
     padding: '0.2rem 0.6rem',
     fontSize: '0.7rem',
     fontWeight: '700',
-    background: '#222',
+    background: 'var(--color-border)',
     color: REASON_PREFIX_COLORS[prefix] ?? 'var(--color-muted)',
     letterSpacing: '0.04em',
     whiteSpace: 'nowrap',

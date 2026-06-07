@@ -49,7 +49,7 @@ const loadingStyle = {
   overflow: 'auto',
   fontFamily: 'var(--font-mono)',
   fontSize: '0.75rem',
-  background: '#0a0a0a',
+  background: 'var(--color-bg)',
 };
 
 const emptyStyle = {
@@ -59,7 +59,7 @@ const emptyStyle = {
   justifyContent: 'center',
   background: 'var(--color-bg)',
   fontFamily: 'var(--font-mono)',
-  color: '#b8b8b8',
+  color: 'var(--color-muted)',
   fontSize: '1.1rem',
   letterSpacing: '0.05em',
 };
@@ -71,7 +71,7 @@ const unavailableStyle = {
   justifyContent: 'center',
   background: 'var(--color-bg)',
   fontFamily: 'var(--font-mono)',
-  color: '#b8b8b8',
+  color: 'var(--color-muted)',
   fontSize: '0.85rem',
   letterSpacing: '0.03em',
 };
@@ -182,7 +182,7 @@ export default function DiffPane({ activeKey }) {
 
   if (status === null) {
     return (
-      <pre style={{ ...loadingStyle, color: '#b8b8b8' }}>
+      <pre style={{ ...loadingStyle, color: 'var(--color-muted)' }}>
         Loading diff…
       </pre>
     );
@@ -212,7 +212,7 @@ export default function DiffPane({ activeKey }) {
           style={{
             padding: 'var(--space-2) var(--space-4)',
             background: '#332200',
-            color: '#ffaa00',
+            color: 'var(--color-warning)',
             fontFamily: 'var(--font-mono)',
             fontSize: '0.75rem',
             borderBottom: '1px solid #443300',

@@ -73,8 +73,8 @@ export default function FeatureConfigModal({ feature, onClose }) {
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
         style={{
-          background: '#1a1a1a',
-          border: '1px solid #333',
+          background: 'var(--color-surface-header)',
+          border: '1px solid var(--color-border-strong)',
           padding: 'var(--space-6)',
           minWidth: '320px',
           maxWidth: '480px',
@@ -91,7 +91,7 @@ export default function FeatureConfigModal({ feature, onClose }) {
           <h2 style={{
             margin: 0,
             fontSize: '0.9rem',
-            color: '#eee',
+            color: 'var(--color-ink)',
             fontFamily: 'var(--font-mono)',
           }}>
             {displayName}
@@ -114,11 +114,11 @@ export default function FeatureConfigModal({ feature, onClose }) {
           fontSize: '0.68rem',
           color: '#ccc',
         }}>
-          <dt style={{ color: '#888' }}>Branch</dt>
+          <dt style={{ color: 'var(--color-ink-dim)' }}>Branch</dt>
           <dd style={{ margin: 0 }}>{feature.branch}</dd>
-          <dt style={{ color: '#888' }}>Worktree</dt>
+          <dt style={{ color: 'var(--color-ink-dim)' }}>Worktree</dt>
           <dd style={{ margin: 0, wordBreak: 'break-all', fontFamily: 'var(--font-mono)' }}>{formatWorktree(feature.worktreePath)}</dd>
-          <dt style={{ color: '#888' }}>Host</dt>
+          <dt style={{ color: 'var(--color-ink-dim)' }}>Host</dt>
           {(() => {
             const h = formatHost(feature.host);
             if (h.kind === 'local') {
@@ -131,7 +131,7 @@ export default function FeatureConfigModal({ feature, onClose }) {
               </dd>
             );
           })()}
-          <dt style={{ color: '#888' }}>Services</dt>
+          <dt style={{ color: 'var(--color-ink-dim)' }}>Services</dt>
           <dd style={{ margin: 0 }}>
             {(() => {
               const services = Array.isArray(feature.services) ? feature.services : [];

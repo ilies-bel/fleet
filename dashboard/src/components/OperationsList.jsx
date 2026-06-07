@@ -34,7 +34,7 @@ export default function OperationsList({ onSelect }) {
         color: 'var(--color-text)',
       }}>
         <thead>
-          <tr style={{ borderBottom: '1px solid #333' }}>
+          <tr style={{ borderBottom: '1px solid var(--color-border-strong)' }}>
             <th style={thStyle}>Kind</th>
             <th style={thStyle}>Key</th>
             <th style={thStyle}>Started</th>
@@ -57,7 +57,7 @@ export default function OperationsList({ onSelect }) {
                 }
               } : undefined}
               style={{
-                borderBottom: '1px solid #1a1a1a',
+                borderBottom: '1px solid var(--color-surface-header)',
                 cursor: onSelect ? 'pointer' : 'default',
               }}
             >
@@ -105,12 +105,12 @@ const tdStyle = {
 };
 
 function outcomeColor(outcome) {
-  if (outcome === 'success') return '#00ff88';
-  if (outcome === 'failure') return '#ff4444';
+  if (outcome === 'success') return 'var(--color-accent)';
+  if (outcome === 'failure') return 'var(--color-danger)';
   return 'var(--color-muted)';
 }
 
-const REASON_PREFIX_COLORS = { docker: '#ffaa00', build: '#ff4444', registry: '#ffaa00', sync: '#00aaff' };
+const REASON_PREFIX_COLORS = { docker: 'var(--color-warning)', build: 'var(--color-danger)', registry: 'var(--color-warning)', sync: 'var(--color-transient)' };
 
 function reasonBadgeStyle(reasonCode) {
   const prefix = reasonCode?.split(':')[0];
@@ -119,7 +119,7 @@ function reasonBadgeStyle(reasonCode) {
     padding: '0.1rem var(--space-15)', /* off-scale: 0.1rem vertical micro-gap */
     fontSize: '0.65rem',
     fontWeight: '600',
-    background: '#222',
+    background: 'var(--color-border)',
     color: REASON_PREFIX_COLORS[prefix] ?? 'var(--color-muted)',
     letterSpacing: '0.03em',
     whiteSpace: 'nowrap',

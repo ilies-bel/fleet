@@ -40,8 +40,8 @@ export default function FailureClusters() {
     <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
       {clusters.map(cluster => (
         <div key={cluster.reasonCode} className="cluster-card" style={{
-          background: '#111',
-          border: '1px solid #222',
+          background: 'var(--color-surface)',
+          border: '1px solid var(--color-border)',
           padding: 'var(--space-3) var(--space-4)',
           fontFamily: 'var(--font-mono)',
         }}>
@@ -55,7 +55,7 @@ export default function FailureClusters() {
             last seen <span title={absoluteTime(cluster.lastSeenAt)}>{relativeTime(cluster.lastSeenAt)}</span>
           </div>
           {cluster.sampleKeys.length > 0 && (
-            <ul style={{ margin: 0, padding: '0 0 0 var(--space-4)', fontSize: '0.7rem', color: '#888' }}>
+            <ul style={{ margin: 0, padding: '0 0 0 var(--space-4)', fontSize: '0.7rem', color: 'var(--color-ink-dim)' }}>
               {cluster.sampleKeys.slice(0, 5).map(k => <li key={k}>{k}</li>)}
             </ul>
           )}
@@ -65,7 +65,7 @@ export default function FailureClusters() {
   );
 }
 
-const REASON_PREFIX_COLORS = { docker: '#ffaa00', build: '#ff4444', registry: '#ffaa00', sync: '#00aaff' };
+const REASON_PREFIX_COLORS = { docker: 'var(--color-warning)', build: 'var(--color-danger)', registry: 'var(--color-warning)', sync: 'var(--color-transient)' };
 
 function reasonBadgeStyle(reasonCode) {
   const prefix = reasonCode?.split(':')[0];
@@ -74,7 +74,7 @@ function reasonBadgeStyle(reasonCode) {
     padding: '0.1rem var(--space-15)', /* off-scale: 0.1rem vertical micro-gap */
     fontSize: '0.65rem',
     fontWeight: '600',
-    background: '#222',
+    background: 'var(--color-border)',
     color: REASON_PREFIX_COLORS[prefix] ?? 'var(--color-muted)',
     letterSpacing: '0.03em',
     whiteSpace: 'nowrap',

@@ -53,7 +53,7 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
         : 'var(--color-accent)';
 
   return (
-    <div style={{ marginBottom: 'var(--space-6)', padding: 'var(--space-3) var(--space-4)', background: '#0d0d0d', border: '1px solid #1a1a1a' }}>
+    <div style={{ marginBottom: 'var(--space-6)', padding: 'var(--space-3) var(--space-4)', background: '#0d0d0d', border: '1px solid var(--color-surface-header)' }}>
       <div style={{
         fontFamily: 'var(--font-mono)',
         fontSize: '0.65rem',
@@ -89,7 +89,7 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
         </span>
         {host.status === 'ok' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <div style={{ width: '120px', height: '6px', background: '#222', flexShrink: 0 }}>
+            <div style={{ width: '120px', height: '6px', background: 'var(--color-border)', flexShrink: 0 }}>
               <div style={{
                 width: `${Math.min(host.cpuPercent, 100)}%`,
                 height: '100%',
@@ -115,7 +115,7 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
         </span>
         {host.status === 'ok' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <div style={{ width: '120px', height: '6px', background: '#222', flexShrink: 0 }}>
+            <div style={{ width: '120px', height: '6px', background: 'var(--color-border)', flexShrink: 0 }}>
               <div style={{
                 width: `${Math.min(memPercent, 100)}%`,
                 height: '100%',

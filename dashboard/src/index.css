@@ -1,12 +1,34 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
 :root {
-  --color-bg: #0a0a0a;
-  --color-surface: #111111;
-  --color-accent: #00ff88;
-  --color-danger: #ff4444;
-  --color-warning: #ffaa00;
-  --color-muted: #b8b8b8;
+  /* ── Tonal ramp ────────────────────────────────────────────────────────────── */
+  --color-bg-black: #000000;       /* status bar / iframe backdrop               */
+  --color-bg: #0a0a0a;             /* body field                                 */
+  --color-surface: #111111;        /* panel / card fill                          */
+  --color-surface-raised: #161616; /* hover / active card fill                   */
+  --color-surface-header: #1a1a1a; /* diff-file / section header band            */
+
+  /* ── Borders ───────────────────────────────────────────────────────────────── */
+  --color-border: #222222;         /* content / card hairline                    */
+  --color-border-strong: #333333;  /* header band / scrollbar thumb              */
+
+  /* ── Ink ramp ──────────────────────────────────────────────────────────────── */
+  --color-ink: #eeeeee;            /* primary body text                          */
+  --color-muted: #b8b8b8;          /* secondary text (clears 4.5:1 on field)     */
+  --color-ink-dim: #888888;        /* tertiary labels                            */
+  --color-ink-faint: #555555;      /* decorative-only glyphs (NON-essential)     */
+
+  /* ── Lifecycle palette ─────────────────────────────────────────────────────── */
+  --color-accent: #00ff88;         /* phosphor green — affirmative / selected    */
+  --color-caution: #ffb000;        /* amber — use-with-care (SYNC button)        */
+  --color-warning: #ffaa00;        /* amber — BUILDING / UNHEALTHY lifecycle     */
+  --color-transient: #00aaff;      /* blue — STARTING / RESTARTING lifecycle     */
+  --color-danger: #ff4444;         /* red — FAILED / destructive                 */
+
+  /* ── Source log tints ──────────────────────────────────────────────────────── */
+  --color-source-nginx: #66d9ef;      /* nginx log stream                        */
+  --color-source-postgresql: #e6a700; /* postgresql log stream                   */
+
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 
   /* ── 4pt-base spacing scale ────────────────────────────────────────────── */
@@ -30,7 +52,7 @@ html, body, #root {
   padding: 0;
   height: 100%;
   background: var(--color-bg);
-  color: #eee;
+  color: var(--color-ink);
   font-family: var(--font-mono);
 }
 
@@ -62,11 +84,11 @@ input {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0a0a0a;
+  background: var(--color-bg);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #333;
+  background: var(--color-border-strong);
 }
 
 @keyframes blink {
@@ -101,7 +123,7 @@ input {
     width: 280px;
     z-index: 200;
     background: var(--color-bg);
-    border-right: 1px solid #222;
+    border-right: 1px solid var(--color-border);
     transform: translateX(-100%);
     transition: transform 200ms ease;
     overflow: hidden;
@@ -141,9 +163,9 @@ input {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   padding: 0.3rem 0.75rem;
-  background: #1a1a1a;
-  border-top: 1px solid #333;
-  border-bottom: 1px solid #333;
+  background: var(--color-surface-header);
+  border-top: 1px solid var(--color-border-strong);
+  border-bottom: 1px solid var(--color-border-strong);
   color: var(--color-accent);
   white-space: nowrap;
   overflow: hidden;
@@ -195,19 +217,19 @@ input {
 }
 
 /* primary — phosphor-green, affirmative */
-.btn-primary           { color: #00ff88; }
+.btn-primary           { color: var(--color-accent); }
 .btn-primary:hover:not(:disabled),
-.btn-primary:focus:not(:disabled) { background: #00ff88; color: #000; outline: none; }
+.btn-primary:focus:not(:disabled) { background: var(--color-accent); color: var(--color-bg-black); outline: none; }
 
 /* caution — amber, use-with-care */
-.btn-caution           { color: #ffb000; }
+.btn-caution           { color: var(--color-caution); }
 .btn-caution:hover:not(:disabled),
-.btn-caution:focus:not(:disabled) { background: #ffb000; color: #000; outline: none; }
+.btn-caution:focus:not(:disabled) { background: var(--color-caution); color: var(--color-bg-black); outline: none; }
 
 /* destructive — red, permanent / irreversible */
-.btn-destructive           { color: #ff4444; }
+.btn-destructive           { color: var(--color-danger); }
 .btn-destructive:hover:not(:disabled),
-.btn-destructive:focus:not(:disabled) { background: #ff4444; color: #000; outline: none; }
+.btn-destructive:focus:not(:disabled) { background: var(--color-danger); color: var(--color-bg-black); outline: none; }
 
 /* ── Empty-state copy button ───────────────────────────────────────────────── */
 /* Mirrors the button-tone grammar: outline at rest, accent fill floods on
@@ -215,7 +237,7 @@ input {
 .empty-state-copy:hover,
 .empty-state-copy:focus-visible {
   background: var(--color-accent) !important;
-  color: #000 !important;
+  color: var(--color-bg-black) !important;
   outline: none;
 }
 

@@ -23,7 +23,7 @@ import { useState, useRef, useCallback } from 'react';
  */
 export default function EmptyState({
   status,
-  statusColor = '#888',
+  statusColor = 'var(--color-ink-dim)',
   lead,
   command,
   hint,
@@ -43,7 +43,7 @@ export default function EmptyState({
         padding: isSidebar ? 'var(--space-4) var(--space-3)' : 'var(--space-6) var(--space-4)',
         textAlign: 'left',
         fontFamily: 'var(--font-mono)',
-        color: '#eee',
+        color: 'var(--color-ink)',
         minWidth: 0,
         overflow: 'hidden',
       }}
@@ -94,7 +94,7 @@ export default function EmptyState({
           <p
             style={{
               margin: 0,
-              color: '#888',
+              color: 'var(--color-ink-dim)',
               fontSize: isSidebar ? '0.58rem' : '0.65rem',
               lineHeight: 1.5,
             }}
@@ -157,8 +157,8 @@ function CommandLine({ command, compact }) {
         display: 'flex',
         alignItems: 'stretch',
         gap: 0,
-        border: '1px solid #222',
-        background: '#000',
+        border: '1px solid var(--color-border)',
+        background: 'var(--color-bg-black)',
       }}
     >
       <code
@@ -170,7 +170,7 @@ function CommandLine({ command, compact }) {
           padding: compact ? 'var(--space-15) var(--space-2)' : 'var(--space-2) var(--space-3)',
           fontFamily: 'var(--font-mono)',
           fontSize: compact ? '0.6rem' : '0.72rem',
-          color: '#eee',
+          color: 'var(--color-ink)',
           overflowX: 'auto',
           whiteSpace: 'nowrap',
         }}
@@ -187,8 +187,8 @@ function CommandLine({ command, compact }) {
           flexShrink: 0,
           background: 'transparent',
           border: 'none',
-          borderLeft: '1px solid #222',
-          color: copied ? 'var(--color-accent)' : '#888',
+          borderLeft: '1px solid var(--color-border)',
+          color: copied ? 'var(--color-accent)' : 'var(--color-ink-dim)',
           fontFamily: 'var(--font-mono)',
           fontSize: compact ? '0.55rem' : '0.62rem',
           letterSpacing: '0.06em',

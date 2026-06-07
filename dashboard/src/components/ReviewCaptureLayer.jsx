@@ -62,7 +62,7 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
         bottom: '1.25rem', /* off-scale: 1.25rem positioning offset has no exact token */
         left: '50%',
         transform: 'translateX(-50%)',
-        background: '#111',
+        background: 'var(--color-surface)',
         border: '1px solid #444',
         padding: 'var(--space-2) var(--space-3)',
         display: 'flex',
@@ -78,7 +78,7 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
         style={{
           fontFamily: 'var(--font-mono)',
           fontSize: '0.68rem',
-          color: '#888',
+          color: 'var(--color-ink-dim)',
           userSelect: 'none',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
@@ -96,8 +96,8 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
         onKeyDown={handleKeyDown}
         placeholder="Describe the improvement… (Enter to save, Esc to cancel)"
         style={{
-          background: '#000',
-          border: '1px solid #333',
+          background: 'var(--color-bg-black)',
+          border: '1px solid var(--color-border-strong)',
           color: '#ccc',
           fontFamily: 'var(--font-mono)',
           fontSize: '0.8rem',

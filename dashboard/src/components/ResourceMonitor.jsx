@@ -26,7 +26,7 @@ function CpuBar({ percent }) {
       <div style={{
         width: '80px',
         height: '6px',
-        background: '#222',
+        background: 'var(--color-border)',
         flexShrink: 0,
       }}>
         <div style={{
@@ -100,7 +100,7 @@ export default function ResourceMonitor() {
     fontFamily: 'var(--font-mono)',
     fontSize: '0.72rem',
     padding: 'var(--space-2) var(--space-3)',
-    borderBottom: '1px solid #1a1a1a',
+    borderBottom: '1px solid var(--color-surface-header)',
     verticalAlign: 'middle',
   };
 
@@ -109,8 +109,8 @@ export default function ResourceMonitor() {
     color: 'var(--color-muted)',
     fontSize: '0.65rem',
     letterSpacing: '0.06em',
-    borderBottom: '1px solid #222',
-    background: '#000',
+    borderBottom: '1px solid var(--color-border)',
+    background: 'var(--color-bg-black)',
   };
 
   const mutedCell = {
@@ -195,19 +195,19 @@ export default function ResourceMonitor() {
 
               return (
                 <tr key={r.key} style={{ background: '#0d0d0d' }}>
-                  <td style={{ ...col, color: '#eee', fontWeight: 700 }}>{r.name}</td>
+                  <td style={{ ...col, color: 'var(--color-ink)', fontWeight: 700 }}>{r.name}</td>
                   <td style={{ ...col, color: 'var(--color-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.project || '—'}</td>
                   <td style={{ ...col, color: 'var(--color-muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch}</td>
                   <td style={{ ...col, color: statusColor }}>{r.status.toUpperCase()}</td>
                   <td style={col}>
                     {r.status === 'running'
                       ? <CpuBar percent={r.cpuPercent} />
-                      : <span style={{ color: '#888' }}>—</span>}
+                      : <span style={{ color: 'var(--color-ink-dim)' }}>—</span>}
                   </td>
-                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : '#888' }}>
+                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : 'var(--color-ink-dim)' }}>
                     {r.status === 'running' ? fmtMem(r.memUsageMB, r.memLimitMB) : '—'}
                   </td>
-                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : '#888' }}>
+                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : 'var(--color-ink-dim)' }}>
                     {r.status === 'running' ? fmtNet(r.netRxMB, r.netTxMB) : '—'}
                   </td>
                 </tr>

@@ -167,13 +167,13 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     <div
       style={{
         padding: 'var(--space-3)',
-        background: isActive || isPreview ? '#161616' : 'transparent',
+        background: isActive || isPreview ? 'var(--color-surface-raised)' : 'transparent',
         borderLeft: isActive ? '3px solid var(--color-accent)' : '3px solid transparent',
-        borderBottom: '1px solid #222',
+        borderBottom: '1px solid var(--color-border)',
         transition: 'background 0.1s',
         opacity: presentation.dimmed ? 0.7 : 1,
       }}
-      onMouseEnter={e => { if (!isActive && !isPreview) e.currentTarget.style.background = '#161616'; }}
+      onMouseEnter={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'var(--color-surface-raised)'; }}
       onMouseLeave={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'transparent'; }}
     >
       {/* Header row: collapse/expand toggle + title (editable) + config menu trigger */}
@@ -201,7 +201,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             fontFamily: 'var(--font-mono)',
           }}
         >
-          <span style={{ color: '#888', fontSize: '0.75rem', flexShrink: 0, lineHeight: 1 }}>
+          <span style={{ color: 'var(--color-ink-dim)', fontSize: '0.75rem', flexShrink: 0, lineHeight: 1 }}>
             {collapsed ? '▸' : '▾'}
           </span>
           {/* Status chip appears in the compact header only when collapsed */}
@@ -230,7 +230,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             style={{
               flex: 1,
               minWidth: 0,
-              color: isActive ? 'var(--color-accent)' : '#eee',
+              color: isActive ? 'var(--color-accent)' : 'var(--color-ink)',
               fontFamily: 'var(--font-mono)',
               fontSize: '0.9rem',
               fontWeight: 700,
@@ -247,7 +247,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             title="Double-click to rename"
             style={{
               flex: 1,
-              color: isActive ? 'var(--color-accent)' : '#eee',
+              color: isActive ? 'var(--color-accent)' : 'var(--color-ink)',
               fontFamily: 'var(--font-mono)',
               fontSize: '0.9rem',
               fontWeight: 700,
@@ -302,7 +302,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
                 role="alert"
                 title={feature.error}
                 style={{
-                  color: '#ff4444',
+                  color: 'var(--color-danger)',
                   fontFamily: 'var(--font-mono)',
                   fontSize: '0.65rem',
                   marginTop: '0.3rem', /* off-scale: 0.3rem has no exact token */
@@ -321,10 +321,10 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
               <div style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.65rem',
-                color: '#b8b8b8',
+                color: 'var(--color-muted)',
                 marginTop: 'var(--space-1)',
               }}>
-                Start: <span style={{ color: '#b8b8b8' }}>fleet add {name} {branch}</span>
+                Start: <span style={{ color: 'var(--color-muted)' }}>fleet add {name} {branch}</span>
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 'var(--space-15)', flexWrap: 'wrap' }}>
@@ -335,7 +335,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
                     disabled={activating || isActive}
                     style={{
                       ...cardBtnStyle,
-                      ...(isActive ? { background: '#00ff88', color: '#000' } : {}),
+                      ...(isActive ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' } : {}),
                     }}
                     title={isActive ? 'Currently active on port 3000' : 'Route port 3000 to this feature'}
                   >
@@ -359,7 +359,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
                   disabled={syncing}
                   style={{
                     ...cardBtnStyle,
-                    ...(syncConfirm ? { background: '#ff4444', color: '#000' } : {}),
+                    ...(syncConfirm ? { background: 'var(--color-danger)', color: 'var(--color-bg-black)' } : {}),
                   }}
                   title="Rebuild and restart backend from bind-mounted source (logs open automatically)"
                 >
