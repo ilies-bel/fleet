@@ -105,9 +105,14 @@ export const INJECTED_PICKER = String.raw`(() => {
 
   // _hoverHandler holds the registered mousemove handler so uninstall can remove
   // the exact same function reference. _rafId tracks any pending rAF so it can
-  // be cancelled on teardown.
+  // be cancelled on teardown. _hoverEl persists the last successfully resolved
+  // target so a transient null from elementFromPoint does not blank the overlay
+  // while the cursor is still over a valid element. _hoverLeaveHandler clears
+  // the overlay only when the pointer genuinely leaves the document.
   let _hoverHandler = null;
   let _rafId = null;
+  let _hoverEl = null;
+  let _hoverLeaveHandler = null;
 
   // _marked holds {el, rect} pairs so reposition() can update each tint div's
   // position whenever the viewport scrolls or the window resizes.
@@ -133,9 +138,14 @@ export const INJECTED_PICKER = String.raw`(() => {
         _rafId = null;
         const el = document.elementFromPoint(pendingX, pendingY);
         if (!el || el.closest('#mars-capture-root')) {
-          hoverDiv.style.display = 'none';
+          // Keep the previous highlight in place — a transient null (gap between
+          // pixels, overlay edge) must not blank the overlay while the cursor is
+          // still resting over a valid element.  The overlay is cleared only when
+          // the pointer genuinely leaves the document (mouseleave handler below)
+          // or when a new valid element replaces _hoverEl.
           return;
         }
+        _hoverEl = el;
         const rect = el.getBoundingClientRect();
         hoverDiv.style.display = '';
         hoverDiv.style.transform = 'translate(' + rect.left + 'px,' + rect.top + 'px)';
@@ -144,7 +154,13 @@ export const INJECTED_PICKER = String.raw`(() => {
       });
     };
 
+    _hoverLeaveHandler = function() {
+      _hoverEl = null;
+      hoverDiv.style.display = 'none';
+    };
+
     document.addEventListener('mousemove', _hoverHandler);
+    document.addEventListener('mouseleave', _hoverLeaveHandler);
   }
 
   function uninstallHoverHighlight() {
@@ -152,10 +168,15 @@ export const INJECTED_PICKER = String.raw`(() => {
       document.removeEventListener('mousemove', _hoverHandler);
       _hoverHandler = null;
     }
+    if (_hoverLeaveHandler) {
+      document.removeEventListener('mouseleave', _hoverLeaveHandler);
+      _hoverLeaveHandler = null;
+    }
     if (_rafId !== null) {
       cancelAnimationFrame(_rafId);
       _rafId = null;
     }
+    _hoverEl = null;
   }
 
   // Walk _marked and write each element's current bounding rect into its tint
