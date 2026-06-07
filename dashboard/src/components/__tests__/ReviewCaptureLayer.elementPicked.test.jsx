@@ -144,4 +144,61 @@ describe('ReviewCaptureLayer', () => {
     expect(warnSpy).toHaveBeenCalled();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
+
+  // ── Multi-element marquee selection ─────────────────────────────────────
+
+  it('shows count hint for a multi-pick (refKind: multi, multiple selectors)', () => {
+    render(<ReviewCaptureLayer activeWorktree="feat-abc" addNote={vi.fn()} />);
+
+    fireEvent(
+      window,
+      new MessageEvent('message', {
+        data: {
+          type: 'mars.capture.elementPicked',
+          refKind: 'multi',
+          selectors: ['#avatar-1', '#avatar-2', '#avatar-3'],
+          route: '/team',
+          label: '3 elements',
+        },
+        origin: PROXY_ORIGIN,
+      })
+    );
+
+    expect(screen.getByText('3 elements on /team')).toBeInTheDocument();
+  });
+
+  it('calls addNote once with the full selectors array for a multi-pick on Enter', () => {
+    const addNote = vi.fn();
+    render(<ReviewCaptureLayer activeWorktree="feat-abc" addNote={addNote} />);
+
+    fireEvent(
+      window,
+      new MessageEvent('message', {
+        data: {
+          type: 'mars.capture.elementPicked',
+          refKind: 'multi',
+          selectors: ['#avatar-1', '#avatar-2', '#avatar-3'],
+          route: '/team',
+          label: '3 elements',
+        },
+        origin: PROXY_ORIGIN,
+      })
+    );
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'All avatars need better contrast' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(addNote).toHaveBeenCalledOnce();
+    expect(addNote).toHaveBeenCalledWith(
+      'feat-abc',
+      expect.objectContaining({
+        refKind: 'multi',
+        selectors: ['#avatar-1', '#avatar-2', '#avatar-3'],
+        route: '/team',
+        text: 'All avatars need better contrast',
+      })
+    );
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
 });

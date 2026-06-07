@@ -118,6 +118,20 @@ export const INJECTED_PICKER = String.raw`(() => {
   // position whenever the viewport scrolls or the window resizes.
   let _marked = [];
 
+  // Marquee multi-select state.
+  // _mousedownHandler / _mousemoveHandler / _mouseupHandler hold the registered
+  // listeners so uninstall can remove the exact same function references.
+  // _dragStart records the mousedown position; _dragging flips true once the
+  // cursor has moved past the 4px threshold. _wasDragged is set in mouseup so
+  // the subsequent synthetic click event can be suppressed.
+  let _mousedownHandler = null;
+  let _mousemoveHandler = null;
+  let _mouseupHandler = null;
+  let _marqueeDiv = null;
+  let _dragStart = null;
+  let _dragging = false;
+  let _wasDragged = false;
+
   function installHoverHighlight(shadow) {
     const hoverDiv = document.createElement('div');
     hoverDiv.id = 'mars-hover';
@@ -179,6 +193,116 @@ export const INJECTED_PICKER = String.raw`(() => {
     _hoverEl = null;
   }
 
+  function installMarquee(shadow) {
+    _mousedownHandler = function(e) {
+      if (state.captureRoot && e.target &&
+          (e.target === state.captureRoot || state.captureRoot.contains(e.target))) {
+        return;
+      }
+      _dragStart = { x: e.clientX, y: e.clientY };
+      _dragging = false;
+    };
+
+    _mousemoveHandler = function(e) {
+      if (!_dragStart) return;
+      var dx = e.clientX - _dragStart.x;
+      var dy = e.clientY - _dragStart.y;
+      if (!_dragging && Math.abs(dx) <= 4 && Math.abs(dy) <= 4) return;
+      if (!_dragging) {
+        _dragging = true;
+        // Hide hover highlight so it does not fight the marquee rect.
+        var hoverDiv = shadow.querySelector('#mars-hover');
+        if (hoverDiv) hoverDiv.style.display = 'none';
+      }
+      if (!_marqueeDiv) {
+        _marqueeDiv = document.createElement('div');
+        _marqueeDiv.style.cssText =
+          'position:fixed;pointer-events:none;box-sizing:border-box;' +
+          'background:rgba(59,130,246,0.08);border:1px dashed rgba(59,130,246,0.6);' +
+          'z-index:2147483646';
+        shadow.appendChild(_marqueeDiv);
+      }
+      var left = Math.min(e.clientX, _dragStart.x);
+      var top = Math.min(e.clientY, _dragStart.y);
+      _marqueeDiv.style.left = left + 'px';
+      _marqueeDiv.style.top = top + 'px';
+      _marqueeDiv.style.width = Math.abs(dx) + 'px';
+      _marqueeDiv.style.height = Math.abs(dy) + 'px';
+    };
+
+    _mouseupHandler = function(e) {
+      if (!_dragStart) return;
+      var wasRealDrag = _dragging;
+      var startX = _dragStart.x;
+      var startY = _dragStart.y;
+      _dragStart = null;
+      _dragging = false;
+      _wasDragged = wasRealDrag;
+      if (_marqueeDiv && _marqueeDiv.parentNode) {
+        _marqueeDiv.parentNode.removeChild(_marqueeDiv);
+        _marqueeDiv = null;
+      }
+      if (!wasRealDrag) return;
+      // Compute marquee bounds in viewport coordinates.
+      var left = Math.min(e.clientX, startX);
+      var top = Math.min(e.clientY, startY);
+      var right = Math.max(e.clientX, startX);
+      var bottom = Math.max(e.clientY, startY);
+      // Collect leaf elements (no element children) whose bounding rect
+      // intersects the marquee, excluding the overlay host.
+      var all = document.querySelectorAll('*');
+      var seen = new Set();
+      var selectors = [];
+      Array.from(all).forEach(function(el) {
+        if (state.captureRoot &&
+            (el === state.captureRoot || state.captureRoot.contains(el))) return;
+        if (el.children.length > 0) return;  // not a leaf
+        if (seen.has(el)) return;
+        var rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return;
+        if (rect.right > left && rect.left < right &&
+            rect.bottom > top && rect.top < bottom) {
+          seen.add(el);
+          selectors.push(computeRef(el).selector);
+        }
+      });
+      if (selectors.length === 0) return;
+      window.parent.postMessage({
+        type: 'mars.capture.elementPicked',
+        refKind: 'multi',
+        selectors: selectors,
+        route: location.pathname + location.search,
+        label: selectors.length + ' elements',
+      }, EXPECTED_DASHBOARD_ORIGIN || '*');
+    };
+
+    document.addEventListener('mousedown', _mousedownHandler);
+    document.addEventListener('mousemove', _mousemoveHandler);
+    document.addEventListener('mouseup', _mouseupHandler);
+  }
+
+  function uninstallMarquee() {
+    if (_mousedownHandler) {
+      document.removeEventListener('mousedown', _mousedownHandler);
+      _mousedownHandler = null;
+    }
+    if (_mousemoveHandler) {
+      document.removeEventListener('mousemove', _mousemoveHandler);
+      _mousemoveHandler = null;
+    }
+    if (_mouseupHandler) {
+      document.removeEventListener('mouseup', _mouseupHandler);
+      _mouseupHandler = null;
+    }
+    _dragStart = null;
+    _dragging = false;
+    _wasDragged = false;
+    if (_marqueeDiv && _marqueeDiv.parentNode) {
+      _marqueeDiv.parentNode.removeChild(_marqueeDiv);
+      _marqueeDiv = null;
+    }
+  }
+
   // Walk _marked and write each element's current bounding rect into its tint
   // div. Called once after the tint layer is built and registered as both the
   // scroll (capture) and resize listeners so tints stay aligned on any viewport
@@ -220,6 +344,15 @@ export const INJECTED_PICKER = String.raw`(() => {
   }
 
   function onCaptureClick(ev) {
+    // Suppress the click that the browser fires immediately after a drag-end
+    // mouseup — the gesture already posted a multi-select message; a click here
+    // would incorrectly also post a single-element pick.
+    if (_wasDragged) {
+      _wasDragged = false;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      return;
+    }
     // Ignore clicks that land on the capture-root overlay host (the banner /
     // hover-highlight UI) so the operator can interact with it without
     // accidentally picking it as a target element.
@@ -268,6 +401,7 @@ export const INJECTED_PICKER = String.raw`(() => {
       if (state.active) {
         renderBanner(shadow);
         installHoverHighlight(shadow);
+        installMarquee(shadow);
 
         // Note tint layer: sibling container for blue note-marker overlays.
         // Stored in state so mars.capture.notesUpdated can repaint without
@@ -281,6 +415,7 @@ export const INJECTED_PICKER = String.raw`(() => {
         window.addEventListener('resize', reposition);
       } else {
         uninstallHoverHighlight();
+        uninstallMarquee();
         document.removeEventListener('scroll', reposition, { capture: true });
         window.removeEventListener('resize', reposition);
         _marked = [];

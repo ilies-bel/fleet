@@ -102,14 +102,20 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
                 <div key={note.id} className="review-notes-panel__note-row">
                   <div className="review-notes-panel__note-body">
                     <div className="review-notes-panel__note-meta">
-                      {note.refKind && <span>{note.refKind}</span>}
-                      {note.refKind && note.selectors && note.selectors[0] && <span> · </span>}
-                      {note.selectors && note.selectors[0] && (
-                        <span title={note.selectors[0]}>
-                          {note.selectors[0].length > 30
-                            ? note.selectors[0].slice(0, 30) + '…'
-                            : note.selectors[0]}
-                        </span>
+                      {note.selectors && note.selectors.length > 1 ? (
+                        <span>multi · {note.selectors.length} targets</span>
+                      ) : (
+                        <>
+                          {note.refKind && <span>{note.refKind}</span>}
+                          {note.refKind && note.selectors && note.selectors[0] && <span> · </span>}
+                          {note.selectors && note.selectors[0] && (
+                            <span title={note.selectors[0]}>
+                              {note.selectors[0].length > 30
+                                ? note.selectors[0].slice(0, 30) + '…'
+                                : note.selectors[0]}
+                            </span>
+                          )}
+                        </>
                       )}
                     </div>
                     <div className="review-notes-panel__note-text">{note.text}</div>

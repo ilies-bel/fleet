@@ -191,6 +191,28 @@ describe('ReviewNotesPanel', () => {
     });
   });
 
+  // ── Multi-selector notes show count ───────────────────────────────────
+
+  it('shows "multi · N targets" for a note with multiple selectors', () => {
+    const note = makeNote({
+      refKind: 'multi',
+      selectors: ['#avatar-1', '#avatar-2', '#avatar-3'],
+      route: '/team',
+      text: 'All avatars need contrast',
+    });
+
+    render(
+      <ReviewNotesPanel
+        notes={[note]}
+        worktree={WORKTREE}
+        removeNote={vi.fn()}
+        clearForWorktree={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/multi · 3 targets/)).toBeTruthy();
+  });
+
   // ── Selector is truncated at 30 characters ─────────────────────────────
 
   it('truncates a long selector with an ellipsis', () => {

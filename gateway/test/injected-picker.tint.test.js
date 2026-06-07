@@ -222,4 +222,18 @@ describe('INJECTED_PICKER — note tint overlay', () => {
     const tintDivs = [...getShadow().querySelectorAll(TINT_SELECTOR)];
     assert.equal(tintDivs.length, 1, 'only the matching note should be painted');
   });
+
+  // ── One note with two selectors paints two tints ──────────────────────────
+
+  test('one note with two selectors paints exactly two tint divs', () => {
+    const { getShadow, activate } = setupPicker(
+      '<!DOCTYPE html><html><body><button id="a">A</button><button id="b">B</button></body></html>',
+      { pathname: '/team' },
+    );
+
+    activate(true, [{ id: 'n1', route: '/team', selectors: ['#a', '#b'] }]);
+
+    const tintDivs = [...getShadow().querySelectorAll(TINT_SELECTOR)];
+    assert.equal(tintDivs.length, 2, 'two tint divs for one note with two selectors');
+  });
 });
