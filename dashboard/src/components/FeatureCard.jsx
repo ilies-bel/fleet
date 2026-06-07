@@ -271,7 +271,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
                     ...cardBtnStyle,
                     ...(syncConfirm ? { background: '#ff4444', color: '#000' } : {}),
                   }}
-                  title="Pull latest code, rebuild and restart backend (logs open automatically)"
+                  title="Rebuild and restart backend from bind-mounted source (logs open automatically)"
                 >
                   {syncing ? '[...]' : syncConfirm ? '[CONFIRM SYNC?]' : '[SYNC]'}
                 </Button>

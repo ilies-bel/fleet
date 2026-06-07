@@ -404,7 +404,8 @@ router.post('/features/:key/sync', async (req, res) => {
 
 /**
  * Run the sync sequence inside a feature container:
- *   git pull → [jOOQ codegen] → mvn build → copy JAR → supervisorctl restart
+ *   [jOOQ codegen] → mvn build → copy JAR → supervisorctl restart
+ * Source is already present via the bind-mounted worktree; no git pull needed.
  * @param {string} containerName
  * @param {boolean} regenerateSources
  * @param {number} opId  Operation id from startOperation — events and outcome are written here.
@@ -427,7 +428,6 @@ async function runSync(containerName, regenerateSources, opId) {
 
   const steps = [
     `cd /app/${backendDir}`,
-    'git pull --ff-only',
   ];
   if (regenerateSources) {
     appendEvent(opId, { message: 'regenerating jOOQ sources' });
@@ -438,7 +438,7 @@ async function runSync(containerName, regenerateSources, opId) {
   steps.push(`ls target/*.jar && cp target/*.jar ${artifactPath}`);
   steps.push('supervisorctl restart all');
 
-  appendEvent(opId, { message: 'running rsync: git pull and build' });
+  appendEvent(opId, { message: 'running sync: build and restart' });
   await dockerExec(containerName, ['bash', '-c', steps.join(' && ')]);
   appendEvent(opId, { message: 'sync complete' });
 }
