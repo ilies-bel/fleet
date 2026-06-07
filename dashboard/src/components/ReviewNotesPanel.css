@@ -26,22 +26,6 @@
   margin: 0;
 }
 
-.review-notes-panel__clear-btn {
-  background: none;
-  border: 1px solid #333;
-  color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.06em;
-  padding: 0.15rem 0.4rem;
-  cursor: pointer;
-  transition: color 0.1s, border-color 0.1s;
-}
-
-.review-notes-panel__clear-btn:hover {
-  color: #ff4444;
-  border-color: #ff4444;
-}
 
 .review-notes-panel__body {
   flex: 1;

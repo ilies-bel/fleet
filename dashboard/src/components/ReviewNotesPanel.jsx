@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { buildReviewPrompt } from '../lib/buildReviewPrompt.js';
+import { Button } from './Button.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
 import './ReviewNotesPanel.css';
 
@@ -69,22 +70,22 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
     <aside className="review-notes-panel" aria-label="Review notes">
       <div className="review-notes-panel__header">
         <h3 className="review-notes-panel__title">Review Notes</h3>
-        <button
-          className="review-notes-panel__copy-btn"
+        <Button
+          tone="primary"
           onClick={handleCopy}
           disabled={notes.length === 0}
           aria-label="Copy review notes as prompt"
         >
           {copied ? '[COPIED]' : '[COPY]'}
-        </button>
+        </Button>
         {notes.length > 0 && (
-          <button
-            className="review-notes-panel__clear-btn"
+          <Button
+            tone="destructive"
             onClick={handleClearAll}
             aria-label="Clear all review notes"
           >
             [CLEAR ALL]
-          </button>
+          </Button>
         )}
       </div>
 
@@ -136,28 +137,22 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
                 placeholder="Add a general note…"
               />
               <div className="review-notes-panel__composer-actions">
-                <button
-                  className="review-notes-panel__composer-save"
-                  onClick={handleSave}
-                >
+                <Button tone="primary" onClick={handleSave}>
                   [SAVE]
-                </button>
-                <button
-                  className="review-notes-panel__composer-cancel"
-                  onClick={handleCancel}
-                >
+                </Button>
+                <Button tone="primary" onClick={handleCancel}>
                   [CANCEL]
-                </button>
+                </Button>
               </div>
             </>
           ) : (
-            <button
-              className="review-notes-panel__add-btn"
+            <Button
+              tone="primary"
               aria-label="Add general note"
               onClick={() => setComposerOpen(true)}
             >
               [ADD NOTE]
-            </button>
+            </Button>
           )}
         </div>
       </div>
