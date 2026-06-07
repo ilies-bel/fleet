@@ -14,6 +14,24 @@ function fmtNet(rxMB, txMB) {
   return `↓${rxMB} ↑${txMB} MB`;
 }
 
+// Column widths for skeleton blocks: FEATURE, PROJECT, BRANCH, STATUS, CPU, MEMORY, NETWORK
+const SKELETON_COL_WIDTHS = ['60%', '80%', '40%', '50%', '30%', '45%', '55%'];
+
+function SkeletonRow() {
+  return (
+    <tr data-testid="skeleton-row">
+      {SKELETON_COL_WIDTHS.map((width, i) => (
+        <td key={i} style={{ padding: 'var(--space-2) var(--space-3)' }}>
+          <div
+            className="skeleton-pulse"
+            style={{ height: '0.7rem', width, background: '#1a1a1a' }}
+          />
+        </td>
+      ))}
+    </tr>
+  );
+}
+
 function CpuBar({ percent }) {
   const color = percent > 80
     ? 'var(--color-danger)'
@@ -113,13 +131,6 @@ export default function ResourceMonitor() {
     background: 'var(--color-bg-black)',
   };
 
-  const mutedCell = {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.65rem',
-    color: 'var(--color-muted)',
-    padding: 'var(--space-2) var(--space-3)',
-  };
-
   const runningFeatures = state.status === 'ok' ? state.features.filter(f => f.status === 'running') : [];
   const fleetNetRxMB = runningFeatures.reduce((s, f) => s + f.netRxMB, 0);
   const fleetNetTxMB = runningFeatures.reduce((s, f) => s + f.netTxMB, 0);
@@ -170,9 +181,7 @@ export default function ResourceMonitor() {
         </thead>
         <tbody>
           {state.status === 'loading' ? (
-            <tr>
-              <td colSpan={7} style={mutedCell}>loading instances…</td>
-            </tr>
+            Array.from({ length: 5 }, (_, i) => <SkeletonRow key={i} />)
           ) : state.status === 'ok' && state.features.length === 0 ? (
             <tr>
               <td colSpan={7} style={{ padding: 0 }}>

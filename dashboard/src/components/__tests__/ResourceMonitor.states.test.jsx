@@ -14,12 +14,13 @@ describe('ResourceMonitor — fetch states', () => {
     vi.clearAllMocks();
   });
 
-  it('shows muted loading row inside the table region on initial render before fetch resolves', () => {
+  it('shows skeleton loading rows inside the table region on initial render before fetch resolves', () => {
     getFeatures.mockImplementation(() => new Promise(() => {})); // never resolves
     render(<ResourceMonitor />);
-    // Loading row is inside the table
-    expect(screen.getByText('loading instances…')).toBeInTheDocument();
-    // Table column headers are visible alongside the loading row
+    // 5 skeleton rows replace the plain text placeholder
+    const skeletonRows = screen.getAllByTestId('skeleton-row');
+    expect(skeletonRows).toHaveLength(5);
+    // Table column headers are visible alongside the skeleton rows
     expect(screen.getByText('FEATURE')).toBeInTheDocument();
     // The resource monitor header is unaffected
     expect(screen.getByText(/RESOURCE MONITOR/)).toBeInTheDocument();

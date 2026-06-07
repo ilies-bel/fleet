@@ -114,6 +114,15 @@ input {
   50%, 100% { opacity: 0.2; }
 }
 
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%       { opacity: 0.7; }
+}
+
+.skeleton-pulse {
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
 /* Reduced-motion alternative for the transient-state blink (status bar +
    lifecycle dots). State still travels as color + text label, so dropping the
    flash loses no information. The blink keyframe ends at opacity 0.2, so it must
