@@ -44,6 +44,13 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
           ? 'var(--color-warning)'
           : 'var(--color-accent)'
       : 'var(--color-muted)';
+  const fleetNetWorst = Math.max(Number(fleetNetRxMB ?? 0), Number(fleetNetTxMB ?? 0));
+  const fleetNetColor =
+    fleetNetWorst > 500
+      ? 'var(--color-danger)'
+      : fleetNetWorst > 100
+        ? 'var(--color-warning)'
+        : 'var(--color-accent)';
 
   return (
     <div style={{ marginBottom: 'var(--space-6)', padding: 'var(--space-3) var(--space-4)', background: '#0d0d0d', border: '1px solid #1a1a1a' }}>
@@ -140,8 +147,8 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
       )}
 
       {/* Fleet network row — always rendered regardless of host status */}
-      <span className="fleet-net" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-        FLEET NETWORK ↓{fleetNetRxMB} ↑{fleetNetTxMB} MB
+      <span className="fleet-net" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: fleetNetColor }}>
+        FLEET NETWORK ↓{Number(fleetNetRxMB ?? 0).toFixed(1)} ↑{Number(fleetNetTxMB ?? 0).toFixed(1)} MB
       </span>
     </div>
   );
