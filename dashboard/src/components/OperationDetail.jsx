@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fetchOperation } from '../api.js';
 import { Button } from './Button.jsx';
+import { relativeTime, absoluteTime } from '../lib/formatTime.js';
 
 /**
  * Renders the header and full event timeline for a single operation.
@@ -60,11 +61,11 @@ export default function OperationDetail({ id, onBack }) {
             )}
 
             <div style={{ color: 'var(--color-muted)', marginBottom: 'var(--space-05)' }}>
-              <span style={{ marginRight: 'var(--space-6)' }}>
-                Started: {fmtTime(data.operation.startedAt)}
+              <span style={{ marginRight: 'var(--space-6)' }} title={absoluteTime(data.operation.startedAt)}>
+                Started: {relativeTime(data.operation.startedAt)}
               </span>
-              <span style={{ marginRight: 'var(--space-6)' }}>
-                Ended: {fmtTime(data.operation.endedAt)}
+              <span style={{ marginRight: 'var(--space-6)' }} title={absoluteTime(data.operation.endedAt)}>
+                Ended: {relativeTime(data.operation.endedAt)}
               </span>
               <span style={{ color: outcomeColor(data.operation.outcome) }}>
                 {data.operation.outcome ?? '…'}
@@ -107,15 +108,6 @@ export default function OperationDetail({ id, onBack }) {
       )}
     </div>
   );
-}
-
-function fmtTime(ts) {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  return `${hh}:${mm}:${ss}`;
 }
 
 function outcomeColor(outcome) {

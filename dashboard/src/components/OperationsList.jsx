@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchOperations } from '../api.js';
+import { relativeTime, absoluteTime } from '../lib/formatTime.js';
 
 /**
  * Renders a table of recent gateway operations (activate events etc.)
@@ -62,8 +63,12 @@ export default function OperationsList({ onSelect }) {
             >
               <td style={tdStyle}>{op.kind}</td>
               <td style={tdStyle}>{op.key}</td>
-              <td style={tdStyle}>{fmtTime(op.startedAt)}</td>
-              <td style={tdStyle}>{fmtTime(op.endedAt)}</td>
+              <td style={tdStyle}>
+                <span title={absoluteTime(op.startedAt)}>{relativeTime(op.startedAt)}</span>
+              </td>
+              <td style={tdStyle}>
+                <span title={absoluteTime(op.endedAt)}>{relativeTime(op.endedAt)}</span>
+              </td>
               <td style={{ ...tdStyle, color: outcomeColor(op.outcome) }}>{op.outcome ?? '…'}</td>
               <td style={tdStyle}>
                 {op.outcome === 'failure' && op.reasonCode
@@ -98,15 +103,6 @@ const tdStyle = {
   padding: '0.35rem var(--space-2)', /* off-scale: 0.35rem vertical has no exact token */
   verticalAlign: 'middle',
 };
-
-function fmtTime(ts) {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  return `${hh}:${mm}:${ss}`;
-}
 
 function outcomeColor(outcome) {
   if (outcome === 'success') return '#00ff88';

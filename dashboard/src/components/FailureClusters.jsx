@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fetchFailureClusters } from '../api.js';
 import { headlineFor } from './failureHeadlines.js';
+import { relativeTime, absoluteTime } from '../lib/formatTime.js';
 
 /**
  * Renders one card per failure reason_code cluster, ordered by count DESC.
@@ -51,7 +52,7 @@ export default function FailureClusters() {
             </span>
           </div>
           <div style={{ color: 'var(--color-muted)', fontSize: '0.65rem', marginBottom: cluster.sampleKeys.length ? 'var(--space-15)' : 0 }}>
-            last seen {cluster.lastSeenAt ? fmtTime(cluster.lastSeenAt) : '—'}
+            last seen <span title={absoluteTime(cluster.lastSeenAt)}>{relativeTime(cluster.lastSeenAt)}</span>
           </div>
           {cluster.sampleKeys.length > 0 && (
             <ul style={{ margin: 0, padding: '0 0 0 var(--space-4)', fontSize: '0.7rem', color: '#888' }}>
@@ -62,15 +63,6 @@ export default function FailureClusters() {
       ))}
     </div>
   );
-}
-
-function fmtTime(ts) {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  return `${hh}:${mm}:${ss}`;
 }
 
 const REASON_PREFIX_COLORS = { docker: '#ffaa00', build: '#ff4444', registry: '#ffaa00', sync: '#00aaff' };
