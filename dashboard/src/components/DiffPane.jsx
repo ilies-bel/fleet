@@ -171,7 +171,7 @@ export default function DiffPane({ activeKey }) {
           padding: 'var(--space-4)',
           fontFamily: 'var(--font-mono)',
           fontSize: '0.8rem',
-          color: '#ff5555',
+          color: 'var(--color-danger)',
           background: 'var(--color-bg)',
         }}
       >

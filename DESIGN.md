@@ -198,6 +198,38 @@ sub-4.5:1 risk. Body and label text use `#eee` or `#b8b8b8`. Reserve `#888`/`#55
 for genuinely tertiary, non-essential text (instructions, decorative chevrons),
 and verify contrast rather than assuming it.
 
+### Diff View Sub-Palette (Sanctioned)
+
+The `react-diff-view` component overrides use a deliberately **muted** set of
+tints so that inserted/deleted code lines remain legible without the full
+phosphor or danger saturation. These values are **not** accidents or near-dupes
+of the primary palette; they serve a distinct readability role inside code diff
+blocks.
+
+| Token | Value | Role |
+|---|---|---|
+| `--diff-gutter-insert-background-color` | `#1a3324` | Gutter background for added lines |
+| `--diff-gutter-insert-text-color` | `#00cc66` | Gutter line-number tint for added lines |
+| `--diff-gutter-delete-background-color` | `#3a1a1a` | Gutter background for removed lines |
+| `--diff-gutter-delete-text-color` | `#cc4444` | Gutter line-number tint for removed lines |
+| `--diff-code-insert-background-color` | `#0d2018` | Code cell background for added lines |
+| `--diff-code-delete-background-color` | `#2a0d0d` | Code cell background for removed lines |
+
+**Why muted, not primary?**
+- `#00cc66` (muted insert green) vs. `#00ff88` (Phosphor Green accent): The
+  accent is reserved for the "live/UP" lifecycle state and affirmative actions.
+  Using full phosphor on every inserted diff line would both dilute the accent's
+  signal and make extended code review tiring. The muted value keeps inserts
+  clearly green without competing with lifecycle indicators.
+- `#cc4444` (muted delete red) vs. `#ff4444` (`--color-danger`): Danger red is
+  reserved for broken/destructive UI state. A dense column of deleted lines
+  rendered in full danger red would falsely signal "the system is failing." The
+  muted value communicates "removed code" without triggering operational alarm.
+
+These six values exhaust the diff sub-palette. Any future diff tint must be
+added here with an explicit rationale; do not introduce additional hex literals
+in `DiffPane.jsx` or `index.css` without documenting them in this table.
+
 ## 3. Typography
 
 **Display / Body / Label Font:** JetBrains Mono (with Fira Code, Cascadia Code,
