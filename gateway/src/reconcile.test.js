@@ -37,6 +37,7 @@ import assert from 'node:assert/strict';
 import {
   reconcileOne,
   reconcileSweep,
+  reconcileFromDocker,
   _setDockerImpl,
 } from './reconcile.js';
 
@@ -48,12 +49,15 @@ import {
   getActiveFeature,
   setActiveFeature,
   loadPersistedActive,
+  loadPersistedRegistry,
+  persistRegistryBaseline,
   probeContainerState,
   commitProbedStatus,
+  updateStatus,
   _clearPendingFlips,
 } from './registry.js';
 
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -215,7 +219,7 @@ describe('reconcileOne', () => {
     assert.equal(startContainerCalls.length, 0);
   });
 
-  test('calls startContainer when autoStart=true and container is stopped', async () => {
+  test('calls startContainer when baseline was "up" and container is cleanly stopped', async () => {
     const containerName = 'fleet-proj-sleepy';
     let startCalled = false;
 
@@ -223,8 +227,8 @@ describe('reconcileOne', () => {
       listRunningContainers: async () => [],
       inspectContainer: async (name) => {
         if (name === containerName) {
-          // After start, we'd normally be running — simulate that.
-          return makeInspect(containerName, 'proj', 'sleepy', 'main', true);
+          // First inspect (pre-start): stopped (clean exit). Second inspect (post-start): running.
+          return makeInspect(containerName, 'proj', 'sleepy', 'main', startCalled);
         }
         return null;
       },
@@ -234,11 +238,14 @@ describe('reconcileOne', () => {
       },
     });
 
-    const added = await reconcileOne(makeContainer(containerName, 'exited'), { autoStart: true });
+    const baseline = { 'proj-sleepy': { status: 'up' } };
+    const added = await reconcileOne(makeContainer(containerName, 'exited'), { baseline });
 
-    assert.ok(startCalled, 'startContainer must be called when autoStart=true and container is stopped');
+    assert.ok(startCalled, 'startContainer must be called when baseline was "up" and container is stopped');
     assert.equal(added, true);
     assert.ok(isRegistered('proj-sleepy'));
+    // After starting, the container is running — status should be 'up'.
+    assert.equal(getAll().find((f) => f.key === 'proj-sleepy').status, 'up');
   });
 
   test('skips container with no PROJECT_NAME env', async () => {
@@ -639,8 +646,370 @@ describe('reconcileOne — full entry recovery', () => {
       startContainer: async () => {},
     });
 
-    await reconcileOne(makeContainer(containerName, 'exited'), { autoStart: false });
+    await reconcileOne(makeContainer(containerName, 'exited'));
 
     assert.equal(getAll().find((f) => f.key === 'proj-boom').status, 'failed');
+  });
+});
+
+// ── reconcileOne — baseline-driven start decisions ───────────────────────────
+
+describe('reconcileOne — baseline-driven boot start decisions', () => {
+  let startContainerCalls;
+
+  beforeEach(() => {
+    clearRegistry();
+    startContainerCalls = [];
+  });
+
+  afterEach(() => {
+    clearRegistry();
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async () => null,
+      startContainer: async () => {},
+    });
+  });
+
+  // (a) stopped container whose baseline was 'up' IS restarted
+  test('(a) stopped container with baseline "up" IS started and registered as up', async () => {
+    const containerName = 'fleet-proj-alpha';
+    let startCalled = false;
+
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async (name) => {
+        if (name !== containerName) return null;
+        // Before start: stopped (clean exit). After start: running.
+        return makeInspect(containerName, 'proj', 'alpha', 'main', startCalled);
+      },
+      startContainer: async (name) => { startCalled = true; startContainerCalls.push(name); },
+    });
+
+    await reconcileOne(
+      makeContainer(containerName, 'exited'),
+      { baseline: { 'proj-alpha': { status: 'up' } } }
+    );
+
+    assert.ok(startCalled, 'startContainer must be called');
+    assert.ok(isRegistered('proj-alpha'));
+    assert.equal(getAll().find((f) => f.key === 'proj-alpha').status, 'up',
+      'displayed status must reflect post-start live probe (up), not stale baseline');
+  });
+
+  // (b) stopped container with no baseline (absent key) is NOT restarted
+  test('(b) stopped container with no baseline entry is NOT started, registered as stopped', async () => {
+    const containerName = 'fleet-proj-beta';
+
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'beta', 'main', false)
+          : null,
+      startContainer: async (name) => { startContainerCalls.push(name); },
+    });
+
+    await reconcileOne(makeContainer(containerName, 'exited'), { baseline: {} });
+
+    assert.equal(startContainerCalls.length, 0, 'must not start when baseline has no entry');
+    assert.ok(isRegistered('proj-beta'));
+    assert.equal(getAll().find((f) => f.key === 'proj-beta').status, 'stopped');
+  });
+
+  // (b) stopped container with baseline 'stopped' is NOT restarted
+  test('(b) stopped container with baseline "stopped" is NOT started', async () => {
+    const containerName = 'fleet-proj-gamma';
+
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'gamma', 'main', false)
+          : null,
+      startContainer: async (name) => { startContainerCalls.push(name); },
+    });
+
+    await reconcileOne(
+      makeContainer(containerName, 'exited'),
+      { baseline: { 'proj-gamma': { status: 'stopped' } } }
+    );
+
+    assert.equal(startContainerCalls.length, 0, 'baseline "stopped" must not trigger start');
+    assert.equal(getAll().find((f) => f.key === 'proj-gamma').status, 'stopped');
+  });
+
+  // (c) crashed/failed container is NOT auto-restarted even if baseline was 'up'
+  test('(c) crashed container with baseline "up" is NOT started — stays failed', async () => {
+    const containerName = 'fleet-proj-crashed';
+
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'crashed', 'main', false, {
+              state: { Running: false, ExitCode: 137 },
+            })
+          : null,
+      startContainer: async (name) => { startContainerCalls.push(name); },
+    });
+
+    await reconcileOne(
+      makeContainer(containerName, 'exited'),
+      { baseline: { 'proj-crashed': { status: 'up' } } }
+    );
+
+    assert.equal(startContainerCalls.length, 0, 'crashed container must not be auto-restarted');
+    assert.equal(getAll().find((f) => f.key === 'proj-crashed').status, 'failed',
+      'crashed container must be registered as failed');
+  });
+
+  // (d) displayed status always equals live probe, never stale baseline
+  test('(d) displayed status is the live probe, not the stale baseline', async () => {
+    const containerName = 'fleet-proj-delta';
+
+    // Container IS still running (live probe = up), baseline says 'stopped' (stale/wrong)
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'delta', 'main', true)
+          : null,
+      startContainer: async () => {},
+    });
+
+    await reconcileOne(
+      makeContainer(containerName, 'running'),
+      { baseline: { 'proj-delta': { status: 'stopped' } } }
+    );
+
+    assert.equal(getAll().find((f) => f.key === 'proj-delta').status, 'up',
+      'status must be the live probe (up), not the stale baseline (stopped)');
+  });
+});
+
+// ── reconcileFromDocker — baseline-driven boot (integration) ─────────────────
+
+describe('reconcileFromDocker — baseline-driven boot', () => {
+  let tmpDir;
+  let registryFile;
+  let savedRegistryEnv;
+  let startContainerCalls;
+
+  beforeEach(() => {
+    clearRegistry();
+    startContainerCalls = [];
+    tmpDir = mkdtempSync(join(tmpdir(), 'fleet-boot-baseline-'));
+    registryFile = join(tmpDir, 'registry.json');
+    savedRegistryEnv = process.env.FLEET_REGISTRY_FILE;
+    process.env.FLEET_REGISTRY_FILE = registryFile;
+  });
+
+  afterEach(() => {
+    clearRegistry();
+    _clearPendingFlips();
+    if (savedRegistryEnv === undefined) {
+      delete process.env.FLEET_REGISTRY_FILE;
+    } else {
+      process.env.FLEET_REGISTRY_FILE = savedRegistryEnv;
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
+    _setDockerImpl({
+      listRunningContainers: async () => [],
+      inspectContainer: async () => null,
+      startContainer: async () => {},
+    });
+  });
+
+  test('does not start a stopped container when baseline is empty (no prior state)', async () => {
+    const containerName = 'fleet-proj-new';
+    // No registry.json on disk → baseline is {}
+
+    _setDockerImpl({
+      listRunningContainers: async () => [makeContainer(containerName, 'exited')],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'new', 'main', false)
+          : null,
+      startContainer: async (name) => { startContainerCalls.push(name); },
+    });
+
+    await reconcileFromDocker();
+
+    assert.equal(startContainerCalls.length, 0, 'no prior baseline → do not start');
+    assert.ok(isRegistered('proj-new'));
+    assert.equal(getAll().find((f) => f.key === 'proj-new').status, 'stopped');
+  });
+
+  test('restarts a stopped container whose baseline was "up"', async () => {
+    const containerName = 'fleet-proj-comeback';
+    // Write baseline: this feature was 'up' before the gateway went down.
+    writeFileSync(registryFile, JSON.stringify({ 'proj-comeback': { status: 'up' } }), 'utf8');
+
+    let startCalled = false;
+    _setDockerImpl({
+      listRunningContainers: async () => [makeContainer(containerName, 'exited')],
+      inspectContainer: async (name) => {
+        if (name !== containerName) return null;
+        return makeInspect(containerName, 'proj', 'comeback', 'main', startCalled);
+      },
+      startContainer: async (name) => { startCalled = true; startContainerCalls.push(name); },
+    });
+
+    await reconcileFromDocker();
+
+    assert.ok(startCalled, 'container with baseline "up" must be restarted');
+    assert.equal(getAll().find((f) => f.key === 'proj-comeback').status, 'up',
+      'registered status must reflect post-start live probe');
+  });
+
+  test('does not restart a container whose baseline was "stopped"', async () => {
+    const containerName = 'fleet-proj-intentional';
+    writeFileSync(registryFile, JSON.stringify({ 'proj-intentional': { status: 'stopped' } }), 'utf8');
+
+    _setDockerImpl({
+      listRunningContainers: async () => [makeContainer(containerName, 'exited')],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'intentional', 'main', false)
+          : null,
+      startContainer: async (name) => { startContainerCalls.push(name); },
+    });
+
+    await reconcileFromDocker();
+
+    assert.equal(startContainerCalls.length, 0, 'deliberately-stopped feature must not be restarted');
+    assert.equal(getAll().find((f) => f.key === 'proj-intentional').status, 'stopped');
+  });
+
+  test('does not restart a crashed container even if baseline was "up"', async () => {
+    const containerName = 'fleet-proj-oom';
+    writeFileSync(registryFile, JSON.stringify({ 'proj-oom': { status: 'up' } }), 'utf8');
+
+    _setDockerImpl({
+      listRunningContainers: async () => [makeContainer(containerName, 'exited')],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'oom', 'main', false, {
+              state: { Running: false, OOMKilled: true },
+            })
+          : null,
+      startContainer: async (name) => { startContainerCalls.push(name); },
+    });
+
+    await reconcileFromDocker();
+
+    assert.equal(startContainerCalls.length, 0, 'OOM-killed container must not be auto-restarted');
+    assert.equal(getAll().find((f) => f.key === 'proj-oom').status, 'failed');
+  });
+
+  // (e) sweep path never starts anything
+  test('(e) sweep path never calls startContainer regardless of baseline', async () => {
+    const containerName = 'fleet-proj-sweep-check';
+    // Seed a baseline that says 'up' — sweep must ignore it
+    writeFileSync(registryFile, JSON.stringify({ 'proj-sweep-check': { status: 'up' } }), 'utf8');
+
+    _setDockerImpl({
+      listRunningContainers: async () => [makeContainer(containerName, 'exited')],
+      inspectContainer: async (name) =>
+        name === containerName
+          ? makeInspect(containerName, 'proj', 'sweep-check', 'main', false)
+          : null,
+      startContainer: async (name) => { startContainerCalls.push(name); },
+    });
+
+    // reconcileSweep must never start containers (no baseline passed to reconcileOne)
+    await reconcileSweep();
+
+    assert.equal(startContainerCalls.length, 0, 'sweep must never call startContainer');
+  });
+});
+
+// ── registry baseline persistence (persistRegistryBaseline / loadPersistedRegistry) ─
+
+describe('registry baseline persistence', () => {
+  let tmpDir;
+  let registryFile;
+  let savedRegistryEnv;
+
+  beforeEach(() => {
+    clearRegistry();
+    tmpDir = mkdtempSync(join(tmpdir(), 'fleet-registry-baseline-'));
+    registryFile = join(tmpDir, 'registry.json');
+    savedRegistryEnv = process.env.FLEET_REGISTRY_FILE;
+    process.env.FLEET_REGISTRY_FILE = registryFile;
+  });
+
+  afterEach(() => {
+    clearRegistry();
+    if (savedRegistryEnv === undefined) {
+      delete process.env.FLEET_REGISTRY_FILE;
+    } else {
+      process.env.FLEET_REGISTRY_FILE = savedRegistryEnv;
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // (f) baseline file is written on register()
+  test('(f) register() writes the baseline file', () => {
+    register('proj', 'f1', 'main', null, 'up');
+
+    assert.ok(existsSync(registryFile), 'baseline file must exist after register()');
+    const baseline = loadPersistedRegistry();
+    assert.deepEqual(baseline['proj-f1'], { status: 'up' });
+  });
+
+  // (f) baseline file is written on updateStatus()
+  test('(f) updateStatus() writes the baseline file', () => {
+    register('proj', 'f2', 'main', null, 'up');
+    updateStatus('proj-f2', 'stopped');
+
+    const baseline = loadPersistedRegistry();
+    assert.deepEqual(baseline['proj-f2'], { status: 'stopped' },
+      'baseline must reflect the new status after updateStatus()');
+  });
+
+  // (f) loadPersistedRegistry round-trips correctly
+  test('(f) loadPersistedRegistry round-trips the baseline', () => {
+    register('proj', 'f3', 'main', null, 'up');
+    register('proj', 'f4', 'main', null, 'stopped');
+
+    const baseline = loadPersistedRegistry();
+    assert.deepEqual(baseline['proj-f3'], { status: 'up' });
+    assert.deepEqual(baseline['proj-f4'], { status: 'stopped' });
+  });
+
+  // (f) corrupt file yields {} without throwing
+  test('(f) corrupt registry file yields {} without throwing', () => {
+    writeFileSync(registryFile, 'not-valid-json', 'utf8');
+
+    let result;
+    assert.doesNotThrow(() => { result = loadPersistedRegistry(); });
+    assert.deepEqual(result, {});
+  });
+
+  // (f) missing file yields {} without throwing
+  test('(f) missing registry file yields {} without throwing', () => {
+    // registryFile has never been written
+    let result;
+    assert.doesNotThrow(() => { result = loadPersistedRegistry(); });
+    assert.deepEqual(result, {});
+  });
+
+  // (f) persistRegistryBaseline uses atomic tmp+rename (no .tmp file left behind)
+  test('(f) persistRegistryBaseline writes atomically — no .tmp file left behind', () => {
+    register('proj', 'f5', 'main', null, 'up');
+
+    assert.ok(existsSync(registryFile), 'final file must exist');
+    assert.equal(existsSync(`${registryFile}.tmp`), false, '.tmp file must not remain');
+  });
+
+  test('baseline is persisted as a map with only {status} per entry (no transient fields)', () => {
+    register('proj', 'f6', 'main', '/some/path', 'up', [{ name: 'web', port: 3000 }]);
+
+    const baseline = loadPersistedRegistry();
+    const entry = baseline['proj-f6'];
+    assert.ok(entry, 'entry must exist');
+    assert.deepEqual(Object.keys(entry), ['status'], 'baseline must only contain status');
   });
 });

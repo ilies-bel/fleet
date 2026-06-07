@@ -23,6 +23,17 @@ function titlesFilePath() {
 }
 
 /**
+ * Return the path to the registry-status baseline file.
+ * Read on every call so that tests can override FLEET_REGISTRY_FILE at runtime
+ * without re-importing the module. Mirrors the FLEET_STATE_FILE / FLEET_TITLES_FILE
+ * pattern.
+ * @returns {string}
+ */
+function registryFilePath() {
+  return process.env.FLEET_REGISTRY_FILE ?? '/var/lib/fleet/registry.json';
+}
+
+/**
  * In-memory map of user-set titles, loaded from disk at module init and kept
  * in sync with every updateTitle() call.  Only keys with non-null titles are
  * stored here.  A missing key means "no user rename — fall back to the
@@ -45,6 +56,48 @@ const persistedTitles = (() => {
   }
   return {};
 })();
+
+/**
+ * Atomically write the current registry status baseline to disk.
+ * Stores a minimal map of composite key → { status } for every currently
+ * registered feature. Used by reconcileFromDocker at boot to decide which
+ * containers to restart (only those whose baseline was 'up').
+ *
+ * Silently swallows errors — persistence is best-effort; the gateway must
+ * never crash because state could not be written.
+ */
+export function persistRegistryBaseline() {
+  try {
+    const file = registryFilePath();
+    mkdirSync(dirname(file), { recursive: true });
+    const baseline = {};
+    for (const [key, entry] of features.entries()) {
+      baseline[key] = { status: entry.status };
+    }
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, JSON.stringify(baseline), 'utf8');
+    renameSync(tmp, file);
+  } catch {
+    // Best-effort — never throw from persistence layer.
+  }
+}
+
+/**
+ * Read the persisted registry baseline from disk.
+ * Returns a map of composite key → { status }, or {} on missing/corrupt/unreadable file.
+ * Never throws.
+ * @returns {Record<string, { status: string }>}
+ */
+export function loadPersistedRegistry() {
+  try {
+    const raw = readFileSync(registryFilePath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch {
+    // File absent or corrupt — return empty baseline.
+  }
+  return {};
+}
 
 /**
  * Atomically write the current persistedTitles map to disk.
@@ -284,6 +337,7 @@ export function register(project, name, branch, worktreePath = null, status = 'u
   const effectiveTitle = title ?? persistedTitles[key] ?? null;
   if (title !== null) persistedTitles[key] = title;
   features.set(key, { project, name, key, branch, worktreePath, gitDir, gitCommonDir, title: effectiveTitle, host, addedAt: new Date(), status: normalised, error, services });
+  persistRegistryBaseline();
   if (activeFeature === null && normalised === 'up') {
     activeFeature = key;
     persistActive(key);
@@ -325,6 +379,7 @@ export function updateStatus(key, status, error) {
     activeFeature = null;
   }
   features.set(key, next);
+  persistRegistryBaseline();
 
   // Build log lifecycle: initialise fresh buffer on 'building', schedule
   // eviction 60s after 'up' or 'failed' so page-refresh can replay.
