@@ -3,13 +3,8 @@ import FeatureCard from './FeatureCard.jsx';
 
 const STATUS_CHIPS = [
   { key: 'up', label: 'UP' },
-  { key: 'building', label: 'BUILDING' },
-  { key: 'starting', label: 'STARTING' },
-  { key: 'stopped', label: 'STOPPED' },
   { key: 'failed', label: 'FAILED' },
-  { key: 'not_started', label: 'NOT_STARTED' },
-  { key: 'unhealthy', label: 'UNHEALTHY' },
-  { key: 'created', label: 'CREATED' },
+  { key: 'stopped', label: 'STOPPED' },
 ];
 
 /**
