@@ -26,7 +26,7 @@ function makeNote(overrides) {
   return {
     id: crypto.randomUUID(),
     refKind: 'class',
-    selector: '.btn-primary',
+    selectors: ['.btn-primary'],
     route: '/home',
     text: 'Make this button larger',
     createdAt: new Date().toISOString(),
@@ -77,7 +77,7 @@ describe('ReviewNotesPanel', () => {
 
   it('groups notes without a route under a "General" heading', () => {
     const notes = [
-      makeNote({ route: undefined, selector: undefined, refKind: undefined, text: 'General observation' }),
+      makeNote({ route: undefined, selectors: [], refKind: undefined, text: 'General observation' }),
     ];
 
     render(
@@ -195,7 +195,7 @@ describe('ReviewNotesPanel', () => {
 
   it('truncates a long selector with an ellipsis', () => {
     const longSelector = '.some-very-long-class-name-that-exceeds-the-limit';
-    const note = makeNote({ selector: longSelector });
+    const note = makeNote({ selectors: [longSelector] });
 
     render(
       <ReviewNotesPanel
@@ -270,7 +270,7 @@ describe('ReviewNotesPanel', () => {
       const [worktreeArg, noteArg] = addNote.mock.calls[0];
       expect(worktreeArg).toBe(WORKTREE);
       expect(noteArg.refKind).toBe('general');
-      expect(noteArg.selector).toBeNull();
+      expect(noteArg.selectors).toEqual([]);
       expect(noteArg.route).toBeNull();
       expect(noteArg.text).toBe('This layout needs work');
     });

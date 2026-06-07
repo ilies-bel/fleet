@@ -38,7 +38,7 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
     if (!composerText.trim()) return;
     addNote(worktree, {
       refKind: 'general',
-      selector: null,
+      selectors: [],
       route: null,
       text: composerText.trim(),
     });
@@ -103,12 +103,12 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
                   <div className="review-notes-panel__note-body">
                     <div className="review-notes-panel__note-meta">
                       {note.refKind && <span>{note.refKind}</span>}
-                      {note.refKind && note.selector && <span> · </span>}
-                      {note.selector && (
-                        <span title={note.selector}>
-                          {note.selector.length > 30
-                            ? note.selector.slice(0, 30) + '…'
-                            : note.selector}
+                      {note.refKind && note.selectors && note.selectors[0] && <span> · </span>}
+                      {note.selectors && note.selectors[0] && (
+                        <span title={note.selectors[0]}>
+                          {note.selectors[0].length > 30
+                            ? note.selectors[0].slice(0, 30) + '…'
+                            : note.selectors[0]}
                         </span>
                       )}
                     </div>

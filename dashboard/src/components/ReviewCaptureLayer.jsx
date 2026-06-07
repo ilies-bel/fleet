@@ -40,8 +40,8 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
 
   if (!pendingPick) return null;
 
-  const { selector = '', route = '' } = pendingPick;
-  const hint = `${selector} on ${route}`;
+  const { selectors = [], route = '' } = pendingPick;
+  const hint = `${selectors[0] || ''} on ${route}`;
 
   function handleKeyDown(e) {
     if (e.key === 'Enter') {

@@ -73,7 +73,7 @@ describe('INJECTED_PICKER — mars.capture.notesUpdated reactive repaint', () =>
     activate(true, []);  // start capture with no notes
     assert.equal(getShadow().querySelectorAll(TINT_SELECTOR).length, 0, 'no tints initially');
 
-    notesUpdated([{ id: 'n1', route: '/page', selector: '#ok' }]);
+    notesUpdated([{ id: 'n1', route: '/page', selectors: ['#ok'] }]);
 
     assert.equal(getShadow().querySelectorAll(TINT_SELECTOR).length, 1,
       'one tint after notesUpdated');
@@ -87,7 +87,7 @@ describe('INJECTED_PICKER — mars.capture.notesUpdated reactive repaint', () =>
       { pathname: '/page' },
     );
 
-    activate(true, [{ id: 'n1', route: '/page', selector: '#ok' }]);
+    activate(true, [{ id: 'n1', route: '/page', selectors: ['#ok'] }]);
     assert.ok(getShadow().querySelectorAll(TINT_SELECTOR).length > 0, 'tint present');
 
     notesUpdated([]);
@@ -99,7 +99,7 @@ describe('INJECTED_PICKER — mars.capture.notesUpdated reactive repaint', () =>
   // ── Add then delete same note leaves zero tints ───────────────────────────
 
   test('add then delete the same note leaves zero blue tints in the shadow', () => {
-    const note = { id: 'n1', route: '/checkout', selector: '#btn' };
+    const note = { id: 'n1', route: '/checkout', selectors: ['#btn'] };
     const { getShadow, activate, notesUpdated } = setupPicker(
       '<!DOCTYPE html><html><body><button id="btn">Buy</button></body></html>',
       { pathname: '/checkout' },
@@ -124,10 +124,10 @@ describe('INJECTED_PICKER — mars.capture.notesUpdated reactive repaint', () =>
 
     activate(true, []);
 
-    notesUpdated([{ id: 'n1', route: '/dash', selector: '#a' }]);
+    notesUpdated([{ id: 'n1', route: '/dash', selectors: ['#a'] }]);
     assert.equal(getShadow().querySelectorAll(TINT_SELECTOR).length, 1, 'one tint after first update');
 
-    notesUpdated([{ id: 'n2', route: '/dash', selector: '#b' }]);
+    notesUpdated([{ id: 'n2', route: '/dash', selectors: ['#b'] }]);
     assert.equal(getShadow().querySelectorAll(TINT_SELECTOR).length, 1,
       'still exactly one tint — no orphan from prior set');
   });
@@ -142,7 +142,7 @@ describe('INJECTED_PICKER — mars.capture.notesUpdated reactive repaint', () =>
 
     activate(true, []);
 
-    notesUpdated([{ id: 'n1', route: '/page-b', selector: '#ok' }]);
+    notesUpdated([{ id: 'n1', route: '/page-b', selectors: ['#ok'] }]);
 
     assert.equal(getShadow().querySelectorAll(TINT_SELECTOR).length, 0,
       'no tint for note from different route');
@@ -158,7 +158,7 @@ describe('INJECTED_PICKER — mars.capture.notesUpdated reactive repaint', () =>
 
     // Never activated — sending notesUpdated must not throw and must not create DOM.
     assert.doesNotThrow(() => {
-      notesUpdated([{ id: 'n1', route: '/page', selector: '#ok' }]);
+      notesUpdated([{ id: 'n1', route: '/page', selectors: ['#ok'] }]);
     });
 
     assert.equal(getShadow(), null, 'shadow root not created for inactive picker');
@@ -167,7 +167,7 @@ describe('INJECTED_PICKER — mars.capture.notesUpdated reactive repaint', () =>
   // ── Deactivating after mutations leaves zero tints ────────────────────────
 
   test('deactivating after add/delete sequence leaves the shadow empty', () => {
-    const note = { id: 'n1', route: '/flow', selector: '#x' };
+    const note = { id: 'n1', route: '/flow', selectors: ['#x'] };
     const { getShadow, activate, notesUpdated } = setupPicker(
       '<!DOCTYPE html><html><body><div id="x"></div></body></html>',
       { pathname: '/flow' },
@@ -192,12 +192,12 @@ describe('INJECTED_PICKER — mars.capture.notesUpdated reactive repaint', () =>
       { pathname: '/page' },
     );
 
-    activate(true, [{ id: 'n1', route: '/page', selector: '#ok' }]);
+    activate(true, [{ id: 'n1', route: '/page', selectors: ['#ok'] }]);
     activate(false);
 
     // Shadow is cleared. Now send notesUpdated — must remain empty.
     assert.doesNotThrow(() => {
-      notesUpdated([{ id: 'n1', route: '/page', selector: '#ok' }]);
+      notesUpdated([{ id: 'n1', route: '/page', selectors: ['#ok'] }]);
     });
 
     assert.equal(getShadow().childNodes.length, 0,

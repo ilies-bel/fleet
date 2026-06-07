@@ -55,7 +55,7 @@ describe('useReviewNotes', () => {
 
     act(() => {
       result.current.addNote('feat-abc', {
-        selector: '#login-button',
+        selectors: ['#login-button'],
         route: '/login',
         refKind: 'id',
         label: 'Login button',
@@ -66,7 +66,7 @@ describe('useReviewNotes', () => {
     const notes = result.current.notesByWorktree['feat-abc'];
     expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({
-      selector: '#login-button',
+      selectors: ['#login-button'],
       route: '/login',
       refKind: 'id',
       label: 'Login button',

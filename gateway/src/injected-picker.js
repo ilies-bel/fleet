@@ -193,7 +193,7 @@ export const INJECTED_PICKER = String.raw`(() => {
   }
 
   // Paint blue tint overlays for every note whose route matches the current page
-  // route and whose selector resolves to at least one element.
+  // route and whose selectors resolve to at least one element each.
   // Clears layer first so the result always equals the current note set exactly.
   // Called both on initial activation (layer is freshly created) and on every
   // mars.capture.notesUpdated message (layer holds the prior set).
@@ -203,16 +203,17 @@ export const INJECTED_PICKER = String.raw`(() => {
     const currentRoute = location.pathname + location.search;
     (notes || []).forEach(function(note) {
       if (note.route !== currentRoute) return;
-      if (!note.selector) return;
-      let els;
-      try { els = document.querySelectorAll(note.selector); } catch (_) { return; }
-      Array.from(els).forEach(function(el) {
-        const d = document.createElement('div');
-        d.style.cssText =
-          'position:fixed;top:0;left:0;pointer-events:none;box-sizing:border-box;' +
-          'background:rgba(59,130,246,0.12);box-shadow:inset 0 0 0 1px rgba(59,130,246,0.35)';
-        layer.appendChild(d);
-        _marked.push({ el: el, rect: d });
+      (note.selectors || []).forEach(function(sel) {
+        let els;
+        try { els = document.querySelectorAll(sel); } catch (_) { return; }
+        Array.from(els).forEach(function(el) {
+          const d = document.createElement('div');
+          d.style.cssText =
+            'position:fixed;top:0;left:0;pointer-events:none;box-sizing:border-box;' +
+            'background:rgba(59,130,246,0.12);box-shadow:inset 0 0 0 1px rgba(59,130,246,0.35)';
+          layer.appendChild(d);
+          _marked.push({ el: el, rect: d });
+        });
       });
     });
     reposition();
@@ -232,7 +233,7 @@ export const INJECTED_PICKER = String.raw`(() => {
     window.parent.postMessage({
       type: 'mars.capture.elementPicked',
       refKind: ref.refKind,
-      selector: ref.selector,
+      selectors: [ref.selector],
       route: location.pathname + location.search,
       label: ref.label,
     }, EXPECTED_DASHBOARD_ORIGIN || '*');

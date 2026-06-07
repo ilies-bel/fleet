@@ -24,7 +24,7 @@ function dispatchPick(payload = {}, origin = PROXY_ORIGIN) {
     new MessageEvent('message', {
       data: {
         type: 'mars.capture.elementPicked',
-        selector: '#submit-btn',
+        selectors: ['#submit-btn'],
         route: '/checkout',
         refKind: 'id',
         label: 'Submit',
@@ -53,7 +53,7 @@ describe('ReviewCaptureLayer', () => {
   it('shows a text input after receiving elementPicked from PROXY_ORIGIN', () => {
     render(<ReviewCaptureLayer activeWorktree="feat-abc" addNote={vi.fn()} />);
 
-    dispatchPick({ selector: '#login-button', route: '/login' });
+    dispatchPick({ selectors: ['#login-button'], route: '/login' });
 
     expect(screen.getByRole('textbox')).toBeInTheDocument();
   });
@@ -61,7 +61,7 @@ describe('ReviewCaptureLayer', () => {
   it('prefills the hint with selector and route', () => {
     render(<ReviewCaptureLayer activeWorktree="feat-abc" addNote={vi.fn()} />);
 
-    dispatchPick({ selector: '#login-button', route: '/login' });
+    dispatchPick({ selectors: ['#login-button'], route: '/login' });
 
     expect(screen.getByText('#login-button on /login')).toBeInTheDocument();
   });
@@ -72,7 +72,7 @@ describe('ReviewCaptureLayer', () => {
     const addNote = vi.fn();
     render(<ReviewCaptureLayer activeWorktree="feat-abc" addNote={addNote} />);
 
-    dispatchPick({ selector: '#login-button', route: '/login', refKind: 'id', label: 'Login' });
+    dispatchPick({ selectors: ['#login-button'], route: '/login', refKind: 'id', label: 'Login' });
 
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'Make it green' } });
@@ -81,7 +81,7 @@ describe('ReviewCaptureLayer', () => {
     expect(addNote).toHaveBeenCalledWith(
       'feat-abc',
       expect.objectContaining({
-        selector: '#login-button',
+        selectors: ['#login-button'],
         route: '/login',
         refKind: 'id',
         label: 'Login',

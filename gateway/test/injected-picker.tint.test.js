@@ -82,7 +82,7 @@ describe('INJECTED_PICKER — note tint overlay', () => {
       { pathname: '/checkout' },
     );
 
-    activate(true, [{ id: 'n1', route: '/checkout', selector: '#save' }]);
+    activate(true, [{ id: 'n1', route: '/checkout', selectors: ['#save'] }]);
 
     const shadow = getShadow();
     assert.ok(shadow, 'shadow root must be created on activation');
@@ -99,7 +99,7 @@ describe('INJECTED_PICKER — note tint overlay', () => {
       { pathname: '/checkout' },
     );
 
-    activate(true, [{ id: 'n1', route: '/checkout', selector: '#save' }]);
+    activate(true, [{ id: 'n1', route: '/checkout', selectors: ['#save'] }]);
 
     const tintDiv = getShadow().querySelector(TINT_SELECTOR);
     assert.ok(tintDiv, 'tint div must exist');
@@ -117,7 +117,7 @@ describe('INJECTED_PICKER — note tint overlay', () => {
       { pathname: '/' },
     );
 
-    activate(true, [{ id: 'n2', route: '/', selector: '#p' }]);
+    activate(true, [{ id: 'n2', route: '/', selectors: ['#p'] }]);
 
     const tintDiv = getShadow().querySelector(TINT_SELECTOR);
     assert.ok(tintDiv, 'tint div must exist');
@@ -136,7 +136,7 @@ describe('INJECTED_PICKER — note tint overlay', () => {
       { pathname: '/checkout' },
     );
 
-    activate(true, [{ id: 'n1', route: '/checkout', selector: '#save' }]);
+    activate(true, [{ id: 'n1', route: '/checkout', selectors: ['#save'] }]);
 
     const shadow = getShadow();
     assert.ok(shadow.querySelector('#mars-hover'), 'green hover div must be in shadow root');
@@ -151,7 +151,7 @@ describe('INJECTED_PICKER — note tint overlay', () => {
       { pathname: '/checkout' },
     );
 
-    activate(true, [{ id: 'n1', route: '/other-page', selector: '#save' }]);
+    activate(true, [{ id: 'n1', route: '/other-page', selectors: ['#save'] }]);
 
     const shadow = getShadow();
     const tintDivs = shadow ? [...shadow.querySelectorAll(TINT_SELECTOR)] : [];
@@ -168,7 +168,7 @@ describe('INJECTED_PICKER — note tint overlay', () => {
 
     // Must not throw.
     assert.doesNotThrow(() => {
-      activate(true, [{ id: 'n1', route: '/page1', selector: '#nonexistent' }]);
+      activate(true, [{ id: 'n1', route: '/page1', selectors: ['#nonexistent'] }]);
     });
 
     const shadow = getShadow();
@@ -184,7 +184,7 @@ describe('INJECTED_PICKER — note tint overlay', () => {
       { pathname: '/checkout' },
     );
 
-    activate(true, [{ id: 'n1', route: '/checkout', selector: '#save' }]);
+    activate(true, [{ id: 'n1', route: '/checkout', selectors: ['#save'] }]);
 
     const shadow = getShadow();
     assert.ok(shadow.querySelectorAll(TINT_SELECTOR).length > 0, 'tints present before deactivation');
@@ -215,8 +215,8 @@ describe('INJECTED_PICKER — note tint overlay', () => {
     );
 
     activate(true, [
-      { id: 'n1', route: '/page',  selector: '#a' },   // matches
-      { id: 'n2', route: '/other', selector: '#b' },   // does not match
+      { id: 'n1', route: '/page',  selectors: ['#a'] },   // matches
+      { id: 'n2', route: '/other', selectors: ['#b'] },   // does not match
     ]);
 
     const tintDivs = [...getShadow().querySelectorAll(TINT_SELECTOR)];
