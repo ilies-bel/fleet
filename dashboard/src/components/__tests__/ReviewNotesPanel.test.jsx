@@ -7,7 +7,7 @@
  *  - Notes without a route appear under a 'General' group.
  *  - Each note row shows refKind, truncated selector, and text.
  *  - Delete button calls removeNote with worktree + note id.
- *  - 'Clear all' button calls clearForWorktree only after window.confirm.
+ *  - 'Clear all' button opens a confirmation modal; Confirm clears notes, Cancel does not.
  *  - 'Clear all' button is absent when the notes list is empty.
  *  - 'Add general note' button toggles a composer textarea + Save/Cancel.
  *  - Saving a non-empty note calls addNote with refKind='general', selector=null.
@@ -16,7 +16,7 @@
  *  - The composer is available regardless of capture mode (no capture-mode prop needed).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ReviewNotesPanel from '../ReviewNotesPanel.jsx';
 
@@ -114,19 +114,28 @@ describe('ReviewNotesPanel', () => {
     expect(removeNote).toHaveBeenCalledWith(WORKTREE, 'note-123');
   });
 
-  // ── Clear all requires confirmation ───────────────────────────────────
+  // ── Clear all uses an in-app confirmation modal ───────────────────────
 
   describe('"Clear all" button', () => {
-    beforeEach(() => {
-      vi.stubGlobal('confirm', vi.fn());
+    it('opens a confirmation modal when clicked', () => {
+      const notes = [makeNote()];
+
+      render(
+        <ReviewNotesPanel
+          notes={notes}
+          worktree={WORKTREE}
+          removeNote={vi.fn()}
+          clearForWorktree={vi.fn()}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /clear all review notes/i }));
+
+      expect(screen.getByRole('dialog')).toBeTruthy();
+      expect(screen.getByText('Clear all review notes for this feature?')).toBeTruthy();
     });
 
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
-
-    it('calls clearForWorktree when the user confirms', () => {
-      window.confirm.mockReturnValue(true);
+    it('calls clearForWorktree and closes the modal when the user confirms', () => {
       const clearForWorktree = vi.fn();
       const notes = [makeNote()];
 
@@ -139,14 +148,16 @@ describe('ReviewNotesPanel', () => {
         />
       );
 
-      fireEvent.click(screen.getByRole('button', { name: /clear all/i }));
+      fireEvent.click(screen.getByRole('button', { name: /clear all review notes/i }));
+      // Click the destructive confirm button inside the modal
+      fireEvent.click(screen.getByRole('button', { name: /^clear all$/i }));
 
-      expect(window.confirm).toHaveBeenCalledOnce();
+      expect(clearForWorktree).toHaveBeenCalledOnce();
       expect(clearForWorktree).toHaveBeenCalledWith(WORKTREE);
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
 
-    it('does NOT call clearForWorktree when the user cancels the confirm dialog', () => {
-      window.confirm.mockReturnValue(false);
+    it('does NOT call clearForWorktree and closes the modal when the user cancels', () => {
       const clearForWorktree = vi.fn();
       const notes = [makeNote()];
 
@@ -159,10 +170,11 @@ describe('ReviewNotesPanel', () => {
         />
       );
 
-      fireEvent.click(screen.getByRole('button', { name: /clear all/i }));
+      fireEvent.click(screen.getByRole('button', { name: /clear all review notes/i }));
+      fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
 
-      expect(window.confirm).toHaveBeenCalledOnce();
       expect(clearForWorktree).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
 
     it('does not render the "Clear all" button when there are no notes', () => {
@@ -175,7 +187,7 @@ describe('ReviewNotesPanel', () => {
         />
       );
 
-      expect(screen.queryByRole('button', { name: /clear all/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /clear all review notes/i })).toBeNull();
     });
   });
 

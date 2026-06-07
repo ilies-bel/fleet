@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { buildReviewPrompt } from '../lib/buildReviewPrompt.js';
+import ConfirmModal from './ConfirmModal.jsx';
 import './ReviewNotesPanel.css';
 
 /**
@@ -15,6 +16,7 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [copied, setCopied] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function handleCopy() {
     try {
@@ -28,9 +30,7 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
 
   function handleClearAll() {
     if (!worktree) return;
-    if (window.confirm('Clear all review notes for this feature?')) {
-      clearForWorktree(worktree);
-    }
+    setConfirmOpen(true);
   }
 
   function handleSave() {
@@ -65,6 +65,7 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
   if (groups['General']) routeKeys.push('General');
 
   return (
+    <>
     <aside className="review-notes-panel" aria-label="Review notes">
       <div className="review-notes-panel__header">
         <h3 className="review-notes-panel__title">Review Notes</h3>
@@ -160,5 +161,15 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
         </div>
       </div>
     </aside>
+    <ConfirmModal
+      open={confirmOpen}
+      title="Clear all review notes"
+      message="Clear all review notes for this feature?"
+      confirmLabel="Clear all"
+      onConfirm={() => { clearForWorktree(worktree); setConfirmOpen(false); }}
+      onCancel={() => setConfirmOpen(false)}
+      destructive
+    />
+    </>
   );
 }
