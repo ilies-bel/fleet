@@ -218,3 +218,20 @@ input {
   color: #000 !important;
   outline: none;
 }
+
+/* ── Feature-card config-menu trigger (⋯) ──────────────────────────────────── */
+/* Three quiet gray dots on the card surface — no button chrome at all.
+   rest: dim gray; hover/focus: ink white; keyboard focus: thin accent outline. */
+.card-config-trigger {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 2px 7px;
+  line-height: 1;
+  font-family: inherit;
+  font-size: 0.68rem;
+}
+.card-config-trigger:hover { color: #eee; }
+.card-config-trigger:focus { color: #eee; outline: none; }
+.card-config-trigger:focus-visible { color: #eee; outline: 1px solid var(--color-accent); }

@@ -264,9 +264,10 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
 
         <button
           ref={configTriggerRef}
+          className="card-config-trigger"
           aria-label={`Open ${displayName} configuration`}
           onClick={(e) => { e.stopPropagation(); setConfigOpen(true); }}
-          style={{ ...cardBtnStyle, flexShrink: 0 }}
+          style={{ flexShrink: 0 }}
         >
           ⋯
         </button>
