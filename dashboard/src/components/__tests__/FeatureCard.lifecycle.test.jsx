@@ -1,9 +1,11 @@
 /**
- * Chip-variant tests for the building / starting / failed lifecycle statuses.
+ * Dot-variant tests for the building / starting / failed lifecycle statuses.
  *
- * These verify FeatureCard renders the correct registry-driven chip label,
- * color, and (for failed) the error string. The 'running' path is covered by
- * FeatureCard.services.test.jsx.
+ * The card communicates status through a single colored dot beside the title
+ * (the status WORD is no longer rendered anywhere). These verify the dot
+ * carries the correct registry-driven color and blink animation, that the
+ * status word is absent, and (for failed) that the error string surfaces. The
+ * 'running' path is covered by FeatureCard.services.test.jsx.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -55,31 +57,35 @@ describe('FeatureCard — lifecycle chip variants', () => {
     vi.clearAllMocks();
   });
 
-  it("renders amber 'BUILDING' chip with blink animation for status='building'", () => {
+  it("renders an amber blinking dot (no status word) for status='building'", () => {
     renderCard(makeFeature({ status: 'building' }));
 
-    const chip = screen.getByText(/● BUILDING/);
-    expect(chip).toBeInTheDocument();
-    expect(chip).toHaveStyle({ color: 'rgb(255, 170, 0)' });
-    expect(chip.style.animation).toContain('blink');
+    const dot = screen.getByText('●');
+    expect(dot).toBeInTheDocument();
+    expect(dot).toHaveStyle({ color: 'rgb(255, 170, 0)' });
+    expect(dot.style.animation).toContain('blink');
+    // The status WORD must not be rendered anywhere — only the dot.
+    expect(screen.queryByText(/BUILDING/)).not.toBeInTheDocument();
   });
 
-  it("renders blue 'STARTING' chip with blink animation for status='starting'", () => {
+  it("renders a blue blinking dot (no status word) for status='starting'", () => {
     renderCard(makeFeature({ status: 'starting' }));
 
-    const chip = screen.getByText(/● STARTING/);
-    expect(chip).toBeInTheDocument();
-    expect(chip).toHaveStyle({ color: 'rgb(0, 170, 255)' });
-    expect(chip.style.animation).toContain('blink');
+    const dot = screen.getByText('●');
+    expect(dot).toBeInTheDocument();
+    expect(dot).toHaveStyle({ color: 'rgb(0, 170, 255)' });
+    expect(dot.style.animation).toContain('blink');
+    expect(screen.queryByText(/STARTING/)).not.toBeInTheDocument();
   });
 
-  it("renders red 'FAILED' chip WITHOUT animation for status='failed'", () => {
+  it("renders a red dot WITHOUT animation (no status word) for status='failed'", () => {
     renderCard(makeFeature({ status: 'failed', error: 'docker build failed' }));
 
-    const chip = screen.getByText(/● FAILED/);
-    expect(chip).toBeInTheDocument();
-    expect(chip).toHaveStyle({ color: 'rgb(255, 68, 68)' });
-    expect(chip.style.animation === '' || chip.style.animation === 'none').toBe(true);
+    const dot = screen.getByText('●');
+    expect(dot).toBeInTheDocument();
+    expect(dot).toHaveStyle({ color: 'rgb(255, 68, 68)' });
+    expect(dot.style.animation === '' || dot.style.animation === 'none').toBe(true);
+    expect(screen.queryByText(/FAILED/)).not.toBeInTheDocument();
   });
 
   it('surfaces feature.error text when status=failed', () => {
@@ -95,7 +101,9 @@ describe('FeatureCard — lifecycle chip variants', () => {
 
   it('prefers registry status over client-side health sentinel', () => {
     // isStarting=true would normally trigger the client-side 'starting' health
-    // label — but the registry-driven BUILDING chip must take precedence.
+    // color — but the registry-driven BUILDING color must take precedence. With
+    // the status word gone, we assert the dot resolves to BUILDING amber, not
+    // STARTING blue.
     render(
       <FeatureCard
         feature={makeFeature({ status: 'building' })}
@@ -107,8 +115,9 @@ describe('FeatureCard — lifecycle chip variants', () => {
         onLogs={vi.fn()}
       />
     );
-    expect(screen.getByText(/● BUILDING/)).toBeInTheDocument();
-    expect(screen.queryByText(/● STARTING/)).toBeNull();
+    const dot = screen.getByText('●');
+    expect(dot).toHaveStyle({ color: 'rgb(255, 170, 0)' }); // BUILDING amber
+    expect(dot).not.toHaveStyle({ color: 'rgb(0, 170, 255)' }); // not STARTING blue
   });
 });
 

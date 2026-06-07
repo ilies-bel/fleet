@@ -96,11 +96,13 @@ describe('FeatureCard — collapsible', () => {
     expect(screen.getByText('●')).toBeInTheDocument();
   });
 
-  // ── Expanded body: full status label visible ──────────────────────────────
+  // ── Expanded body: dot beside title, still no status word ─────────────────
 
-  it('expanded body shows the full status label including the status word', () => {
+  it('expanded card shows the status dot beside the title but never the status word', () => {
     renderCard({ status: 'building', title: undefined });
-    // card is expanded by default — full label must be present
-    expect(screen.getByText(/● BUILDING/i)).toBeInTheDocument();
+    // card is expanded by default — the dot communicates status in every
+    // state, and the status WORD must not appear even when expanded.
+    expect(screen.getByText('●')).toBeInTheDocument();
+    expect(screen.queryByText(/BUILDING/)).not.toBeInTheDocument();
   });
 });
