@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react';
 import DiffPane from './DiffPane.jsx';
 import ReviewCaptureLayer from './ReviewCaptureLayer.jsx';
 import EmptyState from './EmptyState.jsx';
+import { Button } from './Button.jsx';
 import { PROXY_ORIGIN } from '../lib/captureProtocol.js';
 
 // Port 3000 is the transparent proxy — always the same URL regardless of which feature is active.
@@ -99,13 +100,17 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
         {/* Preview-only controls — hidden while in DIFF view */}
         {viewMode === 'preview' && (
           <>
-            <button
+            <Button
+              tone="primary"
               aria-pressed={isCapture}
               onClick={onToggleCapture}
-              style={isCapture ? captureActiveBtn : toolbarBtn}
+              style={isCapture
+                ? { ...toolbarBtn, background: '#00ff88', color: '#000', borderColor: '#00ff88' }
+                : toolbarBtn
+              }
             >
-              Capture
-            </button>
+              [CAPTURE]
+            </Button>
             <button
               onClick={() => window.open(PROXY_URL, '_blank')}
               style={toolbarBtn}
@@ -164,8 +169,3 @@ const activeTabBtn = {
   color: 'var(--color-accent)',
 };
 
-const captureActiveBtn = {
-  ...toolbarBtn,
-  border: '1px solid #e06c75',
-  color: '#e06c75',
-};

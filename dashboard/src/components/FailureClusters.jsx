@@ -27,7 +27,7 @@ export default function FailureClusters() {
         padding: 'var(--space-6) var(--space-4)',
         fontFamily: 'var(--font-mono)',
         fontSize: '0.75rem',
-        color: '#555',
+        color: 'var(--color-muted)',
         textAlign: 'center',
       }}>
         no failure clusters
@@ -40,8 +40,7 @@ export default function FailureClusters() {
       {clusters.map(cluster => (
         <div key={cluster.reasonCode} className="cluster-card" style={{
           background: '#111',
-          border: '1px solid #2a2a2a',
-          borderRadius: '4px',
+          border: '1px solid #222',
           padding: 'var(--space-3) var(--space-4)',
           fontFamily: 'var(--font-mono)',
         }}>
@@ -52,7 +51,7 @@ export default function FailureClusters() {
             </span>
           </div>
           <div style={{ color: 'var(--color-muted)', fontSize: '0.65rem', marginBottom: cluster.sampleKeys.length ? 'var(--space-15)' : 0 }}>
-            last seen {cluster.lastSeenAt ? new Date(cluster.lastSeenAt).toISOString() : '—'}
+            last seen {cluster.lastSeenAt ? fmtTime(cluster.lastSeenAt) : '—'}
           </div>
           {cluster.sampleKeys.length > 0 && (
             <ul style={{ margin: 0, padding: '0 0 0 var(--space-4)', fontSize: '0.7rem', color: '#888' }}>
@@ -65,18 +64,26 @@ export default function FailureClusters() {
   );
 }
 
-const REASON_PREFIX_COLORS = { docker: '#ff9800', build: '#f44336', registry: '#9c27b0', sync: '#2196f3' };
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+const REASON_PREFIX_COLORS = { docker: '#ffaa00', build: '#ff4444', registry: '#ffaa00', sync: '#00aaff' };
 
 function reasonBadgeStyle(reasonCode) {
   const prefix = reasonCode?.split(':')[0];
   return {
     display: 'inline-block',
     padding: '0.1rem var(--space-15)', /* off-scale: 0.1rem vertical micro-gap */
-    borderRadius: '3px',
     fontSize: '0.65rem',
     fontWeight: '600',
-    background: REASON_PREFIX_COLORS[prefix] ?? '#555',
-    color: '#fff',
+    background: '#222',
+    color: REASON_PREFIX_COLORS[prefix] ?? 'var(--color-muted)',
     letterSpacing: '0.03em',
     whiteSpace: 'nowrap',
     flexShrink: 0,

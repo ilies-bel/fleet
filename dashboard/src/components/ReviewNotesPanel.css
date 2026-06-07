@@ -34,14 +34,13 @@
   font-size: 0.6rem;
   letter-spacing: 0.06em;
   padding: 0.15rem 0.4rem;
-  border-radius: 3px;
   cursor: pointer;
   transition: color 0.1s, border-color 0.1s;
 }
 
 .review-notes-panel__clear-btn:hover {
-  color: #e05252;
-  border-color: #e05252;
+  color: #ff4444;
+  border-color: #ff4444;
 }
 
 .review-notes-panel__body {
@@ -62,7 +61,7 @@
   font-family: var(--font-mono);
   font-size: 0.6rem;
   letter-spacing: 0.06em;
-  color: var(--color-accent, #00ff9d);
+  color: var(--color-accent, #00ff88);
   text-transform: uppercase;
   margin: 0.5rem 0.75rem 0.25rem;
 }
@@ -114,5 +113,5 @@
 }
 
 .review-notes-panel__delete-btn:hover {
-  color: #e05252;
+  color: #ff4444;
 }

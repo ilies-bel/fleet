@@ -46,7 +46,15 @@ export default function OperationsList({ onSelect }) {
           {operations.map(op => (
             <tr
               key={op.id}
+              role={onSelect ? 'button' : undefined}
+              tabIndex={onSelect ? 0 : undefined}
               onClick={onSelect ? () => onSelect(op.id) : undefined}
+              onKeyDown={onSelect ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(op.id);
+                }
+              } : undefined}
               style={{
                 borderBottom: '1px solid #1a1a1a',
                 cursor: onSelect ? 'pointer' : 'default',
@@ -54,8 +62,8 @@ export default function OperationsList({ onSelect }) {
             >
               <td style={tdStyle}>{op.kind}</td>
               <td style={tdStyle}>{op.key}</td>
-              <td style={tdStyle}>{op.startedAt ? new Date(op.startedAt).toISOString() : '—'}</td>
-              <td style={tdStyle}>{op.endedAt ? new Date(op.endedAt).toISOString() : '—'}</td>
+              <td style={tdStyle}>{fmtTime(op.startedAt)}</td>
+              <td style={tdStyle}>{fmtTime(op.endedAt)}</td>
               <td style={{ ...tdStyle, color: outcomeColor(op.outcome) }}>{op.outcome ?? '…'}</td>
               <td style={tdStyle}>
                 {op.outcome === 'failure' && op.reasonCode
@@ -66,7 +74,7 @@ export default function OperationsList({ onSelect }) {
           ))}
           {operations.length === 0 && (
             <tr>
-              <td colSpan={6} style={{ ...tdStyle, color: '#555', textAlign: 'center', padding: 'var(--space-6) 0' }}>
+              <td colSpan={6} style={{ ...tdStyle, color: 'var(--color-muted)', textAlign: 'center', padding: 'var(--space-6) 0' }}>
                 no operations recorded
               </td>
             </tr>
@@ -91,24 +99,32 @@ const tdStyle = {
   verticalAlign: 'middle',
 };
 
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
 function outcomeColor(outcome) {
-  if (outcome === 'success') return '#4caf50';
-  if (outcome === 'failure') return '#f44336';
+  if (outcome === 'success') return '#00ff88';
+  if (outcome === 'failure') return '#ff4444';
   return 'var(--color-muted)';
 }
 
-const REASON_PREFIX_COLORS = { docker: '#ff9800', build: '#f44336', registry: '#9c27b0', sync: '#2196f3' };
+const REASON_PREFIX_COLORS = { docker: '#ffaa00', build: '#ff4444', registry: '#ffaa00', sync: '#00aaff' };
 
 function reasonBadgeStyle(reasonCode) {
   const prefix = reasonCode?.split(':')[0];
   return {
     display: 'inline-block',
     padding: '0.1rem var(--space-15)', /* off-scale: 0.1rem vertical micro-gap */
-    borderRadius: '3px',
     fontSize: '0.65rem',
     fontWeight: '600',
-    background: REASON_PREFIX_COLORS[prefix] ?? '#555',
-    color: '#fff',
+    background: '#222',
+    color: REASON_PREFIX_COLORS[prefix] ?? 'var(--color-muted)',
     letterSpacing: '0.03em',
     whiteSpace: 'nowrap',
   };

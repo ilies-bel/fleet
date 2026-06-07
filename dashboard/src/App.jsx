@@ -11,6 +11,7 @@ import FailureClusters from './components/FailureClusters.jsx';
 import OperationDetail from './components/OperationDetail.jsx';
 import { useReviewNotes } from './hooks/useReviewNotes.js';
 import ReviewNotesPanel from './components/ReviewNotesPanel.jsx';
+import { Button } from './components/Button.jsx';
 
 function NavBar({ onDrawerToggle, isNarrow }) {
   const linkStyle = ({ isActive }) => ({
@@ -225,25 +226,18 @@ function OperationsPage() {
         flexShrink: 0,
       }}>
         {[['recent', 'RECENT'], ['clusters', 'CLUSTERS']].map(([v, label]) => (
-          <button
+          <Button
             key={v}
+            tone="primary"
             onClick={() => setView(v)}
             aria-pressed={view === v}
-            style={{
-              background: view === v ? 'var(--color-accent)' : 'transparent',
-              border: '1px solid',
-              borderColor: view === v ? 'var(--color-accent)' : '#444',
-              color: view === v ? '#000' : 'var(--color-muted)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.65rem',
-              letterSpacing: '0.06em',
-              padding: 'var(--space-05) var(--space-3)',
-              borderRadius: '3px',
-              cursor: 'pointer',
-            }}
+            style={view === v
+              ? { background: 'var(--color-accent)', color: '#000', fontSize: '0.65rem', letterSpacing: '0.06em', padding: 'var(--space-05) var(--space-3)' }
+              : { color: 'var(--color-muted)', borderColor: '#444', fontSize: '0.65rem', letterSpacing: '0.06em', padding: 'var(--space-05) var(--space-3)' }
+            }
           >
-            {label}
-          </button>
+            [{label}]
+          </Button>
         ))}
       </div>
       {view === 'recent' ? <OperationsList onSelect={setSelectedId} /> : <FailureClusters />}

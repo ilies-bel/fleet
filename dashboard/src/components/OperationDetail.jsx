@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchOperation } from '../api.js';
+import { Button } from './Button.jsx';
 
 /**
  * Renders the header and full event timeline for a single operation.
@@ -21,24 +22,16 @@ export default function OperationDetail({ id, onBack }) {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text)' }}>
-      <button
+      <Button
+        tone="primary"
         onClick={onBack}
-        style={{
-          background: 'none',
-          border: '1px solid #333',
-          color: 'var(--color-muted)',
-          cursor: 'pointer',
-          fontFamily: 'var(--font-mono)',
-          fontSize: '0.72rem',
-          padding: 'var(--space-1) var(--space-2)',
-          marginBottom: 'var(--space-4)',
-        }}
+        style={{ marginBottom: 'var(--space-4)', fontSize: '0.72rem', padding: 'var(--space-1) var(--space-2)' }}
       >
-        ← Back
-      </button>
+        [← BACK]
+      </Button>
 
       {error && (
-        <div style={{ color: '#f44336', marginBottom: 'var(--space-4)' }}>
+        <div style={{ color: '#ff4444', marginBottom: 'var(--space-4)' }}>
           Error: {error}
         </div>
       )}
@@ -68,24 +61,24 @@ export default function OperationDetail({ id, onBack }) {
 
             <div style={{ color: 'var(--color-muted)', marginBottom: 'var(--space-05)' }}>
               <span style={{ marginRight: 'var(--space-6)' }}>
-                Started: {data.operation.startedAt ? new Date(data.operation.startedAt).toISOString() : '—'}
+                Started: {fmtTime(data.operation.startedAt)}
               </span>
               <span style={{ marginRight: 'var(--space-6)' }}>
-                Ended: {data.operation.endedAt ? new Date(data.operation.endedAt).toISOString() : '—'}
+                Ended: {fmtTime(data.operation.endedAt)}
               </span>
               <span style={{ color: outcomeColor(data.operation.outcome) }}>
                 {data.operation.outcome ?? '…'}
               </span>
             </div>
             {data.operation.errorMessage && (
-              <div style={{ color: '#f44336', marginTop: '0.3rem' /* off-scale: 0.3rem has no exact token */ }}>
+              <div style={{ color: '#ff4444', marginTop: '0.3rem' /* off-scale: 0.3rem has no exact token */ }}>
                 {data.operation.errorMessage}
               </div>
             )}
           </div>
 
           {data.events.length === 0 ? (
-            <div style={{ color: '#555' }}>No events recorded for this operation.</div>
+            <div style={{ color: 'var(--color-muted)' }}>No events recorded for this operation.</div>
           ) : (
             <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {data.events.map(event => (
@@ -99,7 +92,7 @@ export default function OperationDetail({ id, onBack }) {
                     alignItems: 'baseline',
                   }}
                 >
-                  <span style={{ color: '#555', flexShrink: 0, minWidth: '5rem' }}>
+                  <span style={{ color: 'var(--color-muted)', flexShrink: 0, minWidth: '5rem' }}>
                     +{relativeMs(data.operation.startedAt, event.ts)}
                   </span>
                   <span style={{ color: levelColor(event.level), flexShrink: 0, minWidth: '3rem' }}>
@@ -116,15 +109,24 @@ export default function OperationDetail({ id, onBack }) {
   );
 }
 
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
 function outcomeColor(outcome) {
-  if (outcome === 'success') return '#4caf50';
-  if (outcome === 'failure') return '#f44336';
+  if (outcome === 'success') return '#00ff88';
+  if (outcome === 'failure') return '#ff4444';
   return 'var(--color-muted)';
 }
 
 function levelColor(level) {
-  if (level === 'warn') return '#ff9800';
-  if (level === 'error') return '#f44336';
+  if (level === 'warn') return '#ffaa00';
+  if (level === 'error') return '#ff4444';
   return 'var(--color-muted)';
 }
 
@@ -141,18 +143,17 @@ function relativeMs(operationStart, eventTs) {
   return `${(delta / 1000).toFixed(1)}s`;
 }
 
-const REASON_PREFIX_COLORS = { docker: '#ff9800', build: '#f44336', registry: '#9c27b0', sync: '#2196f3' };
+const REASON_PREFIX_COLORS = { docker: '#ffaa00', build: '#ff4444', registry: '#ffaa00', sync: '#00aaff' };
 
 function reasonBadgeStyle(reasonCode) {
   const prefix = reasonCode?.split(':')[0];
   return {
     display: 'inline-block',
     padding: '0.2rem 0.6rem',
-    borderRadius: '3px',
     fontSize: '0.7rem',
     fontWeight: '700',
-    background: REASON_PREFIX_COLORS[prefix] ?? '#555',
-    color: '#fff',
+    background: '#222',
+    color: REASON_PREFIX_COLORS[prefix] ?? 'var(--color-muted)',
     letterSpacing: '0.04em',
     whiteSpace: 'nowrap',
   };

@@ -64,7 +64,6 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
         transform: 'translateX(-50%)',
         background: '#111',
         border: '1px solid #444',
-        borderRadius: '3px',
         padding: 'var(--space-2) var(--space-3)',
         display: 'flex',
         flexDirection: 'column',
@@ -72,7 +71,6 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
         zIndex: 10,
         minWidth: '320px',
         maxWidth: '600px',
-        boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
       }}
     >
       <span
@@ -105,7 +103,6 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
           fontSize: '0.8rem',
           padding: '0.3rem var(--space-2)', /* off-scale: 0.3rem vertical has no exact token */
           outline: 'none',
-          borderRadius: 0,
           width: '100%',
           boxSizing: 'border-box',
         }}
