@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
-import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, updateTitle, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
+import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, updateTitle, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog, getServices } from './registry.js';
 import { dockerExec, dockerExecStream, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
@@ -48,6 +48,42 @@ router.get('/features/:key/health', async (req, res) => {
   } catch {
     res.json({ status: 'down' });
   }
+});
+
+/**
+ * GET /_fleet/api/features/:key/services/health
+ * Probe each registered service of a feature and return per-service health.
+ * Returns { services: [{ name, port, status: 'up'|'down' }] }.
+ */
+router.get('/features/:key/services/health', async (req, res) => {
+  const { key } = req.params;
+
+  if (!getFeature(key)) {
+    return res.status(404).json({ error: 'Feature not registered' });
+  }
+
+  const services = getServices(key);
+
+  const results = await Promise.all(
+    services.map(async (service) => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+
+        const response = await fetch(`http://fleet-${key}:${service.port}/`, {
+          method: 'HEAD',
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+        return { name: service.name, port: service.port, status: response.ok ? 'up' : 'down' };
+      } catch {
+        return { name: service.name, port: service.port, status: 'down' };
+      }
+    }),
+  );
+
+  res.json({ services: results });
 });
 
 /**

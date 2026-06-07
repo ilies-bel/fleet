@@ -48,6 +48,14 @@ export function getHealth(key) {
   return request(`/_fleet/api/features/${key}/health`);
 }
 
+/**
+ * @param {string} key  Composite key: "<project>-<name>"
+ * @returns {Promise<{ services: Array<{ name: string, port: number, status: 'up'|'down' }> }>}
+ */
+export function getServicesHealth(key) {
+  return request(`/_fleet/api/features/${key}/services/health`);
+}
+
 /** @returns {Promise<{ uptimeMs: number, featureCount: number, activeFeature: string|null, nodeVersion: string }>} */
 export function getStatus() {
   return request('/_fleet/api/status');

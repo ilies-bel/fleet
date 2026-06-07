@@ -22,6 +22,7 @@ vi.mock('../../api.js', () => ({
   getLogs: vi.fn().mockResolvedValue({ lines: '' }),
   getStats: vi.fn().mockResolvedValue({}),
   getStatus: vi.fn().mockResolvedValue({}),
+  getServicesHealth: vi.fn().mockResolvedValue({ services: [] }),
 }));
 
 const makeFeature = (overrides = {}) => ({

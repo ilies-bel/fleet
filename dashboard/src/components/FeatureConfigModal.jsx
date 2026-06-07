@@ -1,10 +1,28 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { formatWorktree, formatHost } from './featurePresentation.js';
+import { getServicesHealth } from '../api.js';
 
 export default function FeatureConfigModal({ feature, onClose }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const displayName = feature.title || feature.name;
+
+  // Per-service health: null = loading, Map<name, status> once resolved, 'unavailable' on error.
+  const [serviceHealth, setServiceHealth] = useState(null);
+
+  // Fetch per-service health once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    getServicesHealth(feature.key).then((data) => {
+      if (!cancelled) {
+        const map = new Map(data.services.map((s) => [s.name, s.status]));
+        setServiceHealth(map);
+      }
+    }).catch(() => {
+      if (!cancelled) setServiceHealth('unavailable');
+    });
+    return () => { cancelled = true; };
+  }, [feature.key]);
 
   // Focus the close button on mount.
   useEffect(() => {
@@ -135,11 +153,45 @@ export default function FeatureConfigModal({ feature, onClose }) {
           <dd style={{ margin: 0 }}>
             {(() => {
               const services = Array.isArray(feature.services) ? feature.services : [];
-              return services.length === 0
-                ? <span>no services</span>
-                : <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontFamily: 'var(--font-mono)' }}>
-                    {services.map(s => <li key={s.name}>{s.name} → {s.port}</li>)}
-                  </ul>;
+              if (services.length === 0) return <span>no services</span>;
+
+              return (
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontFamily: 'var(--font-mono)' }}>
+                  {services.map((s) => {
+                    let badgeColor;
+                    let badgeLabel;
+                    if (serviceHealth === null) {
+                      badgeColor = 'var(--color-muted)';
+                      badgeLabel = 'checking…';
+                    } else if (serviceHealth === 'unavailable') {
+                      badgeColor = 'var(--color-muted)';
+                      badgeLabel = '— unavailable';
+                    } else {
+                      const status = serviceHealth.get(s.name);
+                      if (status === 'up') {
+                        badgeColor = 'var(--color-accent)';
+                        badgeLabel = 'UP';
+                      } else {
+                        badgeColor = 'var(--color-danger)';
+                        badgeLabel = 'DOWN';
+                      }
+                    }
+                    return (
+                      <li key={s.name} style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'baseline' }}>
+                        <span>{s.name} → {s.port}</span>
+                        <span style={{
+                          color: badgeColor,
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '0.68rem',
+                          borderRadius: 0,
+                        }}>
+                          {badgeLabel}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
             })()}
           </dd>
         </dl>
