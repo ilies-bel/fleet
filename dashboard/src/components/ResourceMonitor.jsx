@@ -149,7 +149,6 @@ export default function ResourceMonitor() {
             fontSize: '0.65rem',
             padding: '0.15rem var(--space-2)', /* off-scale: 0.15rem vertical micro-gap */
             border: '1px solid var(--color-danger)',
-            borderRadius: '2px',
             marginBottom: 'var(--space-2)',
           }}
         >

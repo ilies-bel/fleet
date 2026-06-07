@@ -150,7 +150,7 @@ describe('ReviewNotesPanel', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /clear all review notes/i }));
       // Click the destructive confirm button inside the modal
-      fireEvent.click(screen.getByRole('button', { name: /^clear all$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /\[clear all\]/i }));
 
       expect(clearForWorktree).toHaveBeenCalledOnce();
       expect(clearForWorktree).toHaveBeenCalledWith(WORKTREE);
@@ -171,7 +171,7 @@ describe('ReviewNotesPanel', () => {
       );
 
       fireEvent.click(screen.getByRole('button', { name: /clear all review notes/i }));
-      fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /\[cancel\]/i }));
 
       expect(clearForWorktree).not.toHaveBeenCalled();
       expect(screen.queryByRole('dialog')).toBeNull();
@@ -245,8 +245,8 @@ describe('ReviewNotesPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: /add general note/i }));
 
       expect(screen.getByRole('textbox')).toBeTruthy();
-      expect(screen.getByRole('button', { name: /^save$/i })).toBeTruthy();
-      expect(screen.getByRole('button', { name: /^cancel$/i })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /\[save\]/i })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /\[cancel\]/i })).toBeTruthy();
     });
 
     it('calls addNote with a general note when Save is clicked with non-empty text', () => {
@@ -264,7 +264,7 @@ describe('ReviewNotesPanel', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /add general note/i }));
       fireEvent.change(screen.getByRole('textbox'), { target: { value: 'This layout needs work' } });
-      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /\[save\]/i }));
 
       expect(addNote).toHaveBeenCalledOnce();
       const [worktreeArg, noteArg] = addNote.mock.calls[0];
@@ -290,7 +290,7 @@ describe('ReviewNotesPanel', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /add general note/i }));
       // textarea is empty — do not type anything
-      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /\[save\]/i }));
 
       expect(addNote).not.toHaveBeenCalled();
     });
@@ -310,7 +310,7 @@ describe('ReviewNotesPanel', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /add general note/i }));
       fireEvent.change(screen.getByRole('textbox'), { target: { value: '   ' } });
-      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /\[save\]/i }));
 
       expect(addNote).not.toHaveBeenCalled();
     });
@@ -329,7 +329,7 @@ describe('ReviewNotesPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: /add general note/i }));
       expect(screen.getByRole('textbox')).toBeTruthy();
 
-      fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /\[cancel\]/i }));
 
       expect(screen.queryByRole('textbox')).toBeNull();
       expect(screen.getByRole('button', { name: /add general note/i })).toBeTruthy();
@@ -350,7 +350,7 @@ describe('ReviewNotesPanel', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /add general note/i }));
       fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Some note' } });
-      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /\[save\]/i }));
 
       expect(screen.queryByRole('textbox')).toBeNull();
       expect(screen.getByRole('button', { name: /add general note/i })).toBeTruthy();

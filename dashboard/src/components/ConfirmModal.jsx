@@ -129,7 +129,7 @@ export default function ConfirmModal({ open, title, message, confirmLabel, onCon
         )}
         <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
           <Button tone="primary" onClick={onCancel}>
-            Cancel
+            [CANCEL]
           </Button>
           <Button tone={destructive ? 'destructive' : 'primary'} onClick={onConfirm}>
             {confirmLabel}

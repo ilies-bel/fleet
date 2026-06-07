@@ -5,7 +5,7 @@
  * - Escape key closes the modal
  * - Clicking the backdrop (outer overlay) closes the modal
  * - Clicking inside the inner panel does NOT close the modal
- * - The × close button closes the modal
+ * - The [CLOSE] close button closes the modal
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -53,7 +53,7 @@ describe('FeatureConfigModal — dismiss behaviour', () => {
 
   // ── Close button ───────────────────────────────────────────────────────────
 
-  it('clicking the × close button calls onClose', () => {
+  it('clicking the [CLOSE] close button calls onClose', () => {
     render(<FeatureConfigModal feature={makeFeature()} onClose={onClose} />);
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledTimes(1);

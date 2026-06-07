@@ -1,23 +1,55 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import { formatWorktree, formatHost } from './featurePresentation.js';
 
 export default function FeatureConfigModal({ feature, onClose }) {
+  const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const displayName = feature.title || feature.name;
 
+  // Focus the close button on mount.
   useEffect(() => {
     closeRef.current?.focus();
   }, []);
 
+  // Escape closes the modal (global listener so it fires regardless of focus position).
   useEffect(() => {
     function handler(e) {
-      if (e.key === 'Escape') {
-        onClose();
-      }
+      if (e.key === 'Escape') onClose();
     }
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
+
+  // Tab traps focus within the inner panel (matches ConfirmModal / LogPanel pattern).
+  const handleKeyDown = useCallback((e) => {
+    if (e.key !== 'Tab') return;
+
+    const panel = dialogRef.current;
+    if (!panel) return;
+
+    const focusable = Array.from(
+      panel.querySelectorAll(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input, select, textarea',
+      ),
+    );
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last  = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (e.shiftKey) {
+      if (active === first || active === panel) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }, []);
 
   return (
     <div
@@ -36,7 +68,10 @@ export default function FeatureConfigModal({ feature, onClose }) {
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
         style={{
           background: '#1a1a1a',
           border: '1px solid #333',
@@ -44,6 +79,7 @@ export default function FeatureConfigModal({ feature, onClose }) {
           minWidth: '320px',
           maxWidth: '480px',
           fontFamily: 'var(--font-mono)',
+          outline: 'none',
         }}
       >
         <div style={{
@@ -62,19 +98,12 @@ export default function FeatureConfigModal({ feature, onClose }) {
           </h2>
           <button
             ref={closeRef}
+            className="btn btn-primary"
             aria-label="Close"
             onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: '#aaa',
-              fontSize: '1rem',
-              padding: '2px 6px',
-              fontFamily: 'var(--font-mono)',
-            }}
+            style={{ fontSize: '0.75rem', padding: '2px 8px' }}
           >
-            ×
+            [CLOSE]
           </button>
         </div>
         <dl style={{

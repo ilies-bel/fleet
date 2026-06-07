@@ -75,7 +75,7 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
           disabled={notes.length === 0}
           aria-label="Copy review notes as prompt"
         >
-          {copied ? 'Copied ✓' : 'Copy as prompt'}
+          {copied ? '[COPIED]' : '[COPY]'}
         </button>
         {notes.length > 0 && (
           <button
@@ -83,7 +83,7 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
             onClick={handleClearAll}
             aria-label="Clear all review notes"
           >
-            Clear all
+            [CLEAR ALL]
           </button>
         )}
       </div>
@@ -140,22 +140,23 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
                   className="review-notes-panel__composer-save"
                   onClick={handleSave}
                 >
-                  Save
+                  [SAVE]
                 </button>
                 <button
                   className="review-notes-panel__composer-cancel"
                   onClick={handleCancel}
                 >
-                  Cancel
+                  [CANCEL]
                 </button>
               </div>
             </>
           ) : (
             <button
               className="review-notes-panel__add-btn"
+              aria-label="Add general note"
               onClick={() => setComposerOpen(true)}
             >
-              Add general note
+              [ADD NOTE]
             </button>
           )}
         </div>
@@ -165,7 +166,7 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
       open={confirmOpen}
       title="Clear all review notes"
       message="Clear all review notes for this feature?"
-      confirmLabel="Clear all"
+      confirmLabel="[CLEAR ALL]"
       onConfirm={() => { clearForWorktree(worktree); setConfirmOpen(false); }}
       onCancel={() => setConfirmOpen(false)}
       destructive
