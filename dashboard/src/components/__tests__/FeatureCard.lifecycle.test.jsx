@@ -7,8 +7,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import FeatureCard from '../FeatureCard.jsx';
+import * as api from '../../api.js';
 
 vi.mock('../../api.js', () => ({
   getHealth: vi.fn().mockResolvedValue({ status: 'down' }),
@@ -16,6 +17,7 @@ vi.mock('../../api.js', () => ({
   stopFeature: vi.fn().mockResolvedValue({}),
   startFeature: vi.fn().mockResolvedValue({}),
   syncFeature: vi.fn().mockResolvedValue({ ok: true }),
+  renameFeature: vi.fn().mockResolvedValue({}),
   getFeatures: vi.fn().mockResolvedValue([]),
   activateFeature: vi.fn().mockResolvedValue({ ok: true }),
   addFeature: vi.fn().mockResolvedValue({}),
@@ -107,5 +109,83 @@ describe('FeatureCard — lifecycle chip variants', () => {
     );
     expect(screen.getByText(/● BUILDING/)).toBeInTheDocument();
     expect(screen.queryByText(/● STARTING/)).toBeNull();
+  });
+});
+
+describe('FeatureCard — kill flow', () => {
+  const feature = makeFeature({ status: 'running' });
+
+  function renderKillCard(onRemoved = vi.fn()) {
+    return render(
+      <FeatureCard
+        feature={feature}
+        isActive={false}
+        isPreview={false}
+        isStarting={false}
+        onActivate={vi.fn()}
+        onRemoved={onRemoved}
+        onLogs={vi.fn()}
+      />
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('clicking [KILL] opens the ConfirmModal with a destruction explanation', () => {
+    renderKillCard();
+
+    fireEvent.click(screen.getByRole('button', { name: /Kill feature/i }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // Modal must explain what is permanently destroyed
+    expect(screen.getByText(/permanently removes/i)).toBeInTheDocument();
+    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument();
+  });
+
+  it('confirming in the modal calls removeFeature and onRemoved', async () => {
+    const onRemoved = vi.fn();
+    renderKillCard(onRemoved);
+
+    fireEvent.click(screen.getByRole('button', { name: /Kill feature/i }));
+
+    // The modal's confirm button is labelled "[KILL]"; use within(dialog) to
+    // distinguish it from the trigger button whose aria-label is different.
+    const dialog = screen.getByRole('dialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: /\[KILL\]/i }));
+    });
+
+    expect(api.removeFeature).toHaveBeenCalledWith(feature.key);
+    expect(onRemoved).toHaveBeenCalledWith(feature.key);
+  });
+
+  it('cancelling in the modal does not call removeFeature and closes the dialog', () => {
+    renderKillCard();
+
+    fireEvent.click(screen.getByRole('button', { name: /Kill feature/i }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel/i }));
+
+    expect(api.removeFeature).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('focus returns to the [KILL] trigger after the modal closes via cancel', () => {
+    renderKillCard();
+
+    const killTrigger = screen.getByRole('button', { name: /Kill feature/i });
+    // Ensure the trigger is focused before opening (simulates keyboard/mouse focus)
+    killTrigger.focus();
+    fireEvent.click(killTrigger);
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    // Cancel — ConfirmModal restores focus to the element that was active when it opened
+    fireEvent.click(screen.getByRole('button', { name: /Cancel/i }));
+
+    expect(document.activeElement).toBe(killTrigger);
   });
 });

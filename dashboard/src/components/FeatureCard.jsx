@@ -3,11 +3,12 @@ import { getHealth, removeFeature, stopFeature, startFeature, syncFeature, renam
 import { describeFeature } from './featurePresentation.js';
 import { Button } from './Button.jsx';
 import FeatureConfigModal from './FeatureConfigModal.jsx';
+import ConfirmModal from './ConfirmModal.jsx';
 
 export default function FeatureCard({ feature, isActive, isPreview, isStarting, onActivate, onRemoved, onLogs }) {
   const { key, name, branch, title } = feature;
   const [health, setHealth] = useState('checking');
-  const [confirming, setConfirming] = useState(false);
+  const [killConfirmOpen, setKillConfirmOpen] = useState(false);
   const [syncConfirm, setSyncConfirm] = useState(false);
   const syncConfirmTimer = useRef(null);
   const configTriggerRef = useRef(null);
@@ -76,15 +77,18 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     }
   }
 
-  async function handleKill() {
-    if (!confirming) { setConfirming(true); return; }
+  function handleKill() {
+    setKillConfirmOpen(true);
+  }
+
+  async function handleKillConfirm() {
+    setKillConfirmOpen(false);
     try {
       await removeFeature(key);
       onRemoved(key);
     } catch (err) {
       console.error('Kill failed:', err);
     }
-    setConfirming(false);
   }
 
   async function handleSync() {
@@ -372,13 +376,10 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
                 <Button
                   tone="destructive"
                   onClick={handleKill}
-                  style={{
-                    ...cardBtnStyle,
-                    ...(confirming ? { background: '#ff4444', color: '#000' } : {}),
-                  }}
+                  style={cardBtnStyle}
                   aria-label={`Kill feature ${displayName}`}
                 >
-                  {confirming ? '[CONFIRM?]' : '[KILL]'}
+                  [KILL]
                 </Button>
               </div>
             )}
@@ -408,6 +409,15 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           }}
         />
       )}
+      <ConfirmModal
+        open={killConfirmOpen}
+        title={`Kill ${displayName}`}
+        message={`Permanently removes the container and worktree for ${displayName}. This cannot be undone.`}
+        confirmLabel="[KILL]"
+        onConfirm={handleKillConfirm}
+        onCancel={() => setKillConfirmOpen(false)}
+        destructive
+      />
     </div>
   );
 }
