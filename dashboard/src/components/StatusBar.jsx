@@ -31,6 +31,15 @@ export default function StatusBar() {
       ? 'var(--color-accent)'
       : 'var(--color-danger)';
 
+  // Connecting is a transient state — blink it like every other in-flight
+  // lifecycle indicator. Unreachable is terminal-until-fixed: steady red, and
+  // the recovery command rides along as a tooltip so a fresh operator who never
+  // started the gateway has somewhere to go without bloating the status line.
+  const gwBlink = status === null;
+  const gwTitle = status && !status.up
+    ? 'Gateway not responding on :4000. Start it with `fleet up`.'
+    : undefined;
+
   return (
     <div
       className="status-bar"
@@ -48,7 +57,12 @@ export default function StatusBar() {
       }}
     >
       <span style={{ color: 'var(--color-accent)', fontWeight: 700 }}>[QA FLEET v1.0]</span>
-      <span style={{ color: gwColor }}>{gwLabel}</span>
+      <span
+        style={{ color: gwColor, animation: gwBlink ? 'blink 1s step-start infinite' : undefined }}
+        title={gwTitle}
+      >
+        {gwLabel}
+      </span>
       <span style={{ color: 'var(--color-muted)' }}>
         {status?.featureCount ?? 0} FEATURES
       </span>

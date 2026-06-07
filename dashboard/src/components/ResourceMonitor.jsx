@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getFeatures, getStats } from '../api.js';
 import SystemResourcePanel from './SystemResourcePanel.jsx';
+import EmptyState from './EmptyState.jsx';
 
 const POLL_MS = 3000;
 
@@ -175,7 +176,15 @@ export default function ResourceMonitor() {
             </tr>
           ) : state.status === 'ok' && state.features.length === 0 ? (
             <tr>
-              <td colSpan={7} style={mutedCell}>no features registered</td>
+              <td colSpan={7} style={{ padding: 0 }}>
+                <EmptyState
+                  status="0 FEATURES REGISTERED"
+                  statusColor="var(--color-accent)"
+                  lead="CPU, memory, and network for every running feature container show up here. There's nothing to measure until a feature exists."
+                  command="fleet add <name> <branch>"
+                  hint="Stats stream once the container is up. Auto-refresh every 3s."
+                />
+              </td>
             </tr>
           ) : state.status === 'ok' ? (
             state.features.map((r) => {

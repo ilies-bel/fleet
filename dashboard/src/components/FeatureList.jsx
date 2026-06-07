@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import FeatureCard from './FeatureCard.jsx';
+import EmptyState from './EmptyState.jsx';
 
 const STATUS_CHIPS = [
   { key: 'up', label: 'UP' },
@@ -62,6 +63,13 @@ export default function FeatureList({ features, activePreview, startingFeatures,
       return next;
     });
   }
+
+  function clearFilters() {
+    setSearchQuery('');
+    setActiveStatuses(new Set());
+  }
+
+  const hasActiveFilter = searchQuery !== '' || activeStatuses.size > 0;
 
   const filteredFeatures = features.filter(f => {
     if (searchQuery) {
@@ -204,24 +212,46 @@ export default function FeatureList({ features, activePreview, startingFeatures,
 
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {features.length === 0 && (
-              <div style={{
-                padding: 'var(--space-4) var(--space-3)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.75rem',
-                color: '#333',
-              }}>
-                no features registered
-              </div>
+              <EmptyState
+                variant="sidebar"
+                status="0 REGISTERED"
+                statusColor="var(--color-accent)"
+                lead="No feature branches yet. Register one and it lands here, ready to activate."
+                command="fleet add <name> <branch>"
+              />
             )}
 
             {features.length > 0 && filteredFeatures.length === 0 && (
               <div style={{
                 padding: 'var(--space-4) var(--space-3)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-2)',
                 fontFamily: 'var(--font-mono)',
-                fontSize: '0.75rem',
-                color: '#333',
+                fontSize: '0.65rem',
+                color: 'var(--color-muted)',
               }}>
-                no features match
+                <span>No features match the current filter.</span>
+                {hasActiveFilter && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="empty-state-copy"
+                    style={{
+                      alignSelf: 'flex-start',
+                      background: 'transparent',
+                      border: '1px solid #2a2a2a',
+                      color: '#888',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '0.6rem',
+                      letterSpacing: '0.05em',
+                      padding: '1px 6px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    [CLEAR FILTERS]
+                  </button>
+                )}
               </div>
             )}
 

@@ -81,9 +81,17 @@ describe('PreviewFrame toolbar header', () => {
 
   // ── Empty state: no active preview ───────────────────────────────────────
 
-  it('renders the empty state prompt when activePreview is falsy', () => {
-    renderFrame({ activePreview: null });
-    expect(screen.getByText(/ACTIVATE A FEATURE TO PREVIEW/)).toBeInTheDocument();
+  it('renders the first-run register state when nothing is active and no features exist', () => {
+    renderFrame({ activePreview: null, hasFeatures: false });
+    expect(screen.getByText(/0 FEATURES REGISTERED/)).toBeInTheDocument();
+    expect(screen.getByText('fleet add <name> <branch>')).toBeInTheDocument();
+  });
+
+  it('renders the activate-a-feature state when features exist but none is active', () => {
+    renderFrame({ activePreview: null, hasFeatures: true });
+    expect(screen.getByText(/NO FEATURE ACTIVE/)).toBeInTheDocument();
+    // Past first run: prompt to activate, not to register again.
+    expect(screen.queryByText('fleet add <name> <branch>')).not.toBeInTheDocument();
   });
 
   // ── Buttons are untouched ─────────────────────────────────────────────────

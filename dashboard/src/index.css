@@ -74,6 +74,18 @@ input {
   50%, 100% { opacity: 0.2; }
 }
 
+/* Reduced-motion alternative for the transient-state blink (status bar +
+   lifecycle dots). State still travels as color + text label, so dropping the
+   flash loses no information. The blink keyframe ends at opacity 0.2, so it must
+   be removed (not snapped to its end frame) to leave the dot at full opacity;
+   width/opacity transitions collapse to instant. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ── Responsive: off-canvas feature drawer (< 768px) ─────────────────────── */
 
 @media (max-width: 767px) {
@@ -196,3 +208,13 @@ input {
 .btn-destructive           { color: #ff4444; }
 .btn-destructive:hover:not(:disabled),
 .btn-destructive:focus:not(:disabled) { background: #ff4444; color: #000; outline: none; }
+
+/* ── Empty-state copy button ───────────────────────────────────────────────── */
+/* Mirrors the button-tone grammar: outline at rest, accent fill floods on
+   hover/focus, text goes black. Keyboard and mouse read identically. */
+.empty-state-copy:hover,
+.empty-state-copy:focus-visible {
+  background: var(--color-accent) !important;
+  color: #000 !important;
+  outline: none;
+}

@@ -39,14 +39,14 @@ describe('ResourceMonitor — fetch states', () => {
     expect(screen.getByText(/RESOURCE MONITOR/)).toBeInTheDocument();
   });
 
-  it('shows "no features registered" only after a successful fetch that returns empty array', async () => {
+  it('shows the first-run empty state only after a successful fetch that returns empty array', async () => {
     getFeatures.mockResolvedValue([]);
     render(<ResourceMonitor />);
     // Must not appear during loading
-    expect(screen.queryByText('no features registered')).not.toBeInTheDocument();
+    expect(screen.queryByText('0 FEATURES REGISTERED')).not.toBeInTheDocument();
     // Must appear after the resolved-empty fetch
     await waitFor(() => {
-      expect(screen.getByText('no features registered')).toBeInTheDocument();
+      expect(screen.getByText('0 FEATURES REGISTERED')).toBeInTheDocument();
     });
   });
 });

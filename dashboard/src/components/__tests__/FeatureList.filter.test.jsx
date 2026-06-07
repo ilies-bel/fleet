@@ -212,17 +212,31 @@ describe('FeatureList — search and status-chip filter', () => {
 
   // ── Empty state ───────────────────────────────────────────────────────────
 
-  it('shows "no features match" when filters exclude all features', () => {
+  it('shows a no-match empty state when filters exclude all features', () => {
     renderList([makeFeature({ name: 'alpha', status: 'running' })]);
     fireEvent.change(screen.getByRole('textbox', { name: 'Search features' }), {
       target: { value: 'zzz-no-match' },
     });
     expect(screen.getByText(/no features match/i)).toBeInTheDocument();
+    // No-match offers a way out, not the first-run register command.
+    expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument();
+    expect(screen.queryByText(/no feature branches yet/i)).not.toBeInTheDocument();
   });
 
-  it('shows "no features registered" (not "no features match") for truly empty features', () => {
+  it('clearing filters from the no-match state restores the feature', () => {
+    renderList([makeFeature({ name: 'alpha', status: 'running' })]);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search features' }), {
+      target: { value: 'zzz-no-match' },
+    });
+    expect(screen.queryByText('alpha')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /clear filters/i }));
+    expect(screen.getByText('alpha')).toBeInTheDocument();
+  });
+
+  it('shows the first-run register state (not no-match) for truly empty features', () => {
     renderList([]);
-    expect(screen.getByText(/no features registered/i)).toBeInTheDocument();
+    expect(screen.getByText(/no feature branches yet/i)).toBeInTheDocument();
+    expect(screen.getByText('fleet add <name> <branch>')).toBeInTheDocument();
     expect(screen.queryByText(/no features match/i)).not.toBeInTheDocument();
   });
 

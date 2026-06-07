@@ -31,8 +31,9 @@ describe('ResourceMonitor — empty state', () => {
       expect(screen.getByText(/CPU \(8 cores\)/)).toBeInTheDocument();
     });
 
-    // Host-CPU label (from SystemResourcePanel) and empty-state message both present
+    // Host-CPU label (from SystemResourcePanel) and the first-run empty state both present
     expect(screen.getByText(/CPU \(8 cores\)/)).toBeInTheDocument();
-    expect(screen.getByText('no features registered')).toBeInTheDocument();
+    expect(screen.getByText('0 FEATURES REGISTERED')).toBeInTheDocument();
+    expect(screen.getByText('fleet add <name> <branch>')).toBeInTheDocument();
   });
 });

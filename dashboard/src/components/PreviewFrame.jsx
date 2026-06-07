@@ -1,12 +1,13 @@
 import { useRef, useState, useEffect } from 'react';
 import DiffPane from './DiffPane.jsx';
 import ReviewCaptureLayer from './ReviewCaptureLayer.jsx';
+import EmptyState from './EmptyState.jsx';
 import { PROXY_ORIGIN } from '../lib/captureProtocol.js';
 
 // Port 3000 is the transparent proxy — always the same URL regardless of which feature is active.
 const PROXY_URL = 'http://localhost:3000/';
 
-export default function PreviewFrame({ activePreview, branch, previewKey, title, isCapture, onToggleCapture, addNote, notes }) {
+export default function PreviewFrame({ activePreview, branch, previewKey, title, isCapture, onToggleCapture, addNote, notes, hasFeatures = false }) {
   const iframeRef = useRef(null);
   const [viewMode, setViewMode] = useState('preview');
 
@@ -31,20 +32,24 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
   }, [onToggleCapture]);
 
   if (!activePreview) {
-    return (
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--color-bg)',
-        fontFamily: 'var(--font-mono)',
-        color: '#333',
-        fontSize: '1.1rem',
-        letterSpacing: '0.05em',
-      }}>
-        // ACTIVATE A FEATURE TO PREVIEW
-      </div>
+    // Two distinct first-run states. Before any `fleet add`, teach the one
+    // command that makes a feature appear. Once features exist, point at the
+    // [ACTIVATE] click that drives the aha moment: branch live on :3000.
+    return hasFeatures ? (
+      <EmptyState
+        status="NO FEATURE ACTIVE"
+        statusColor="var(--color-warning)"
+        lead="Activate a feature from the list to load it here. The branch runs live behind localhost:3000, so you review it without checking it out or restarting a server."
+        hint="Click [ACTIVATE] on a card, or press ⌘1–9 to switch by position. Only one feature holds the preview port at a time."
+      />
+    ) : (
+      <EmptyState
+        status="0 FEATURES REGISTERED"
+        statusColor="var(--color-accent)"
+        lead="Fleet keeps every feature branch alive behind one preview port. Register a branch and it shows up in the list on the left. Click it and review it here: no checkout, no rebuild."
+        command="fleet add <name> <branch>"
+        hint="Run that in your project, then watch the feature appear in the list. Build progress: docker logs -f fleet-<name>."
+      />
     );
   }
 
