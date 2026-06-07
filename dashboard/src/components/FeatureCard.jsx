@@ -197,7 +197,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             fontFamily: 'var(--font-mono)',
           }}
         >
-          <span style={{ color: '#555', fontSize: '0.75rem', flexShrink: 0, lineHeight: 1 }}>
+          <span style={{ color: '#888', fontSize: '0.75rem', flexShrink: 0, lineHeight: 1 }}>
             {collapsed ? '▸' : '▾'}
           </span>
           {/* Status chip appears in the compact header only when collapsed */}
@@ -316,10 +316,10 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
               <div style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.65rem',
-                color: '#555',
+                color: '#b8b8b8',
                 marginTop: 'var(--space-1)',
               }}>
-                Start: <span style={{ color: '#888' }}>fleet add {name} {branch}</span>
+                Start: <span style={{ color: '#b8b8b8' }}>fleet add {name} {branch}</span>
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 'var(--space-15)', flexWrap: 'wrap' }}>

@@ -197,18 +197,18 @@ export default function ResourceMonitor() {
               return (
                 <tr key={r.key} style={{ background: '#0d0d0d' }}>
                   <td style={{ ...col, color: '#eee', fontWeight: 700 }}>{r.name}</td>
-                  <td style={{ ...col, color: '#555', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.project || '—'}</td>
+                  <td style={{ ...col, color: 'var(--color-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.project || '—'}</td>
                   <td style={{ ...col, color: 'var(--color-muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch}</td>
                   <td style={{ ...col, color: statusColor }}>{r.status.toUpperCase()}</td>
                   <td style={col}>
                     {r.status === 'running'
                       ? <CpuBar percent={r.cpuPercent} />
-                      : <span style={{ color: '#333' }}>—</span>}
+                      : <span style={{ color: '#888' }}>—</span>}
                   </td>
-                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : '#333' }}>
+                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : '#888' }}>
                     {r.status === 'running' ? fmtMem(r.memUsageMB, r.memLimitMB) : '—'}
                   </td>
-                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : '#333' }}>
+                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : '#888' }}>
                     {r.status === 'running' ? fmtNet(r.netRxMB, r.netTxMB) : '—'}
                   </td>
                 </tr>

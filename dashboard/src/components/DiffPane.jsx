@@ -59,7 +59,7 @@ const emptyStyle = {
   justifyContent: 'center',
   background: 'var(--color-bg)',
   fontFamily: 'var(--font-mono)',
-  color: '#333',
+  color: '#b8b8b8',
   fontSize: '1.1rem',
   letterSpacing: '0.05em',
 };
@@ -71,7 +71,7 @@ const unavailableStyle = {
   justifyContent: 'center',
   background: 'var(--color-bg)',
   fontFamily: 'var(--font-mono)',
-  color: '#555',
+  color: '#b8b8b8',
   fontSize: '0.85rem',
   letterSpacing: '0.03em',
 };
@@ -182,7 +182,7 @@ export default function DiffPane({ activeKey }) {
 
   if (status === null) {
     return (
-      <pre style={{ ...loadingStyle, color: '#555' }}>
+      <pre style={{ ...loadingStyle, color: '#b8b8b8' }}>
         Loading diff…
       </pre>
     );
