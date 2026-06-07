@@ -204,18 +204,16 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           <span style={{ color: 'var(--color-ink-dim)', fontSize: '0.75rem', flexShrink: 0, lineHeight: 1 }}>
             {collapsed ? '▸' : '▾'}
           </span>
-          {/* Status chip appears in the compact header only when collapsed */}
-          {collapsed && (
-            <span style={{
-              color: presentation.dotColor,
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.68rem',
-              flexShrink: 0,
-              animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
-            }}>
-              {'●'}
-            </span>
-          )}
+          {/* Status chip always visible beside the title */}
+          <span style={{
+            color: presentation.dotColor,
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.68rem',
+            flexShrink: 0,
+            animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
+          }}>
+            {'●'}
+          </span>
         </button>
 
         {/* Title — double-click to rename inline */}
@@ -230,7 +228,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             style={{
               flex: 1,
               minWidth: 0,
-              color: isActive ? 'var(--color-accent)' : 'var(--color-ink)',
+              color: presentation.dotColor,
               fontFamily: 'var(--font-mono)',
               fontSize: '0.9rem',
               fontWeight: 700,
@@ -246,7 +244,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             title="Double-click to rename"
             style={{
               flex: 1,
-              color: isActive ? 'var(--color-accent)' : 'var(--color-ink)',
+              color: presentation.dotColor,
               fontFamily: 'var(--font-mono)',
               fontSize: '0.9rem',
               fontWeight: 700,
@@ -287,15 +285,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             {branch}
           </div>
 
-          <div style={{ marginBottom: 'var(--space-2)' }}> {/* tight identity cluster: status→controls */}
-            <span style={{
-              color: presentation.dotColor,
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.68rem',
-              animation: presentation.blink ? 'blink 1s step-start infinite' : 'none',
-            }}>
-              {presentation.dotLabel}
-            </span>
+          <div style={{ marginBottom: 'var(--space-2)' }}> {/* error cluster: branch→error→controls */}
             {presentation.showError && feature.error && (
               <div
                 role="alert"
