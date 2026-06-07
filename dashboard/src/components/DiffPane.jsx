@@ -45,7 +45,7 @@ function DiffFile({ file }) {
 const loadingStyle = {
   flex: 1,
   margin: 0,
-  padding: '1rem',
+  padding: 'var(--space-4)',
   overflow: 'auto',
   fontFamily: 'var(--font-mono)',
   fontSize: '0.75rem',
@@ -168,7 +168,7 @@ export default function DiffPane({ activeKey }) {
         className="diff-pane-error"
         style={{
           flex: 1,
-          padding: '1rem',
+          padding: 'var(--space-4)',
           fontFamily: 'var(--font-mono)',
           fontSize: '0.8rem',
           color: '#ff5555',
@@ -210,7 +210,7 @@ export default function DiffPane({ activeKey }) {
         <div
           className="diff-truncation-banner"
           style={{
-            padding: '0.5rem 1rem',
+            padding: 'var(--space-2) var(--space-4)',
             background: '#332200',
             color: '#ffaa00',
             fontFamily: 'var(--font-mono)',

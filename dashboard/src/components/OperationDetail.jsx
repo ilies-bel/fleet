@@ -20,7 +20,7 @@ export default function OperationDetail({ id, onBack }) {
   }, [id]);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text)' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text)' }}>
       <button
         onClick={onBack}
         style={{
@@ -30,15 +30,15 @@ export default function OperationDetail({ id, onBack }) {
           cursor: 'pointer',
           fontFamily: 'var(--font-mono)',
           fontSize: '0.72rem',
-          padding: '0.25rem 0.6rem',
-          marginBottom: '1rem',
+          padding: 'var(--space-1) var(--space-2)',
+          marginBottom: 'var(--space-4)',
         }}
       >
         ← Back
       </button>
 
       {error && (
-        <div style={{ color: '#f44336', marginBottom: '1rem' }}>
+        <div style={{ color: '#f44336', marginBottom: 'var(--space-4)' }}>
           Error: {error}
         </div>
       )}
@@ -49,14 +49,14 @@ export default function OperationDetail({ id, onBack }) {
 
       {data && (
         <>
-          <div style={{ marginBottom: '1.25rem', borderBottom: '1px solid #222', paddingBottom: '0.75rem' }}>
-            <div style={{ color: 'var(--color-accent)', fontWeight: 'bold', marginBottom: '0.4rem' }}>
+          <div style={{ marginBottom: '1.25rem', /* off-scale: 1.25rem between var(--space-4) and var(--space-6) */ borderBottom: '1px solid #222', paddingBottom: 'var(--space-3)' }}>
+            <div style={{ color: 'var(--color-accent)', fontWeight: 'bold', marginBottom: 'var(--space-15)' }}>
               {data.operation.kind} — {data.operation.key}
             </div>
 
             {/* Prominently show reasonCode when the operation failed */}
             {data.operation.outcome === 'failure' && data.operation.reasonCode && (
-              <div style={{ marginBottom: '0.5rem' }}>
+              <div style={{ marginBottom: 'var(--space-2)' }}>
                 <span
                   className={`badge badge-${data.operation.reasonCode.split(':')[0]}`}
                   style={reasonBadgeStyle(data.operation.reasonCode)}
@@ -66,11 +66,11 @@ export default function OperationDetail({ id, onBack }) {
               </div>
             )}
 
-            <div style={{ color: 'var(--color-muted)', marginBottom: '0.2rem' }}>
-              <span style={{ marginRight: '1.5rem' }}>
+            <div style={{ color: 'var(--color-muted)', marginBottom: 'var(--space-05)' }}>
+              <span style={{ marginRight: 'var(--space-6)' }}>
                 Started: {data.operation.startedAt ? new Date(data.operation.startedAt).toISOString() : '—'}
               </span>
-              <span style={{ marginRight: '1.5rem' }}>
+              <span style={{ marginRight: 'var(--space-6)' }}>
                 Ended: {data.operation.endedAt ? new Date(data.operation.endedAt).toISOString() : '—'}
               </span>
               <span style={{ color: outcomeColor(data.operation.outcome) }}>
@@ -78,7 +78,7 @@ export default function OperationDetail({ id, onBack }) {
               </span>
             </div>
             {data.operation.errorMessage && (
-              <div style={{ color: '#f44336', marginTop: '0.3rem' }}>
+              <div style={{ color: '#f44336', marginTop: '0.3rem' /* off-scale: 0.3rem has no exact token */ }}>
                 {data.operation.errorMessage}
               </div>
             )}
@@ -93,8 +93,8 @@ export default function OperationDetail({ id, onBack }) {
                   key={event.id}
                   style={{
                     display: 'flex',
-                    gap: '1rem',
-                    padding: '0.35rem 0',
+                    gap: 'var(--space-4)',
+                    padding: '0.35rem 0', /* off-scale: 0.35rem vertical has no exact token */
                     borderBottom: '1px solid #111',
                     alignItems: 'baseline',
                   }}

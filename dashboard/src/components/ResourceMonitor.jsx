@@ -21,7 +21,7 @@ function CpuBar({ percent }) {
       : 'var(--color-accent)';
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
       <div style={{
         width: '80px',
         height: '6px',
@@ -98,7 +98,7 @@ export default function ResourceMonitor() {
   const col = {
     fontFamily: 'var(--font-mono)',
     fontSize: '0.72rem',
-    padding: '0.6rem 0.75rem',
+    padding: 'var(--space-2) var(--space-3)',
     borderBottom: '1px solid #1a1a1a',
     verticalAlign: 'middle',
   };
@@ -116,7 +116,7 @@ export default function ResourceMonitor() {
     fontFamily: 'var(--font-mono)',
     fontSize: '0.65rem',
     color: 'var(--color-muted)',
-    padding: '0.6rem 0.75rem',
+    padding: 'var(--space-2) var(--space-3)',
   };
 
   const runningFeatures = state.status === 'ok' ? state.features.filter(f => f.status === 'running') : [];
@@ -124,14 +124,14 @@ export default function ResourceMonitor() {
   const fleetNetTxMB = runningFeatures.reduce((s, f) => s + f.netTxMB, 0);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4)' }}>
       <SystemResourcePanel fleetNetRxMB={fleetNetRxMB} fleetNetTxMB={fleetNetTxMB} instanceCounts={instanceCounts} />
       <div style={{
         fontFamily: 'var(--font-mono)',
         fontSize: '0.65rem',
         color: 'var(--color-muted)',
         letterSpacing: '0.08em',
-        marginBottom: '0.75rem',
+        marginBottom: 'var(--space-3)',
       }}>
         // RESOURCE MONITOR &nbsp;— auto-refresh {POLL_MS / 1000}s
       </div>
@@ -146,17 +146,17 @@ export default function ResourceMonitor() {
             color: 'var(--color-danger)',
             fontFamily: 'var(--font-mono)',
             fontSize: '0.65rem',
-            padding: '0.15rem 0.5rem',
+            padding: '0.15rem var(--space-2)', /* off-scale: 0.15rem vertical micro-gap */
             border: '1px solid var(--color-danger)',
             borderRadius: '2px',
-            marginBottom: '0.5rem',
+            marginBottom: 'var(--space-2)',
           }}
         >
           {state.error} — auto-retry pending
         </div>
       )}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', maxWidth: '1100px', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
             <th style={{ ...th, textAlign: 'left' }}>FEATURE</th>

@@ -40,7 +40,7 @@ export default function FeatureConfigModal({ feature, onClose }) {
         style={{
           background: '#1a1a1a',
           border: '1px solid #333',
-          padding: '1.5rem',
+          padding: 'var(--space-6)',
           minWidth: '320px',
           maxWidth: '480px',
           fontFamily: 'var(--font-mono)',
@@ -50,7 +50,7 @@ export default function FeatureConfigModal({ feature, onClose }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginBottom: '1rem',
+          marginBottom: 'var(--space-4)',
         }}>
           <h2 style={{
             margin: 0,
@@ -81,7 +81,7 @@ export default function FeatureConfigModal({ feature, onClose }) {
           margin: 0,
           display: 'grid',
           gridTemplateColumns: 'auto 1fr',
-          gap: '0.4rem 1rem',
+          gap: 'var(--space-15) var(--space-4)',
           fontSize: '0.68rem',
           color: '#ccc',
         }}>

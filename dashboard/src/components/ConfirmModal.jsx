@@ -97,7 +97,7 @@ export default function ConfirmModal({ open, title, message, confirmLabel, onCon
         style={{
           background: '#1a1a1a',
           border: '1px solid #333',
-          padding: '1.5rem',
+          padding: 'var(--space-6)',
           minWidth: '280px',
           maxWidth: '400px',
           fontFamily: 'var(--font-mono)',
@@ -107,7 +107,7 @@ export default function ConfirmModal({ open, title, message, confirmLabel, onCon
         <h2
           id="confirm-modal-title"
           style={{
-            margin: '0 0 0.75rem 0',
+            margin: '0 0 var(--space-3) 0',
             fontSize: '0.85rem',
             color: '#eee',
             fontFamily: 'var(--font-mono)',
@@ -118,7 +118,7 @@ export default function ConfirmModal({ open, title, message, confirmLabel, onCon
         {message && (
           <p
             style={{
-              margin: '0 0 1.25rem 0',
+              margin: '0 0 1.25rem 0', /* off-scale: 1.25rem between var(--space-4) and var(--space-6) */
               fontSize: '0.75rem',
               color: '#ccc',
               lineHeight: 1.5,
@@ -127,7 +127,7 @@ export default function ConfirmModal({ open, title, message, confirmLabel, onCon
             {message}
           </p>
         )}
-        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
           <Button tone="primary" onClick={onCancel}>
             Cancel
           </Button>

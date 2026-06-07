@@ -23,9 +23,10 @@ export default function OperationsList({ onSelect }) {
   }, []);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4)' }}>
       <table style={{
         width: '100%',
+        maxWidth: '1100px',
         borderCollapse: 'collapse',
         fontFamily: 'var(--font-mono)',
         fontSize: '0.75rem',
@@ -65,7 +66,7 @@ export default function OperationsList({ onSelect }) {
           ))}
           {operations.length === 0 && (
             <tr>
-              <td colSpan={6} style={{ ...tdStyle, color: '#555', textAlign: 'center', padding: '1.5rem 0' }}>
+              <td colSpan={6} style={{ ...tdStyle, color: '#555', textAlign: 'center', padding: 'var(--space-6) 0' }}>
                 no operations recorded
               </td>
             </tr>
@@ -78,7 +79,7 @@ export default function OperationsList({ onSelect }) {
 
 const thStyle = {
   textAlign: 'left',
-  padding: '0.4rem 0.6rem',
+  padding: 'var(--space-15) var(--space-2)',
   color: 'var(--color-muted)',
   letterSpacing: '0.06em',
   fontSize: '0.65rem',
@@ -86,7 +87,7 @@ const thStyle = {
 };
 
 const tdStyle = {
-  padding: '0.35rem 0.6rem',
+  padding: '0.35rem var(--space-2)', /* off-scale: 0.35rem vertical has no exact token */
   verticalAlign: 'middle',
 };
 
@@ -102,7 +103,7 @@ function reasonBadgeStyle(reasonCode) {
   const prefix = reasonCode?.split(':')[0];
   return {
     display: 'inline-block',
-    padding: '0.1rem 0.4rem',
+    padding: '0.1rem var(--space-15)', /* off-scale: 0.1rem vertical micro-gap */
     borderRadius: '3px',
     fontSize: '0.65rem',
     fontWeight: '600',

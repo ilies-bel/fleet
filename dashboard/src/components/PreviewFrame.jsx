@@ -57,8 +57,8 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
         borderBottom: '1px solid #222',
         display: 'flex',
         alignItems: 'center',
-        padding: '0 0.75rem',
-        gap: '0.5rem',
+        padding: '0 var(--space-3)',
+        gap: 'var(--space-2)',
         flexShrink: 0,
       }}>
         {/* View-mode tabs — left-aligned */}

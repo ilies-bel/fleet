@@ -46,20 +46,20 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
       : 'var(--color-muted)';
 
   return (
-    <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', background: '#0d0d0d', border: '1px solid #1a1a1a' }}>
+    <div style={{ marginBottom: 'var(--space-6)', padding: 'var(--space-3) var(--space-4)', background: '#0d0d0d', border: '1px solid #1a1a1a' }}>
       <div style={{
         fontFamily: 'var(--font-mono)',
         fontSize: '0.65rem',
         color: 'var(--color-muted)',
         letterSpacing: '0.08em',
-        marginBottom: '0.75rem',
+        marginBottom: 'var(--space-3)',
       }}>
         // HOST RESOURCES
       </div>
 
       {/* Instance counts roll-up — 'failed' counts status === 'error' (ResourceMonitor maps fetch errors to status:'error'; no lifecycle.failed field exists yet) */}
       {instanceCounts && (
-        <div className="instance-counts" style={{ display: 'flex', gap: '1.5rem', marginBottom: '0.75rem' }}>
+        <div className="instance-counts" style={{ display: 'flex', gap: 'var(--space-6)', marginBottom: 'var(--space-3)' }}>
           <span className="count-total" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)' }}>
             TOTAL {instanceCounts.total}
           </span>
@@ -76,12 +76,12 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
       )}
 
       {/* CPU row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
           CPU{host.status === 'ok' ? ` (${host.cpuCores} cores)` : ''}
         </span>
         {host.status === 'ok' ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <div style={{ width: '120px', height: '6px', background: '#222', flexShrink: 0 }}>
               <div style={{
                 width: `${Math.min(host.cpuPercent, 100)}%`,
@@ -102,12 +102,12 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
       </div>
 
       {/* Memory row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
           MEM
         </span>
         {host.status === 'ok' ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <div style={{ width: '120px', height: '6px', background: '#222', flexShrink: 0 }}>
               <div style={{
                 width: `${Math.min(memPercent, 100)}%`,
@@ -129,7 +129,7 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
 
       {/* Instance counts — always rendered when provided */}
       {instanceCounts != null && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
             INSTANCES
           </span>

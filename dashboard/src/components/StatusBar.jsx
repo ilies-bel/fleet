@@ -41,7 +41,7 @@ export default function StatusBar() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 1rem',
+        padding: '0 var(--space-4)',
         fontFamily: 'var(--font-mono)',
         fontSize: '0.75rem',
         flexShrink: 0,

@@ -207,19 +207,19 @@ export default function LogPanel({ featureName, onClose }) {
       >
         {/* Header */}
         <div style={{
-          padding: '0.5rem 0.75rem',
+          padding: 'var(--space-2) var(--space-3)',
           borderBottom: '1px solid #222',
           display: 'flex',
           alignItems: 'center',
-          gap: '0.5rem',
+          gap: 'var(--space-2)',
           flexWrap: 'wrap',
         }}>
-          <span style={{ color: 'var(--color-accent)', fontSize: '0.75rem', fontWeight: 700, marginRight: '0.25rem' }}>
+          <span style={{ color: 'var(--color-accent)', fontSize: '0.75rem', fontWeight: 700, marginRight: 'var(--space-1)' }}>
             // LOGS — {featureName}
           </span>
 
           {/* Source tabs — primary tone; active tab shows the filled inversion */}
-          <div style={{ display: 'flex', gap: '0.3rem' }}>
+          <div style={{ display: 'flex', gap: '0.3rem' /* off-scale: 0.3rem micro-gap between tab buttons */ }}>
             {SOURCES.map(s => (
               <Button
                 key={s}
@@ -276,7 +276,7 @@ export default function LogPanel({ featureName, onClose }) {
             <div
               role="alert"
               style={{
-                padding: '0.4rem 0.75rem',
+                padding: 'var(--space-15) var(--space-3)',
                 background: '#1a0000',
                 color: 'var(--color-danger)',
                 fontSize: '0.72rem',
@@ -292,7 +292,7 @@ export default function LogPanel({ featureName, onClose }) {
               role="status"
               aria-live="polite"
               style={{
-                padding: '0.4rem 0.75rem',
+                padding: 'var(--space-15) var(--space-3)',
                 color: 'var(--color-muted)',
                 fontSize: '0.72rem',
                 flexShrink: 0,
@@ -307,14 +307,14 @@ export default function LogPanel({ featureName, onClose }) {
             overscrollBehavior: 'contain',
             background: '#050505',
             border: '1px solid #1a1a1a',
-            margin: '0.5rem 0.75rem 0',
+            margin: 'var(--space-2) var(--space-3) 0',
           }}>
             {source === 'all'
               ? <AllSourcesView sources={allSources} loading={loading} />
               : (
                 <pre style={{
                   margin: 0,
-                  padding: '0.5rem 0.75rem',
+                  padding: 'var(--space-2) var(--space-3)',
                   fontSize: '0.72rem',
                   lineHeight: 1.5,
                   color: '#ccc',
@@ -331,7 +331,7 @@ export default function LogPanel({ featureName, onClose }) {
 
         {/* Footer */}
         <div style={{
-          padding: '0.4rem 0.75rem',
+          padding: 'var(--space-15) var(--space-3)',
           borderTop: '1px solid #222',
           display: 'flex',
           alignItems: 'center',
@@ -369,7 +369,7 @@ function AllSourcesView({ sources, loading }) {
     return (
       <pre style={{
         margin: 0,
-        padding: '0.5rem 0.75rem',
+        padding: 'var(--space-2) var(--space-3)',
         fontSize: '0.72rem',
         lineHeight: 1.5,
         color: 'var(--color-muted)',
@@ -381,19 +381,19 @@ function AllSourcesView({ sources, loading }) {
   }
 
   return (
-    <div style={{ padding: '0.5rem 0.75rem' }}>
+    <div style={{ padding: 'var(--space-2) var(--space-3)' }}>
       {names.map(name => {
         const text = sources[name];
         if (!text) return null;
         const color = SOURCE_COLOR[name];
         return (
-          <div key={name} style={{ marginBottom: '0.75rem' }}>
+          <div key={name} style={{ marginBottom: 'var(--space-3)' }}>
             <div style={{
               fontSize: '0.72rem',
               lineHeight: 1.5,
               color,
               fontFamily: 'var(--font-mono)',
-              marginBottom: '0.15rem',
+              marginBottom: '0.15rem', /* off-scale: 0.15rem source-header micro-gap */
               userSelect: 'none',
             }}>
               {'// ' + name}

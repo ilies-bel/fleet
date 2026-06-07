@@ -17,7 +17,7 @@ function NavBar({ onDrawerToggle, isNarrow }) {
     fontFamily: 'var(--font-mono)',
     fontSize: '0.72rem',
     letterSpacing: '0.06em',
-    padding: '0 1rem',
+    padding: '0 var(--space-4)',
     height: '100%',
     display: 'flex',
     alignItems: 'center',
@@ -45,7 +45,7 @@ function NavBar({ onDrawerToggle, isNarrow }) {
             border: 'none',
             borderRight: '1px solid #222',
             cursor: 'pointer',
-            padding: '0 0.75rem',
+            padding: '0 var(--space-3)',
             color: 'var(--color-muted)',
             fontFamily: 'var(--font-mono)',
             fontSize: '1.1rem',
@@ -217,8 +217,8 @@ function OperationsPage() {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{
         display: 'flex',
-        gap: '0.4rem',
-        padding: '0.4rem 1rem',
+        gap: 'var(--space-15)',
+        padding: 'var(--space-15) var(--space-4)',
         borderBottom: '1px solid #222',
         background: '#000',
         flexShrink: 0,
@@ -236,7 +236,7 @@ function OperationsPage() {
               fontFamily: 'var(--font-mono)',
               fontSize: '0.65rem',
               letterSpacing: '0.06em',
-              padding: '0.2rem 0.75rem',
+              padding: 'var(--space-05) var(--space-3)',
               borderRadius: '3px',
               cursor: 'pointer',
             }}

@@ -59,16 +59,16 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
       data-testid="review-capture-layer"
       style={{
         position: 'absolute',
-        bottom: '1.25rem',
+        bottom: '1.25rem', /* off-scale: 1.25rem positioning offset has no exact token */
         left: '50%',
         transform: 'translateX(-50%)',
         background: '#111',
         border: '1px solid #444',
         borderRadius: '3px',
-        padding: '0.5rem 0.75rem',
+        padding: 'var(--space-2) var(--space-3)',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.35rem',
+        gap: '0.35rem', /* off-scale: 0.35rem gap has no exact token */
         zIndex: 10,
         minWidth: '320px',
         maxWidth: '600px',
@@ -103,7 +103,7 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
           color: '#ccc',
           fontFamily: 'var(--font-mono)',
           fontSize: '0.8rem',
-          padding: '0.3rem 0.5rem',
+          padding: '0.3rem var(--space-2)', /* off-scale: 0.3rem vertical has no exact token */
           outline: 'none',
           borderRadius: 0,
           width: '100%',

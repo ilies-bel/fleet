@@ -103,7 +103,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
       transition: 'width 200ms ease',
     }}>
       <div style={{
-        padding: '0.6rem 0.5rem',
+        padding: 'var(--space-2)',
         borderBottom: '1px solid #222',
         fontFamily: 'var(--font-mono)',
         fontSize: '0.65rem',
@@ -149,11 +149,11 @@ export default function FeatureList({ features, activePreview, startingFeatures,
       {!collapsed && (
         <>
           <div style={{
-            padding: '0.4rem 0.5rem',
+            padding: 'var(--space-15) var(--space-2)',
             borderBottom: '1px solid #1a1a1a',
             display: 'flex',
             flexDirection: 'column',
-            gap: '0.35rem',
+            gap: '0.35rem', /* off-scale: 0.35rem micro-gap has no exact token */
             flexShrink: 0,
           }}>
             <input
@@ -168,14 +168,14 @@ export default function FeatureList({ features, activePreview, startingFeatures,
                 color: '#ccc',
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.65rem',
-                padding: '0.25rem 0.4rem',
+                padding: 'var(--space-1) var(--space-15)',
                 borderRadius: '2px',
                 outline: 'none',
                 width: '100%',
                 boxSizing: 'border-box',
               }}
             />
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.2rem' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-05)' }}>
               {STATUS_CHIPS.map(({ key, label }) => {
                 const active = activeStatuses.has(key);
                 return (
@@ -205,7 +205,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {features.length === 0 && (
               <div style={{
-                padding: '1rem 0.75rem',
+                padding: 'var(--space-4) var(--space-3)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.75rem',
                 color: '#333',
@@ -216,7 +216,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
 
             {features.length > 0 && filteredFeatures.length === 0 && (
               <div style={{
-                padding: '1rem 0.75rem',
+                padding: 'var(--space-4) var(--space-3)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.75rem',
                 color: '#333',
@@ -227,10 +227,14 @@ export default function FeatureList({ features, activePreview, startingFeatures,
 
             {filteredFeatures.length > 0 && (
               isMultiProject ? (
-                groups.map(([proj, groupFeatures]) => (
+                groups.map(([proj, groupFeatures], idx) => (
                   <div key={proj || '__ungrouped__'}>
                     <div style={{
-                      padding: '0.5rem 0.75rem 0.3rem',
+                      /* E-item rhythm: generous separation between groups; first group stays tight against search bar */
+                      paddingTop: idx === 0 ? 'var(--space-2)' : 'var(--space-4)',
+                      paddingRight: 'var(--space-3)',
+                      paddingBottom: 'var(--space-1)',
+                      paddingLeft: 'var(--space-3)',
                       fontFamily: 'var(--font-mono)',
                       fontSize: '0.6rem',
                       color: '#555',

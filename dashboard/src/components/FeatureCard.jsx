@@ -162,7 +162,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   return (
     <div
       style={{
-        padding: '0.75rem',
+        padding: 'var(--space-3)',
         background: isActive || isPreview ? '#161616' : 'transparent',
         borderLeft: isActive ? '3px solid var(--color-accent)' : '3px solid transparent',
         borderBottom: '1px solid #222',
@@ -176,8 +176,8 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '0.25rem',
-        marginBottom: collapsed ? 0 : '0.2rem',
+        gap: 'var(--space-1)',
+        marginBottom: collapsed ? 0 : 'var(--space-1)',
       }}>
         {/* Collapse/expand button — narrowed to chevron+dot only so the title
             can be a separate click/dblclick target without triggering collapse. */}
@@ -188,7 +188,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '0.4rem',
+            gap: 'var(--space-15)',
             background: 'none',
             border: 'none',
             cursor: 'pointer',
@@ -275,7 +275,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             color: 'var(--color-muted)',
             fontFamily: 'var(--font-mono)',
             fontSize: '0.68rem',
-            marginBottom: '0.5rem',
+            marginBottom: 'var(--space-1)', /* tight identity cluster: branch→status */
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -283,7 +283,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             {branch}
           </div>
 
-          <div style={{ marginBottom: '0.5rem' }}>
+          <div style={{ marginBottom: 'var(--space-2)' }}> {/* tight identity cluster: status→controls */}
             <span style={{
               color: presentation.dotColor,
               fontFamily: 'var(--font-mono)',
@@ -300,7 +300,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
                   color: '#ff4444',
                   fontFamily: 'var(--font-mono)',
                   fontSize: '0.65rem',
-                  marginTop: '0.3rem',
+                  marginTop: '0.3rem', /* off-scale: 0.3rem has no exact token */
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                 }}
@@ -317,12 +317,12 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.65rem',
                 color: '#555',
-                marginTop: '0.25rem',
+                marginTop: 'var(--space-1)',
               }}>
                 Start: <span style={{ color: '#888' }}>fleet add {name} {branch}</span>
               </div>
             ) : (
-              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-15)', flexWrap: 'wrap' }}>
                 {health !== 'down' && (
                   <Button
                     tone="primary"
@@ -391,7 +391,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
                 color: 'var(--color-danger)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.65rem',
-                marginTop: '0.4rem',
+                marginTop: 'var(--space-15)',
               }}
             >
               {actionError}

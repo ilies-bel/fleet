@@ -8,6 +8,16 @@
   --color-warning: #ffaa00;
   --color-muted: #b8b8b8;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* ── 4pt-base spacing scale ────────────────────────────────────────────── */
+  --space-05: 0.2rem;   /* 3.2px  — chip/badge micro-gaps                   */
+  --space-1:  0.25rem;  /* 4px                                               */
+  --space-15: 0.4rem;   /* 6.4px  — toolbar/button gaps                     */
+  --space-2:  0.5rem;   /* 8px                                               */
+  --space-3:  0.75rem;  /* 12px                                              */
+  --space-4:  1rem;     /* 16px                                              */
+  --space-6:  1.5rem;   /* 24px                                              */
+  --space-8:  2rem;     /* 32px                                              */
 }
 
 *, *::before, *::after {
