@@ -102,7 +102,6 @@ export default function ReviewCaptureLayer({ activeWorktree, addNote }) {
           fontFamily: 'var(--font-mono)',
           fontSize: '0.8rem',
           padding: '0.3rem var(--space-2)', /* off-scale: 0.3rem vertical has no exact token */
-          outline: 'none',
           width: '100%',
           boxSizing: 'border-box',
         }}

@@ -31,6 +31,14 @@
 
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 
+  /* ── Interaction-state tokens ─────────────────────────────────────────── */
+  /* Functional aliases / alpha variants of accent, ink, and surface.        */
+  /* No new hues — these derive entirely from the palette above.             */
+  --focus-ring: var(--color-accent);            /* 1px keyboard-focus outline */
+  --surface-hover: var(--color-surface-raised); /* row / card hover fill      */
+  --surface-selected: var(--color-surface-raised); /* selected / active fill  */
+  --state-disabled-opacity: 0.5;               /* disabled-control opacity    */
+
   /* ── 4pt-base spacing scale ────────────────────────────────────────────── */
   --space-05: 0.2rem;   /* 3.2px  — chip/badge micro-gaps                   */
   --space-1:  0.25rem;  /* 4px                                               */
@@ -45,6 +53,16 @@
 *, *::before, *::after {
   box-sizing: border-box;
   border-radius: 0 !important;
+}
+
+/* ── Global keyboard-focus ring ───────────────────────────────────────────── */
+/* Every interactive element gets a visible 1px phosphor-green outline when   */
+/* reached via keyboard navigation.  Never suppress :focus-visible globally.  */
+/* Per-component rules may add outline-offset or override colour, but must     */
+/* never set outline:none on a :focus-visible selector.                        */
+:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 html, body, #root {
@@ -212,7 +230,7 @@ input {
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: var(--state-disabled-opacity);
   cursor: not-allowed;
 }
 
@@ -220,16 +238,19 @@ input {
 .btn-primary           { color: var(--color-accent); }
 .btn-primary:hover:not(:disabled),
 .btn-primary:focus:not(:disabled) { background: var(--color-accent); color: var(--color-bg-black); outline: none; }
+.btn-primary:focus-visible:not(:disabled) { outline: 1px solid var(--focus-ring); outline-offset: 2px; }
 
 /* caution — amber, use-with-care */
 .btn-caution           { color: var(--color-caution); }
 .btn-caution:hover:not(:disabled),
 .btn-caution:focus:not(:disabled) { background: var(--color-caution); color: var(--color-bg-black); outline: none; }
+.btn-caution:focus-visible:not(:disabled) { outline: 1px solid var(--focus-ring); outline-offset: 2px; }
 
 /* destructive — red, permanent / irreversible */
 .btn-destructive           { color: var(--color-danger); }
 .btn-destructive:hover:not(:disabled),
 .btn-destructive:focus:not(:disabled) { background: var(--color-danger); color: var(--color-bg-black); outline: none; }
+.btn-destructive:focus-visible:not(:disabled) { outline: 1px solid var(--focus-ring); outline-offset: 2px; }
 
 /* ── Empty-state copy button ───────────────────────────────────────────────── */
 /* Mirrors the button-tone grammar: outline at rest, accent fill floods on
@@ -238,7 +259,7 @@ input {
 .empty-state-copy:focus-visible {
   background: var(--color-accent) !important;
   color: var(--color-bg-black) !important;
-  outline: none;
+  /* outline intentionally absent — global :focus-visible rule supplies the ring */
 }
 
 /* ── Feature-card config-menu trigger (⋯) ──────────────────────────────────── */
@@ -247,13 +268,13 @@ input {
 .card-config-trigger {
   background: transparent;
   border: none;
-  color: #888;
+  color: var(--color-ink-dim);
   cursor: pointer;
   padding: 2px 7px;
   line-height: 1;
   font-family: inherit;
   font-size: 0.68rem;
 }
-.card-config-trigger:hover { color: #eee; }
-.card-config-trigger:focus { color: #eee; outline: none; }
-.card-config-trigger:focus-visible { color: #eee; outline: 1px solid var(--color-accent); }
+.card-config-trigger:hover                { color: var(--color-ink); }
+.card-config-trigger:focus                { color: var(--color-ink); outline: none; }
+.card-config-trigger:focus-visible        { color: var(--color-ink); outline: 1px solid var(--focus-ring); }

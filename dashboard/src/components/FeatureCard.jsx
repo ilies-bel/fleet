@@ -167,13 +167,13 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     <div
       style={{
         padding: 'var(--space-3)',
-        background: isActive || isPreview ? 'var(--color-surface-raised)' : 'transparent',
+        background: isActive || isPreview ? 'var(--surface-selected)' : 'transparent',
         borderLeft: isActive ? '3px solid var(--color-accent)' : '3px solid transparent',
         borderBottom: '1px solid var(--color-border)',
         transition: 'background 0.1s',
         opacity: presentation.dimmed ? 0.7 : 1,
       }}
-      onMouseEnter={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'var(--color-surface-raised)'; }}
+      onMouseEnter={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'var(--surface-hover)'; }}
       onMouseLeave={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'transparent'; }}
     >
       {/* Header row: collapse/expand toggle + title (editable) + config menu trigger */}
@@ -237,7 +237,6 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
               background: 'transparent',
               border: 'none',
               borderBottom: '1px solid var(--color-accent)',
-              outline: 'none',
               padding: 0,
             }}
           />

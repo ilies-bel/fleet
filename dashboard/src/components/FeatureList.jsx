@@ -146,7 +146,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
             height: '20px',
             transition: 'color 0.1s, background 0.1s',
           }}
-          onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'var(--color-surface-raised)'; }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'var(--surface-hover)'; }}
           onMouseLeave={e => { e.currentTarget.style.color = ''; e.currentTarget.style.background = ''; }}
         >
           {collapsed ? '›' : '‹'}
@@ -176,7 +176,6 @@ export default function FeatureList({ features, activePreview, startingFeatures,
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.65rem',
                 padding: 'var(--space-1) var(--space-15)',
-                outline: 'none',
                 width: '100%',
                 boxSizing: 'border-box',
               }}
