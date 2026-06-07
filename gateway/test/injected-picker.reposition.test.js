@@ -76,7 +76,7 @@ describe('INJECTED_PICKER — tint reposition on scroll and resize', () => {
     const button = document.getElementById('btn');
     button.getBoundingClientRect = () => ({ left: 10, top: 100, width: 80, height: 40 });
 
-    activate(true, [{ id: 'n1', route: '/', selector: '#btn' }]);
+    activate(true, [{ id: 'n1', route: '/', selectors: ['#btn'] }]);
 
     const tintDiv = getShadow().querySelector(TINT_SELECTOR);
     assert.ok(tintDiv, 'tint div must exist after activation');
@@ -106,7 +106,7 @@ describe('INJECTED_PICKER — tint reposition on scroll and resize', () => {
     const section = document.getElementById('hero');
     section.getBoundingClientRect = () => ({ left: 0, top: 50, width: 300, height: 200 });
 
-    activate(true, [{ id: 'n1', route: '/home', selector: '#hero' }]);
+    activate(true, [{ id: 'n1', route: '/home', selectors: ['#hero'] }]);
 
     // After resize the element reflows: wider, shifted down
     section.getBoundingClientRect = () => ({ left: 0, top: 80, width: 600, height: 200 });
@@ -132,7 +132,7 @@ describe('INJECTED_PICKER — tint reposition on scroll and resize', () => {
     // Initially below the fold
     footer.getBoundingClientRect = () => ({ left: 0, top: 2000, width: 300, height: 50 });
 
-    activate(true, [{ id: 'n1', route: '/', selector: '#footer' }]);
+    activate(true, [{ id: 'n1', route: '/', selectors: ['#footer'] }]);
 
     // Operator scrolls down — footer enters the viewport
     footer.getBoundingClientRect = () => ({ left: 0, top: 500, width: 300, height: 50 });
@@ -157,9 +157,9 @@ describe('INJECTED_PICKER — tint reposition on scroll and resize', () => {
     button.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 30 });
 
     // Cycle: activate → deactivate → activate again
-    activate(true, [{ id: 'n1', route: '/', selector: '#btn' }]);
+    activate(true, [{ id: 'n1', route: '/', selectors: ['#btn'] }]);
     activate(false);
-    activate(true, [{ id: 'n1', route: '/', selector: '#btn' }]);
+    activate(true, [{ id: 'n1', route: '/', selectors: ['#btn'] }]);
 
     // Count getBoundingClientRect calls triggered only by the scroll event
     let callCount = 0;
@@ -185,7 +185,7 @@ describe('INJECTED_PICKER — tint reposition on scroll and resize', () => {
       { pathname: '/' },
     );
 
-    activate(true, [{ id: 'n1', route: '/', selector: '#btn' }]);
+    activate(true, [{ id: 'n1', route: '/', selectors: ['#btn'] }]);
 
     assert.doesNotThrow(() => {
       activate(false);
@@ -204,7 +204,7 @@ describe('INJECTED_PICKER — tint reposition on scroll and resize', () => {
     const button = document.getElementById('btn');
     button.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 30 });
 
-    activate(true, [{ id: 'n1', route: '/', selector: '#btn' }]);
+    activate(true, [{ id: 'n1', route: '/', selectors: ['#btn'] }]);
     activate(false);
 
     // Replace mock AFTER deactivation to detect any post-deactivation calls
@@ -241,8 +241,8 @@ describe('INJECTED_PICKER — tint reposition on scroll and resize', () => {
     p.getBoundingClientRect  = () => ({ left: 0, top: 100, width: 400, height: 60 });
 
     activate(true, [
-      { id: 'n1', route: '/article', selector: '#title' },
-      { id: 'n2', route: '/article', selector: '#para'  },
+      { id: 'n1', route: '/article', selectors: ['#title'] },
+      { id: 'n2', route: '/article', selectors: ['#para']  },
     ]);
 
     // Both elements move after scroll
