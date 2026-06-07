@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
-import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
+import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, updateTitle, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog } from './registry.js';
 import { dockerExec, dockerExecStream, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
@@ -696,6 +696,36 @@ router.patch('/features/:key/status', (req, res) => {
   try {
     updateStatus(key, status, error);
     res.json({ ok: true, key, status });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * PATCH /_fleet/api/features/:key/config
+ * Update mutable configuration fields for a registered feature.
+ *
+ * Body: { title: string|null }
+ *   - title: human-readable display name shown in the dashboard.
+ *     Pass null to clear a user-set title (displayName falls back to name).
+ *     The title is persisted to disk (FLEET_TITLES_FILE) and survives a
+ *     gateway restart; re-registration with title=null will not clobber it.
+ */
+router.patch('/features/:key/config', (req, res) => {
+  const { key } = req.params;
+  const { title } = req.body;
+  if (!getFeature(key)) {
+    return res.status(404).json({ error: 'Feature not registered' });
+  }
+  if (title === undefined) {
+    return res.status(400).json({ error: 'title field required' });
+  }
+  if (title !== null && typeof title !== 'string') {
+    return res.status(400).json({ error: 'title must be a string or null' });
+  }
+  try {
+    updateTitle(key, title);
+    res.json({ ok: true, key, title });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

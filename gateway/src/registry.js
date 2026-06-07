@@ -14,6 +14,56 @@ function stateFilePath() {
 }
 
 /**
+ * Return the path to the feature-titles store file.
+ * Overridable via FLEET_TITLES_FILE for tests (mirrors FLEET_STATE_FILE).
+ * @returns {string}
+ */
+function titlesFilePath() {
+  return process.env.FLEET_TITLES_FILE ?? '/var/lib/fleet/titles.json';
+}
+
+/**
+ * In-memory map of user-set titles, loaded from disk at module init and kept
+ * in sync with every updateTitle() call.  Only keys with non-null titles are
+ * stored here.  A missing key means "no user rename — fall back to the
+ * registration-supplied title (or name)."
+ *
+ * Persistence behaviour: titles are written to disk atomically on every
+ * updateTitle() call so they survive a gateway restart.  register() checks
+ * this map and will NOT clobber a user-set title when re-registering the same
+ * key with title=null (the common case for `fleet add` re-runs).
+ *
+ * @type {Record<string, string>}
+ */
+const persistedTitles = (() => {
+  try {
+    const raw = readFileSync(titlesFilePath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch {
+    // File absent or corrupt — start empty; will be created on first rename.
+  }
+  return {};
+})();
+
+/**
+ * Atomically write the current persistedTitles map to disk.
+ * Silently swallows errors — persistence is best-effort; the gateway must
+ * never crash because state could not be written.
+ */
+function persistTitles() {
+  try {
+    const file = titlesFilePath();
+    mkdirSync(dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, JSON.stringify(persistedTitles), 'utf8');
+    renameSync(tmp, file);
+  } catch {
+    // Best-effort — never throw from persistence layer.
+  }
+}
+
+/**
  * Write the active feature key to disk atomically (tmp + rename).
  * Silently swallows errors — persistence is best-effort; the gateway must
  * never crash because state could not be written (e.g. read-only mount).
@@ -227,7 +277,13 @@ export function register(project, name, branch, worktreePath = null, status = 'u
     }
   }
 
-  features.set(key, { project, name, key, branch, worktreePath, gitDir, gitCommonDir, title, host, addedAt: new Date(), status: normalised, error, services });
+  // When re-registering an existing key with title=null (the common case for
+  // `fleet add` re-runs), preserve any user-set title from the titles store so
+  // a dashboard rename is not clobbered.  A non-null title from the caller
+  // (explicit registration title) always wins and also updates the store.
+  const effectiveTitle = title ?? persistedTitles[key] ?? null;
+  if (title !== null) persistedTitles[key] = title;
+  features.set(key, { project, name, key, branch, worktreePath, gitDir, gitCommonDir, title: effectiveTitle, host, addedAt: new Date(), status: normalised, error, services });
   if (activeFeature === null && normalised === 'up') {
     activeFeature = key;
     persistActive(key);
@@ -278,6 +334,33 @@ export function updateStatus(key, status, error) {
   } else if (normalised === 'up' || normalised === 'failed') {
     clearBuildLog(key, 60000);
   }
+}
+
+/**
+ * Update the display title of a registered feature.
+ * Uses the same immutable-spread pattern as updateStatus.
+ *
+ * Persistence: the title is written to the titles store file
+ * (FLEET_TITLES_FILE / /var/lib/fleet/titles.json) so it survives a gateway
+ * restart.  On re-registration, register() reads this store and preserves the
+ * user-set title when the caller passes title=null (the typical `fleet add` case).
+ *
+ * @param {string} key    composite key `${project}-${name}`
+ * @param {string|null} title
+ */
+export function updateTitle(key, title) {
+  const entry = features.get(key);
+  if (!entry) throw new Error(`Feature '${key}' is not registered`);
+  // Immutable-spread update (mirrors updateStatus pattern).
+  const next = { ...entry, title };
+  features.set(key, next);
+  // Keep the on-disk titles store in sync.
+  if (title !== null) {
+    persistedTitles[key] = title;
+  } else {
+    delete persistedTitles[key];
+  }
+  persistTitles();
 }
 
 /**
@@ -490,4 +573,14 @@ export function commitProbedStatus(key, probed) {
 export function _clearPendingFlips(key) {
   if (key === undefined) pendingFlips.clear();
   else pendingFlips.delete(key);
+}
+
+/**
+ * Test-only: reset the in-memory persistedTitles store.
+ * Production code never calls this — the store is only mutated via updateTitle().
+ */
+export function _clearPersistedTitles() {
+  for (const k of Object.keys(persistedTitles)) {
+    delete persistedTitles[k];
+  }
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { getHealth, removeFeature, stopFeature, startFeature, syncFeature } from '../api.js';
+import { getHealth, removeFeature, stopFeature, startFeature, syncFeature, renameFeature } from '../api.js';
 import { describeFeature } from './featurePresentation.js';
 import { Button } from './Button.jsx';
 import FeatureConfigModal from './FeatureConfigModal.jsx';
@@ -17,6 +17,14 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   const [actionError, setActionError] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  // Optimistic title override — null means "use feature.title from props"
+  const [titleOverride, setTitleOverride] = useState(null);
+  const editInputRef = useRef(null);
+  // Tracks whether the current edit was cancelled (Escape) so the blur handler
+  // skips submission when the input is removed from the DOM.
+  const editCancelledRef = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -99,9 +107,54 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     }
   }
 
+  // Auto-focus and select-all when the inline edit input appears.
+  useEffect(() => {
+    if (editing && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editing]);
+
+  function handleTitleDoubleClick(e) {
+    e.stopPropagation();
+    const currentDisplay = (titleOverride !== null ? titleOverride : title) || name;
+    setEditValue(currentDisplay);
+    setEditing(true);
+  }
+
+  function handleRenameKeyDown(e) {
+    if (e.key === 'Enter') {
+      // Let blur handle submission so there is a single submit path.
+      editInputRef.current.blur();
+    } else if (e.key === 'Escape') {
+      editCancelledRef.current = true;
+      setEditing(false);
+    }
+  }
+
+  function handleRenameBlur() {
+    if (editCancelledRef.current) {
+      editCancelledRef.current = false;
+      return;
+    }
+    const trimmed = editValue.trim();
+    const currentDisplay = (titleOverride !== null ? titleOverride : title) || name;
+    if (!trimmed || trimmed === currentDisplay) {
+      setEditing(false);
+      return;
+    }
+    const prevOverride = titleOverride;
+    setTitleOverride(trimmed);
+    setEditing(false);
+    renameFeature(key, trimmed).catch(err => {
+      setTitleOverride(prevOverride);
+      setActionError(err.message);
+    });
+  }
+
   const isNotStarted = feature.status === 'not_started';
   const presentation = describeFeature(feature, health, isStarting);
-  const displayName = title || name;
+  const displayName = (titleOverride !== null ? titleOverride : title) || name;
 
   /* Small sizing shared by all action buttons in this card */
   const cardBtnStyle = { fontSize: '0.68rem', padding: '2px 7px' };
@@ -119,13 +172,15 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       onMouseEnter={e => { if (!isActive && !isPreview) e.currentTarget.style.background = '#161616'; }}
       onMouseLeave={e => { if (!isActive && !isPreview) e.currentTarget.style.background = 'transparent'; }}
     >
-      {/* Header row: collapse/expand toggle + config menu trigger */}
+      {/* Header row: collapse/expand toggle + title (editable) + config menu trigger */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
         gap: '0.25rem',
         marginBottom: collapsed ? 0 : '0.2rem',
       }}>
+        {/* Collapse/expand button — narrowed to chevron+dot only so the title
+            can be a separate click/dblclick target without triggering collapse. */}
         <button
           onClick={() => setCollapsed(prev => !prev)}
           aria-expanded={!collapsed}
@@ -138,10 +193,8 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             border: 'none',
             cursor: 'pointer',
             padding: 0,
-            flex: 1,
-            textAlign: 'left',
+            flexShrink: 0,
             fontFamily: 'var(--font-mono)',
-            minWidth: 0,
           }}
         >
           <span style={{ color: '#555', fontSize: '0.75rem', flexShrink: 0, lineHeight: 1 }}>
@@ -159,20 +212,52 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
               {'●'}
             </span>
           )}
-          <span style={{
-            color: isActive ? 'var(--color-accent)' : '#eee',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.9rem',
-            fontWeight: 700,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            minWidth: 0,
-          }}>
+        </button>
+
+        {/* Title — double-click to rename inline */}
+        {editing ? (
+          <input
+            ref={editInputRef}
+            value={editValue}
+            onChange={e => setEditValue(e.target.value)}
+            onKeyDown={handleRenameKeyDown}
+            onBlur={handleRenameBlur}
+            aria-label="Rename feature"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              color: isActive ? 'var(--color-accent)' : '#eee',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.9rem',
+              fontWeight: 700,
+              background: 'transparent',
+              border: 'none',
+              borderBottom: '1px solid var(--color-accent)',
+              outline: 'none',
+              padding: 0,
+            }}
+          />
+        ) : (
+          <span
+            onDoubleClick={handleTitleDoubleClick}
+            title="Double-click to rename"
+            style={{
+              flex: 1,
+              color: isActive ? 'var(--color-accent)' : '#eee',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.9rem',
+              fontWeight: 700,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              minWidth: 0,
+              cursor: 'text',
+            }}
+          >
             {displayName}
           </span>
+        )}
 
-        </button>
         <button
           ref={configTriggerRef}
           aria-label={`Open ${displayName} configuration`}

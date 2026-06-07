@@ -150,3 +150,18 @@ export function fetchFailureClusters({ sinceHours = 24 } = {}) {
 export function getDiff(key) {
   return request(`/_fleet/api/features/${key}/diff`);
 }
+
+/**
+ * Rename a feature's display title.
+ * The new title is persisted to the gateway's title store and survives restarts.
+ * @param {string} key    Composite key: "<project>-<name>"
+ * @param {string|null} title  New display title, or null to clear
+ * @returns {Promise<{ ok: boolean, key: string, title: string|null }>}
+ */
+export function renameFeature(key, title) {
+  return request(`/_fleet/api/features/${key}/config`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+}

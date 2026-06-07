@@ -15,7 +15,7 @@ import cors from 'cors';
 
 import authRouter from './auth.js';
 import apiRouter from './api.js';
-import { getAll, unregister } from './registry.js';
+import { getAll, unregister, _clearPersistedTitles } from './registry.js';
 
 // ── App factory ──────────────────────────────────────────────────────────────
 
@@ -79,6 +79,7 @@ describe('POST /register-feature — composite key contract', () => {
     for (const f of getAll()) {
       unregister(f.key);
     }
+    _clearPersistedTitles();
 
     if (server) {
       server.close(() => {
@@ -578,6 +579,116 @@ describe('POST /register-feature — composite key contract', () => {
       body: { status: 'failed', error: 42 },
     });
     assert.equal(res.status, 400);
+  });
+
+  // ── PATCH /_fleet/api/features/:key/config contract ──────────────────────
+
+  test('PATCH /config renames a feature title and reflects in GET /features', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { project: 'myproj', name: 'renameable', branch: 'main' },
+    });
+
+    const res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/myproj-renameable/config',
+      body: { title: 'My New Title' },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.key, 'myproj-renameable');
+    assert.equal(res.body.title, 'My New Title');
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.key === 'myproj-renameable');
+    assert.equal(feature.title, 'My New Title');
+  });
+
+  test('PATCH /config with title=null clears the title', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { project: 'myproj', name: 'clearable', branch: 'main', title: 'Original' },
+    });
+
+    const res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/myproj-clearable/config',
+      body: { title: null },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.title, null);
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.key === 'myproj-clearable');
+    assert.equal(feature.title, null);
+  });
+
+  test('PATCH /config returns 404 for unregistered feature', async () => {
+    const res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/no-such-feature/config',
+      body: { title: 'Phantom' },
+    });
+    assert.equal(res.status, 404);
+    assert.ok(res.body.error, 'should return error message');
+  });
+
+  test('PATCH /config returns 400 when title field is missing', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { project: 'myproj', name: 'no-title-field', branch: 'main' },
+    });
+
+    const res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/myproj-no-title-field/config',
+      body: {},
+    });
+    assert.equal(res.status, 400);
+  });
+
+  test('PATCH /config returns 400 when title is not a string or null', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { project: 'myproj', name: 'bad-title-type', branch: 'main' },
+    });
+
+    const res = await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/myproj-bad-title-type/config',
+      body: { title: 42 },
+    });
+    assert.equal(res.status, 400);
+  });
+
+  test('re-registration with null title preserves a user-set title', async () => {
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { project: 'myproj', name: 'persistent', branch: 'main' },
+    });
+
+    // Rename via PATCH /config
+    await request(server, {
+      method: 'PATCH',
+      path: '/_fleet/api/features/myproj-persistent/config',
+      body: { title: 'Renamed Title' },
+    });
+
+    // Re-register the same feature with no title (as `fleet add` would do)
+    await request(server, {
+      method: 'POST',
+      path: '/register-feature',
+      body: { project: 'myproj', name: 'persistent', branch: 'main' },
+    });
+
+    const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
+    const feature = list.body.find((f) => f.key === 'myproj-persistent');
+    assert.equal(feature.title, 'Renamed Title', 're-registration must not clobber a user-set title');
   });
 
 });
