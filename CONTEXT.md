@@ -32,3 +32,7 @@ _Avoid_: picker mode, inspect mode
 **feature diff**:
 The set of changes in a feature's branch relative to main (git diff main...HEAD), computed read-only against the feature's own git metadata and shown in the dashboard DIFF tab.
 _Avoid_: patch, changeset
+
+**feature backend**:
+The substrate that builds, runs, and inspects a feature's instance — local Docker today, with cluster as a second variant; the gateway selects one per feature and never calls substrate tools (docker/oc) directly outside this seam.
+_Avoid_: provider, driver
