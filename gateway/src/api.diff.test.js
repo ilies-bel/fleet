@@ -120,6 +120,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
   it('returns { status: "ok", patch, isEmpty: false } when git diff produces output', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
+      gitDir: '/tmp/worktrees/app-feat/.git',
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
@@ -140,6 +141,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
   it('returns { status: "no-changes", patch: "", isEmpty: true, truncated: false, originalBytes: 0 } when there are no changes', async () => {
     getFeature.mockReturnValue({
       key: 'app-clean',
+      gitDir: '/tmp/worktrees/app-clean/.git',
       worktreePath: '/tmp/worktrees/app-clean',
       branch: 'clean',
     });
@@ -153,7 +155,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
 
   it('execs git inside the feature container derived from the feature key', async () => {
     const worktreePath = '/opt/worktrees/app-feat';
-    getFeature.mockReturnValue({ key: 'app-feat', worktreePath, branch: 'feat' });
+    getFeature.mockReturnValue({ key: 'app-feat', gitDir: `${worktreePath}/.git`, worktreePath, branch: 'feat' });
 
     const capturedContainers = [];
     _setContainerGitStreamImpl((name) => {
@@ -170,6 +172,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
   it('returns 422 when the feature has no worktreePath', async () => {
     getFeature.mockReturnValue({
       key: 'app-cluster',
+      gitDir: '/repo/.git',
       worktreePath: null,
       branch: 'cluster-branch',
     });
@@ -181,9 +184,36 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body.error).toMatch(/worktree/i);
   });
 
+  it('returns 200 unavailable without executing docker for a cluster-hosted feature with no gitDir', async () => {
+    getFeature.mockReturnValue({
+      key: 'app-cluster',
+      // no gitDir — cluster-hosted feature, no local worktree on this host
+      host: 'k8s.example.internal',
+      branch: 'feat/cluster-branch',
+    });
+
+    let execCalled = false;
+    _setContainerGitStreamImpl(() => { execCalled = true; return makeGitResult(''); });
+
+    const res = await fetch(`${baseUrl}/features/app-cluster/diff`);
+
+    expect(execCalled).toBe(false);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({
+      status: 'unavailable',
+      reason: 'no local worktree',
+      patch: '',
+      isEmpty: true,
+      truncated: false,
+      originalBytes: 0,
+    });
+  });
+
   it('returns 200 { status: "unavailable" } when git exits non-zero (worktree gone / not a repo)', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
+      gitDir: '/tmp/worktrees/app-feat/.git',
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
@@ -205,6 +235,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
   it('returns 200 { status: "unavailable" } when the container exec itself fails (container not running)', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
+      gitDir: '/tmp/worktrees/app-feat/.git',
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
