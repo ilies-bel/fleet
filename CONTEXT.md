@@ -36,3 +36,7 @@ _Avoid_: patch, changeset
 **feature backend**:
 The substrate that builds, runs, and inspects a feature's instance — local Docker today, with cluster as a second variant; the gateway selects one per feature and never calls substrate tools (docker/oc) directly outside this seam.
 _Avoid_: provider, driver
+
+**railpack build plan**:
+A per-subproject build recipe JSON (railpack-plan.json) produced by railpack at project init; docker buildx consumes it via the BUILDKIT_SYNTAX frontend arg to build the instance image, reusing the existing Docker build engine with no Dockerfile and no separate BuildKit daemon. Supersedes the hand-assembled fragment Dockerfile system.
+_Avoid_: generated dockerfile, fragment dockerfile
