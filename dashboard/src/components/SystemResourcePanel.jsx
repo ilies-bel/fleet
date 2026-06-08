@@ -66,7 +66,7 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
 
       {/* Instance counts roll-up — 'failed' counts status === 'error' (ResourceMonitor maps fetch errors to status:'error'; no lifecycle.failed field exists yet) */}
       {instanceCounts && (
-        <div className="instance-counts" style={{ display: 'flex', gap: 'var(--space-6)', marginBottom: 'var(--space-3)' }}>
+        <div className="instance-counts" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-6)', rowGap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
           <span className="count-total" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)' }}>
             TOTAL {instanceCounts.total}
           </span>
@@ -83,7 +83,7 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
       )}
 
       {/* CPU row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
           CPU{host.status === 'ok' ? ` (${host.cpuCores} cores)` : ''}
         </span>
@@ -109,7 +109,7 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
       </div>
 
       {/* Memory row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
           MEM
         </span>
@@ -136,7 +136,7 @@ export default function SystemResourcePanel({ fleetNetRxMB, fleetNetTxMB, instan
 
       {/* Instance counts — always rendered when provided */}
       {instanceCounts != null && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--color-muted)', minWidth: '90px' }}>
             INSTANCES
           </span>
