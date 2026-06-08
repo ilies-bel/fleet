@@ -2,10 +2,11 @@
  * Tests for GET /_fleet/api/features/:key/diff when the feature lives in a
  * git linked worktree.
  *
- * Host-side diff runs `git -C feature.worktreePath diff main...HEAD` directly
- * on the host. The worktree root resolves the full repo through its .git pointer
- * file, so no special container-mount logic is needed — a single git invocation
- * against worktreePath covers the whole feature branch.
+ * In-container diff runs `git -C /var/fleet/git/worktree diff main...HEAD` inside
+ * the feature container via docker exec. The dedicated read-only mount at
+ * /var/fleet/git/worktree (established by slice 2) provides the worktree root
+ * with its .git pointer and the full common object store, so the command resolves
+ * regardless of whether the feature is a normal or linked worktree on the host.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -35,6 +36,7 @@ vi.mock('./registry.js', () => ({
 
 vi.mock('./docker.js', () => ({
   dockerExec: vi.fn(),
+  dockerExecStreamWithExitCode: vi.fn(),
   dockerLogs: vi.fn(),
   stopContainer: vi.fn(),
   startContainer: vi.fn(),
@@ -58,7 +60,7 @@ vi.mock('./host-metrics.js', () => ({
 
 // ── import after mocks are in place ──────────────────────────────────────────
 import { getFeature } from './registry.js';
-import { _setHostGitStreamImpl, default as router } from './api.js';
+import { _setContainerGitStreamImpl, default as router } from './api.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -101,10 +103,10 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  _setHostGitStreamImpl(() => makeGitResult(''));
+  _setContainerGitStreamImpl(() => makeGitResult(''));
 });
 
-// ── a linked-worktree feature entry (worktreePath is the only field the diff endpoint reads) ──
+// ── a linked-worktree feature entry (worktreePath is checked by the diff endpoint) ──
 const LINKED_FEATURE = {
   key: 'app-feat',
   worktreePath: '/main/.worktrees/feat',
@@ -117,7 +119,7 @@ describe('GET /_fleet/api/features/:key/diff — linked-worktree feature', () =>
   it('returns { patch, isEmpty: false } for a linked-worktree feature with a non-empty diff', async () => {
     getFeature.mockReturnValue(LINKED_FEATURE);
     const diffOutput = 'diff --git a/src/Foo.java b/src/Foo.java\n+  // new line\n';
-    _setHostGitStreamImpl(() => makeGitResult(diffOutput));
+    _setContainerGitStreamImpl(() => makeGitResult(diffOutput));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
@@ -139,23 +141,23 @@ describe('GET /_fleet/api/features/:key/diff — linked-worktree feature', () =>
     expect(body).toEqual({ status: 'no-changes', patch: '', isEmpty: true, truncated: false, originalBytes: 0 });
   });
 
-  it('runs host git against the worktreePath (not a container path)', async () => {
+  it('execs git inside the feature container (not against a host worktree path)', async () => {
     getFeature.mockReturnValue(LINKED_FEATURE);
-    const capturedPaths = [];
-    _setHostGitStreamImpl((wt) => {
-      capturedPaths.push(wt);
+    const capturedContainers = [];
+    _setContainerGitStreamImpl((name) => {
+      capturedContainers.push(name);
       return makeGitResult('');
     });
 
     await fetch(`${baseUrl}/features/app-feat/diff`);
 
-    // The seam receives the host worktreePath, not any /app container path.
-    expect(capturedPaths).toEqual([LINKED_FEATURE.worktreePath]);
+    // The seam receives the container name fleet-<key>, never the host worktreePath.
+    expect(capturedContainers).toEqual(['fleet-app-feat']);
   });
 
   it('returns 200 { status: "unavailable" } when git exits non-zero for a linked-worktree feature', async () => {
     getFeature.mockReturnValue(LINKED_FEATURE);
-    _setHostGitStreamImpl(() => makeGitResult('', 128));
+    _setContainerGitStreamImpl(() => makeGitResult('', 128));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 

@@ -1,9 +1,9 @@
 /**
  * Tests for the 1 MB cap on GET /_fleet/api/features/:key/diff
  *
- * Uses Vitest. The _setHostGitStreamImpl seam lets tests inject a fake
- * streaming git result without requiring a real git binary. The real registry
- * module is used to register a throwaway test feature.
+ * Uses Vitest. The _setContainerGitStreamImpl seam lets tests inject a fake
+ * streaming exec result without requiring a real Docker daemon. The real
+ * registry module is used to register a throwaway test feature.
  *
  * Run with:
  *   cd gateway && npx vitest run src/api.diff-truncation.test.js
@@ -23,6 +23,7 @@ vi.mock('child_process', () => ({
 // ── mock heavy docker collaborators — not needed for this test ────────────────
 vi.mock('./docker.js', () => ({
   dockerExec: vi.fn(),
+  dockerExecStreamWithExitCode: vi.fn(),
   dockerLogs: vi.fn(),
   stopContainer: vi.fn(),
   startContainer: vi.fn(),
@@ -37,7 +38,7 @@ vi.mock('./backend.js', () => ({ stopFeature: vi.fn() }));
 vi.mock('./host-metrics.js', () => ({ getHostMetrics: vi.fn() }));
 
 // ── import after mocks ────────────────────────────────────────────────────────
-import { _setHostGitStreamImpl, default as router } from './api.js';
+import { _setContainerGitStreamImpl, default as router } from './api.js';
 import { register, unregister } from './registry.js';
 
 const DIFF_CAP_BYTES = 1_048_576;
@@ -71,13 +72,12 @@ afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
-// ── Helper: fake streaming git result that emits chunks then closes ───────────
+// ── Helper: fake streaming exec result that emits chunks then closes ──────────
 
 /**
- * Creates a fake host git stream result with a stdout EventEmitter that emits
- * the given chunks as data events then fires end/close. When abort() is called,
- * emission stops and close fires on the next tick — the in-flight git process
- * is considered terminated.
+ * Creates a fake container exec stream result with a stdout EventEmitter that
+ * emits the given chunks as data events then fires end/close. When abort() is
+ * called, emission stops and close fires on the next tick.
  *
  * @param {Array<Buffer|string>} chunks
  * @returns {{ stdout: EventEmitter, abort: () => void, exitCode: Promise<number> }}
@@ -112,7 +112,7 @@ describe('GET /features/:key/diff — 1 MB cap', () => {
   it('truncates a 2 MB patch to <= 1 MB and sets truncated=true', async () => {
     // 2 MB of ASCII 'A' bytes — byte length == string length, so patch.length is predictable
     const twoMB = Buffer.alloc(2 * 1024 * 1024, 65);
-    _setHostGitStreamImpl(() => makeFakeStream([twoMB]));
+    _setContainerGitStreamImpl(() => makeFakeStream([twoMB]));
 
     const res = await fetch(`${baseUrl}/features/${TEST_KEY}/diff`);
     expect(res.status).toBe(200);
@@ -125,7 +125,7 @@ describe('GET /features/:key/diff — 1 MB cap', () => {
 
   it('does not set truncated for a below-cap patch', async () => {
     const smallPatch = 'diff --git a/foo.js b/foo.js\n+small change\n';
-    _setHostGitStreamImpl(() => makeFakeStream([smallPatch]));
+    _setContainerGitStreamImpl(() => makeFakeStream([smallPatch]));
 
     const res = await fetch(`${baseUrl}/features/${TEST_KEY}/diff`);
     expect(res.status).toBe(200);

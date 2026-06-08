@@ -134,6 +134,88 @@ export async function dockerExecStream(containerName, cmd) {
 }
 
 /**
+ * Run a command inside a container and return a streaming result with an exit-code
+ * promise — analogous to child_process.spawn but for docker exec.
+ *
+ * After the stdout stream closes, the exec is inspected via GET /exec/{id}/json to
+ * obtain the process exit code. The exitCode promise resolves with that code (or 0
+ * if the inspect call cannot determine it) and rejects only on inspect I/O failure.
+ *
+ * @param {string} containerName
+ * @param {string[]} cmd
+ * @returns {Promise<{ stdout: import('http').IncomingMessage, abort: () => void, exitCode: Promise<number> }>}
+ */
+export async function dockerExecStreamWithExitCode(containerName, cmd) {
+  const createRes = await dockerRequest({
+    method: 'POST',
+    path: `/${API_VERSION}/containers/${containerName}/exec`,
+    body: { AttachStdin: false, AttachStdout: true, AttachStderr: true, Tty: true, Cmd: cmd },
+  });
+
+  if (createRes.status === 404) {
+    throw new DockerContainerError(`Container '${containerName}' not found`, 404);
+  }
+  if (createRes.status === 409) {
+    throw new DockerContainerError(`Container '${containerName}' is not running`, 409);
+  }
+  if (createRes.status !== 201) {
+    throw new Error(`Exec create failed: HTTP ${createRes.status}`);
+  }
+
+  const { Id: execId } = JSON.parse(createRes.buffer.toString('utf8'));
+
+  const reqBody = JSON.stringify({ Detach: false, Tty: true });
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        socketPath: SOCKET,
+        method: 'POST',
+        path: `/${API_VERSION}/exec/${execId}/start`,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(reqBody),
+        },
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () => reject(new Error(`Exec start failed: HTTP ${res.statusCode}`)));
+          return;
+        }
+
+        let resolveExitCode, rejectExitCode;
+        const exitCode = new Promise((rs, rj) => { resolveExitCode = rs; rejectExitCode = rj; });
+
+        res.on('close', () => {
+          dockerRequest({ method: 'GET', path: `/${API_VERSION}/exec/${execId}/json` })
+            .then((inspectRes) => {
+              try {
+                const info = JSON.parse(inspectRes.buffer.toString('utf8'));
+                resolveExitCode(typeof info.ExitCode === 'number' ? info.ExitCode : 0);
+              } catch {
+                resolveExitCode(0);
+              }
+            })
+            .catch(rejectExitCode);
+        });
+
+        resolve({ stdout: res, abort: () => res.destroy(), exitCode });
+      },
+    );
+    req.on('error', (err) => {
+      if (err.code === 'ENOENT' || err.code === 'ECONNREFUSED') {
+        reject(new DockerSocketError('Docker socket not available — restart the gateway with fleet init'));
+      } else {
+        reject(err);
+      }
+    });
+    req.write(reqBody);
+    req.end();
+  });
+}
+
+/**
  * Run a command inside a container and return its stdout as a string.
  * Uses Tty:true so output is raw text without multiplexed frame headers.
  * @param {string} containerName

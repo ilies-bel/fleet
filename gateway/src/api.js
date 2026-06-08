@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
 import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, updateTitle, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog, getServices } from './registry.js';
-import { dockerExec, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
+import { dockerExec, dockerExecStreamWithExitCode, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
 import { getHostMetrics } from './host-metrics.js';
@@ -835,18 +835,16 @@ router.post('/cluster/bootstrap', async (req, res) => {
 /**
  * GET /_fleet/api/features/:key/diff
  * Returns the git diff of the feature branch against the merge-base of main,
- * computed on the HOST directly against feature.worktreePath (three-dot
- * syntax: `git diff main...HEAD`). The read-only `--no-optional-locks` flag
- * ensures the index lock is never taken, so the command cannot collide with
- * in-progress edits.
+ * produced inside the feature's own container by running:
+ *   git --no-optional-locks -C /var/fleet/git/worktree diff main...HEAD
+ * against the dedicated read-only git mount established at container start time.
  *
- * The gateway runs as a plain host process and the registry already stores
- * feature.worktreePath — a fully-resolvable git working tree on the host
- * filesystem whose .git pointer, per-worktree gitDir, and common object store
- * all exist on the same host. No container exec or bind-mount is required.
+ * The read-only `--no-optional-locks` flag ensures the index lock is never
+ * taken, so the command cannot collide with in-progress edits. The mount is
+ * read-only, so the command cannot mutate branches or the working tree.
  *
- * When git cannot run (worktree path gone, git binary missing, non-zero exit),
- * the endpoint responds 200 with `status: 'unavailable'` and a short
+ * When git cannot run (container not found/running, non-zero exit), the
+ * endpoint responds 200 with `status: 'unavailable'` and a short
  * human-readable reason rather than 500.
  *
  * Output is capped at DIFF_CAP_BYTES. When the underlying git output exceeds
@@ -867,27 +865,26 @@ router.post('/cluster/bootstrap', async (req, res) => {
  */
 const DIFF_CAP_BYTES = 1_048_576;
 
-/**
- * Mutable shim: spawns `git diff main...HEAD` in the given worktree on the host.
- * Returns { stdout: Readable, abort: fn, exitCode: Promise<number> }.
- * exitCode resolves with the process exit code (null SIGTERM → 0); rejects on spawn error.
- * @internal — tests replace this via _setHostGitStreamImpl to avoid requiring a real git binary.
- * @param {string} worktreePath
- * @returns {{ stdout: import('stream').Readable, abort: () => void, exitCode: Promise<number> }}
- */
-let _hostGitStreamImpl = (worktreePath) => {
-  const proc = spawn('git', ['--no-optional-locks', '-C', worktreePath, 'diff', 'main...HEAD'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const exitCode = new Promise((resolve, reject) => {
-    proc.on('error', reject);
-    proc.on('close', (code) => resolve(code ?? 0));
-  });
-  return { stdout: proc.stdout, abort: () => proc.kill('SIGTERM'), exitCode };
-};
+/** In-container path where the worktree root is bind-mounted read-only (slice 2). */
+const DEDICATED_MOUNT = '/var/fleet/git/worktree';
 
-/** @internal — test seam, replaces the host git spawn implementation. */
-export function _setHostGitStreamImpl(fn) { _hostGitStreamImpl = fn; }
+/**
+ * Mutable shim: execs `git diff main...HEAD` inside the feature's running
+ * container at the dedicated read-only git mount.
+ * Returns Promise<{ stdout: Readable, abort: fn, exitCode: Promise<number> }>.
+ * exitCode resolves with the process exit code; rejects on exec infrastructure failure.
+ * @internal — tests replace this via _setContainerGitStreamImpl to avoid
+ *             requiring a real Docker daemon.
+ * @param {string} containerName  e.g. 'fleet-myproject-myfeature'
+ * @returns {Promise<{ stdout: import('stream').Readable, abort: () => void, exitCode: Promise<number> }>}
+ */
+let _containerGitStreamImpl = (containerName) =>
+  dockerExecStreamWithExitCode(containerName, [
+    'git', '--no-optional-locks', '-C', DEDICATED_MOUNT, 'diff', 'main...HEAD',
+  ]);
+
+/** @internal — test seam, replaces the container git exec implementation. */
+export function _setContainerGitStreamImpl(fn) { _containerGitStreamImpl = fn; }
 
 router.get('/features/:key/diff', async (req, res) => {
   const { key } = req.params;
@@ -899,8 +896,10 @@ router.get('/features/:key/diff', async (req, res) => {
     return res.status(422).json({ error: 'Feature has no worktree path' });
   }
 
+  const containerName = `fleet-${key}`;
+
   try {
-    const { stdout, abort, exitCode: exitCodePromise } = _hostGitStreamImpl(feature.worktreePath);
+    const { stdout, abort, exitCode: exitCodePromise } = await _containerGitStreamImpl(containerName);
 
     const chunks = [];
     let originalBytes = 0;
@@ -933,14 +932,14 @@ router.get('/features/:key/diff', async (req, res) => {
       stdout.on('error', fail);
     });
 
-    // Wait for process exit; rejects on spawn error (e.g. git binary not found).
+    // Wait for exec exit code.
     let exitCode;
     try {
       exitCode = await exitCodePromise;
-    } catch (spawnErr) {
+    } catch (execErr) {
       return res.json({
         status: 'unavailable',
-        reason: spawnErr.message || 'git spawn failed',
+        reason: execErr.message || 'git exec failed',
         patch: '',
         isEmpty: true,
         truncated: false,
@@ -948,7 +947,7 @@ router.get('/features/:key/diff', async (req, res) => {
       });
     }
 
-    // Non-zero exit without truncation means git actually failed (worktree gone, not a repo, etc.)
+    // Non-zero exit without truncation means git actually failed (not a repo, etc.)
     if (exitCode !== 0 && !truncated) {
       return res.json({
         status: 'unavailable',
@@ -966,7 +965,7 @@ router.get('/features/:key/diff', async (req, res) => {
   } catch (err) {
     res.json({
       status: 'unavailable',
-      reason: err.message || 'git command failed',
+      reason: err.message || 'git exec failed',
       patch: '',
       isEmpty: true,
       truncated: false,

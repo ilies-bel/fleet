@@ -2,8 +2,8 @@
  * Tests for GET /_fleet/api/features/:key/diff
  *
  * Exercises the diff endpoint through a real Express HTTP server on an
- * ephemeral port. Host git execution is controlled via the _setHostGitStreamImpl
- * seam — no real git binary or Docker daemon is invoked.
+ * ephemeral port. The container git exec is controlled via the
+ * _setContainerGitStreamImpl seam — no real Docker daemon is invoked.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -33,6 +33,7 @@ vi.mock('./registry.js', () => ({
 
 vi.mock('./docker.js', () => ({
   dockerExec: vi.fn(),
+  dockerExecStreamWithExitCode: vi.fn(),
   dockerLogs: vi.fn(),
   stopContainer: vi.fn(),
   startContainer: vi.fn(),
@@ -56,7 +57,7 @@ vi.mock('./host-metrics.js', () => ({
 
 // ── import after mocks are in place ──────────────────────────────────────────
 import { getFeature } from './registry.js';
-import { _setHostGitStreamImpl, default as router } from './api.js';
+import { _setContainerGitStreamImpl, default as router } from './api.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -100,7 +101,7 @@ afterAll(async () => {
 beforeEach(() => {
   vi.clearAllMocks();
   // Default: empty diff, successful exit.
-  _setHostGitStreamImpl(() => makeGitResult(''));
+  _setContainerGitStreamImpl(() => makeGitResult(''));
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -123,7 +124,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       branch: 'feat',
     });
     const diffOutput = 'diff --git a/foo.js b/foo.js\n+added line\n';
-    _setHostGitStreamImpl(() => makeGitResult(diffOutput));
+    _setContainerGitStreamImpl(() => makeGitResult(diffOutput));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
@@ -150,20 +151,20 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body).toEqual({ status: 'no-changes', patch: '', isEmpty: true, truncated: false, originalBytes: 0 });
   });
 
-  it('runs host git against feature.worktreePath with --no-optional-locks and three-dot syntax', async () => {
+  it('execs git inside the feature container derived from the feature key', async () => {
     const worktreePath = '/opt/worktrees/app-feat';
     getFeature.mockReturnValue({ key: 'app-feat', worktreePath, branch: 'feat' });
 
-    const capturedPaths = [];
-    _setHostGitStreamImpl((wt) => {
-      capturedPaths.push(wt);
+    const capturedContainers = [];
+    _setContainerGitStreamImpl((name) => {
+      capturedContainers.push(name);
       return makeGitResult('');
     });
 
     await fetch(`${baseUrl}/features/app-feat/diff`);
 
-    // The seam is called with the feature's worktreePath — not a container path.
-    expect(capturedPaths).toEqual([worktreePath]);
+    // Container name is fleet-<key>; the seam never receives a host path.
+    expect(capturedContainers).toEqual(['fleet-app-feat']);
   });
 
   it('returns 422 when the feature has no worktreePath', async () => {
@@ -186,7 +187,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
-    _setHostGitStreamImpl(() => makeGitResult('', 128));
+    _setContainerGitStreamImpl(() => makeGitResult('', 128));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
@@ -201,14 +202,14 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body.originalBytes).toBe(0);
   });
 
-  it('returns 200 { status: "unavailable" } when the git spawn itself fails (binary not found)', async () => {
+  it('returns 200 { status: "unavailable" } when the container exec itself fails (container not running)', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
-    _setHostGitStreamImpl(() => {
-      throw new Error('spawn ENOENT');
+    _setContainerGitStreamImpl(() => {
+      throw new Error('Container not running');
     });
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
@@ -216,7 +217,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe('unavailable');
-    expect(body.reason).toMatch(/ENOENT/i);
+    expect(body.reason).toMatch(/Container not running/i);
     expect(body.patch).toBe('');
     expect(body.isEmpty).toBe(true);
   });
