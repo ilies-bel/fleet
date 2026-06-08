@@ -8,7 +8,7 @@ import { PROXY_ORIGIN } from '../lib/captureProtocol.js';
 // Port 3000 is the transparent proxy — always the same URL regardless of which feature is active.
 const PROXY_URL = 'http://localhost:3000/';
 
-export default function PreviewFrame({ activePreview, branch, previewKey, title, isCapture, onToggleCapture, addNote, notes, hasFeatures = false }) {
+export default function PreviewFrame({ activePreview, branch, previewKey, title, isCapture, onToggleCapture, addNote, notes, hasFeatures = false, notesOpen = false, onToggleNotes }) {
   const iframeRef = useRef(null);
   const [viewMode, setViewMode] = useState('preview');
 
@@ -111,6 +111,20 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
             >
               [CAPTURE]
             </Button>
+            {notes && notes.length > 0 && (
+              <button
+                onClick={onToggleNotes}
+                style={notesOpen
+                  ? { ...toolbarBtn, background: 'var(--color-accent)', color: 'var(--color-bg-black)', borderColor: 'var(--color-accent)' }
+                  : toolbarBtn
+                }
+                aria-pressed={notesOpen}
+                aria-controls="review-notes-panel"
+                aria-label="Toggle review notes panel"
+              >
+                [NOTES {notes.length}]
+              </button>
+            )}
             <button
               onClick={() => window.open(PROXY_URL, '_blank')}
               style={toolbarBtn}

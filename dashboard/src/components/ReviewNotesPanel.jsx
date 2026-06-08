@@ -13,7 +13,7 @@ import './ReviewNotesPanel.css';
  *
  * @param {{ notes: Array, worktree: string|null, addNote: Function, removeNote: Function, clearForWorktree: Function }} props
  */
-export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote, clearForWorktree }) {
+export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote, clearForWorktree, open = false, onClose }) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [copied, setCopied] = useState(false);
@@ -67,9 +67,23 @@ export default function ReviewNotesPanel({ notes, worktree, addNote, removeNote,
 
   return (
     <>
-    <aside className="review-notes-panel" aria-label="Review notes">
+    <aside
+      className="review-notes-panel"
+      aria-label="Review notes"
+      id="review-notes-panel"
+      data-open={String(!!open)}
+    >
       <div className="review-notes-panel__header">
         <h3 className="review-notes-panel__title">Review Notes</h3>
+        {onClose && (
+          <button
+            className="review-notes-panel__close-btn"
+            onClick={onClose}
+            aria-label="Close review notes"
+          >
+            [✕]
+          </button>
+        )}
         <Button
           tone="primary"
           onClick={handleCopy}

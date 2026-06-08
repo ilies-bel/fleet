@@ -76,6 +76,7 @@ const [logFeature, setLogFeature] = useState(null);
   const [startingFeatures, setStartingFeatures] = useState(new Set());
   const [isCapture, setIsCapture] = useState(false);
   const toggleCapture = useCallback(() => setIsCapture(prev => !prev), []);
+  const [notesOpen, setNotesOpen] = useState(false);
   const { notesByWorktree, addNote, removeNote, clearForWorktree } = useReviewNotes();
 
   // Key the user just clicked [ACTIVATE] on; suppresses poll-driven
@@ -143,6 +144,7 @@ const [logFeature, setLogFeature] = useState(null);
       setActivePreview(key);              // instant, optimistic highlight
       setPreviewKey(k => k + 1);          // force iframe reload
       onDrawerClose();                    // close the off-canvas drawer (no-op on wide viewports)
+      setNotesOpen(false);               // close the notes panel on feature switch
       await fetchFeatures();              // confirm against gateway (clears pending when matched)
     } catch (err) {
       pendingActivateRef.current = null;  // activation failed — let gateway truth resume
@@ -181,14 +183,19 @@ const activeTitle = activeFeature?.title || activeFeature?.name || '';
         addNote={addNote}
         notes={notesByWorktree[activePreview] ?? []}
         hasFeatures={features.length > 0}
+        notesOpen={notesOpen}
+        onToggleNotes={() => setNotesOpen(o => !o)}
       />
 
       {activePreview && (
         <ReviewNotesPanel
           notes={notesByWorktree[activePreview] ?? []}
           worktree={activePreview}
+          addNote={addNote}
           removeNote={removeNote}
           clearForWorktree={clearForWorktree}
+          open={notesOpen}
+          onClose={() => setNotesOpen(false)}
         />
       )}
 
