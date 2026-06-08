@@ -9,6 +9,8 @@ export FLEET_ROOT
 # Source shared library (color helpers, info/warn/error, apply_stack_template)
 # shellcheck source=./common.sh
 source "${SCRIPT_DIR}/common.sh"
+# shellcheck source=./railpack.sh
+source "${SCRIPT_DIR}/railpack.sh"
 
 OVERRIDE=0
 while [ $# -gt 0 ]; do
@@ -731,6 +733,19 @@ fi
 
 # ─── Discover .env files → .fleet/shared.env ─────────────────────────────────
 discover_env_files "${PROJECT_ROOT}"
+
+# ─── Generate railpack plans for vite services ───────────────────────────────
+for i in "${!SVC_NAMES[@]}"; do
+  [ "${SVC_STACKS[$i]}" = "vite" ] || continue
+  plan_path="${FLEET_DIR}/${SVC_DIRS[$i]}/railpack.json"
+  if [ -f "${plan_path}" ] && [ "${OVERRIDE}" -ne 1 ]; then
+    info "Keeping existing ${plan_path} (pass --override to regenerate)"
+    continue
+  fi
+  mkdir -p "$(dirname "${plan_path}")"
+  railpack_emit_plan "${PROJECT_ROOT}/${SVC_DIRS[$i]}" "${plan_path}"
+  info "Generated railpack plan: ${plan_path}"
+done
 
 # ─── Generate and build project-scoped base image ────────────────────────────
 PROJECT_LOCAL_DOCKERFILE="${PWD}/.fleet/Dockerfile.feature-base"
