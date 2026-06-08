@@ -36,7 +36,3 @@ _Avoid_: patch, changeset
 **feature backend**:
 The substrate that builds, runs, and inspects a feature's instance — local Docker today, with cluster as a second variant; the gateway selects one per feature and never calls substrate tools (docker/oc) directly outside this seam.
 _Avoid_: provider, driver
-
-**generated Dockerfile**:
-A per-subproject Dockerfile produced by railpack at project init (and re-init), committed as the build recipe both local docker build and the cluster BuildConfig consume; supersedes the hand-assembled fragment Dockerfile system.
-_Avoid_: fragment dockerfile, base dockerfile
