@@ -1,6 +1,6 @@
 import { inspectContainer } from './docker.js';
-import { writeFileSync, renameSync, readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { writeFileSync, renameSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
 /**
@@ -31,6 +31,63 @@ function titlesFilePath() {
  */
 function registryFilePath() {
   return process.env.FLEET_REGISTRY_FILE ?? '/var/lib/fleet/registry.json';
+}
+
+/**
+ * Resolve the git directory context for a worktree path.
+ *
+ * Three cases:
+ *   (a) <worktreePath>/.git is a regular file  — linked worktree.
+ *       Parse the "gitdir: <path>" line, resolve to absolute gitDir, then read
+ *       <gitDir>/commondir and resolve it against gitDir to get gitCommonDir.
+ *   (b) <worktreePath>/.git is a directory     — normal (non-linked) repo.
+ *       gitDir = gitCommonDir = <worktreePath>/.git
+ *   (c) <worktreePath>/.git does not exist     — return both as undefined.
+ *
+ * Never throws; on any read/parse error the affected field is set to undefined.
+ *
+ * @param {string|null} worktreePath  absolute path to the worktree root
+ * @returns {{ gitDir: string|undefined, gitCommonDir: string|undefined }}
+ */
+function resolveGitContext(worktreePath) {
+  if (!worktreePath) return { gitDir: undefined, gitCommonDir: undefined };
+
+  const gitPath = join(worktreePath, '.git');
+
+  let stat;
+  try {
+    stat = statSync(gitPath);
+  } catch {
+    return { gitDir: undefined, gitCommonDir: undefined };
+  }
+
+  if (stat.isDirectory()) {
+    return { gitDir: gitPath, gitCommonDir: gitPath };
+  }
+
+  if (stat.isFile()) {
+    let content;
+    try {
+      content = readFileSync(gitPath, 'utf8');
+    } catch {
+      return { gitDir: undefined, gitCommonDir: undefined };
+    }
+    const match = content.match(/^gitdir:\s*(.+)$/m);
+    if (!match) return { gitDir: undefined, gitCommonDir: undefined };
+
+    const gitDir = resolve(worktreePath, match[1].trim());
+
+    let gitCommonDir;
+    try {
+      const commonDirContent = readFileSync(join(gitDir, 'commondir'), 'utf8').trim();
+      gitCommonDir = resolve(gitDir, commonDirContent);
+    } catch {
+      gitCommonDir = undefined;
+    }
+    return { gitDir, gitCommonDir };
+  }
+
+  return { gitDir: undefined, gitCommonDir: undefined };
 }
 
 /**
@@ -157,7 +214,7 @@ export function loadPersistedActive() {
 /**
  * @typedef {{ name: string, port: number }} ServiceEntry
  * @typedef {{ cluster: string, namespace: string }} HostDescriptor
- * @typedef {{ project: string, name: string, key: string, branch: string, worktreePath: string|null, title: string|null, host: HostDescriptor|null, addedAt: Date, status: string, error: string|null, services: ServiceEntry[] }} FeatureEntry
+ * @typedef {{ project: string, name: string, key: string, branch: string, worktreePath: string|null, title: string|null, host: HostDescriptor|null, addedAt: Date, status: string, error: string|null, services: ServiceEntry[], gitDir: string|undefined, gitCommonDir: string|undefined }} FeatureEntry
  * @type {Map<string, FeatureEntry>}
  */
 const features = new Map();
@@ -308,7 +365,8 @@ export function register(project, name, branch, worktreePath = null, status = 'u
   // (explicit registration title) always wins and also updates the store.
   const effectiveTitle = title ?? persistedTitles[key] ?? null;
   if (title !== null) persistedTitles[key] = title;
-  features.set(key, { project, name, key, branch, worktreePath, title: effectiveTitle, host, addedAt: new Date(), status: normalised, error, services });
+  const { gitDir, gitCommonDir } = resolveGitContext(worktreePath);
+  features.set(key, { project, name, key, branch, worktreePath, title: effectiveTitle, host, addedAt: new Date(), status: normalised, error, services, gitDir, gitCommonDir });
   persistRegistryBaseline();
   if (activeFeature === null && normalised === 'up') {
     activeFeature = key;

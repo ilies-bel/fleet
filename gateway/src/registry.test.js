@@ -7,7 +7,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,6 +20,7 @@ import {
   setActiveFeature,
   isRegistered,
   loadPersistedActive,
+  getFeature,
 } from './registry.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -211,6 +212,68 @@ describe('loadPersistedActive', () => {
       const result = loadPersistedActive();
       assert.equal(result, null);
     });
+  });
+});
+
+// ── gitDir / gitCommonDir resolution ──────────────────────────────────────────
+
+describe('FeatureEntry — gitDir and gitCommonDir', () => {
+  beforeEach(() => { for (const f of getAll()) unregister(f.key); });
+  afterEach(() => { for (const f of getAll()) unregister(f.key); });
+
+  test('linked-worktree feature exposes absolute gitDir and gitCommonDir', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'fleet-git-test-'));
+    try {
+      // Set up a linked worktree layout:
+      //   tmpDir/worktree/.git  (file pointing to tmpDir/main/.git/worktrees/feat)
+      //   tmpDir/main/.git/worktrees/feat/commondir  (file containing "../..")
+      const worktreeDir = join(tmpDir, 'worktree');
+      const mainGitDir = join(tmpDir, 'main', '.git');
+      const worktreeGitDir = join(mainGitDir, 'worktrees', 'feat');
+
+      mkdirSync(worktreeDir, { recursive: true });
+      mkdirSync(worktreeGitDir, { recursive: true });
+
+      // .git pointer file in the worktree
+      writeFileSync(join(worktreeDir, '.git'), `gitdir: ${worktreeGitDir}\n`, 'utf8');
+      // commondir file resolves to the main repo's .git
+      writeFileSync(join(worktreeGitDir, 'commondir'), '../..\n', 'utf8');
+
+      register('p', 'wt', 'feat', worktreeDir, 'up');
+      const entry = getFeature('p-wt');
+
+      assert.ok(entry, 'entry must exist');
+      assert.equal(entry.gitDir, worktreeGitDir, 'gitDir must be the absolute path from the .git pointer');
+      assert.equal(entry.gitCommonDir, mainGitDir, 'gitCommonDir must be the main repo .git resolved via commondir');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('normal-repo feature exposes gitDir and gitCommonDir both equal to <worktreePath>/.git', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'fleet-git-test-'));
+    try {
+      const dotGit = join(tmpDir, '.git');
+      mkdirSync(dotGit, { recursive: true });
+
+      register('p', 'nr', 'main', tmpDir, 'up');
+      const entry = getFeature('p-nr');
+
+      assert.ok(entry, 'entry must exist');
+      assert.equal(entry.gitDir, dotGit, 'gitDir must equal <worktreePath>/.git');
+      assert.equal(entry.gitCommonDir, dotGit, 'gitCommonDir must equal <worktreePath>/.git');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('feature with no worktree leaves gitDir and gitCommonDir undefined without throwing', () => {
+    register('p', 'nowt', 'main', null, 'up');
+    const entry = getFeature('p-nowt');
+
+    assert.ok(entry, 'entry must exist');
+    assert.equal(entry.gitDir, undefined, 'gitDir must be undefined when worktreePath is null');
+    assert.equal(entry.gitCommonDir, undefined, 'gitCommonDir must be undefined when worktreePath is null');
   });
 });
 
