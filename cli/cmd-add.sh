@@ -302,6 +302,54 @@ else:
   fi
 fi
 
+# ─── Resolve read-only git context for the feature container ─────────────────
+# Each feature container receives a dedicated read-only bind of its git context
+# at /var/fleet/git/worktree so in-container git commands (e.g. diff main...HEAD)
+# resolve the full repo history without touching the existing /app/<svc> mounts.
+#
+# Two binds for linked worktrees (where .git is a pointer file):
+#   1. <worktreePath>  → /var/fleet/git/worktree:ro  (worktree root + .git file)
+#   2. <gitCommonDir>  → <gitCommonDir>:ro            (object store at its host abs path
+#                                                        so the pointer resolves identically)
+# One bind for normal repos (.git is a directory):
+#   1. <worktreePath>  → /var/fleet/git/worktree:ro  (repo root, .git dir included)
+# No binds when PROJECT_WORKTREE_PATH is empty (cluster-hosted features).
+GIT_WORKTREE_BIND_SRC=""
+GIT_COMMON_DIR_BIND=""   # non-empty only for linked worktrees
+
+if [ -n "${PROJECT_WORKTREE_PATH}" ]; then
+  _git_dot="${PROJECT_WORKTREE_PATH}/.git"
+  if [ -f "${_git_dot}" ]; then
+    # Linked worktree: .git is a pointer file — parse gitdir, then commondir.
+    _gitdir_line=$(grep -m1 '^gitdir: ' "${_git_dot}" 2>/dev/null | sed 's/^gitdir: //' || true)
+    if [ -n "${_gitdir_line}" ]; then
+      # Resolve gitDir to an absolute path.
+      if [ "${_gitdir_line#/}" = "${_gitdir_line}" ]; then
+        _git_dir_abs="${PROJECT_WORKTREE_PATH}/${_gitdir_line}"
+      else
+        _git_dir_abs="${_gitdir_line}"
+      fi
+      _git_dir_abs=$(cd "${_git_dir_abs}" 2>/dev/null && pwd || echo "${_git_dir_abs}")
+      # Resolve gitCommonDir (the main repo's object store) — may be relative to gitDir.
+      if [ -f "${_git_dir_abs}/commondir" ]; then
+        _commondir_raw=$(cat "${_git_dir_abs}/commondir" 2>/dev/null || true)
+        if [ -n "${_commondir_raw}" ]; then
+          if [ "${_commondir_raw#/}" = "${_commondir_raw}" ]; then
+            _git_common_dir="${_git_dir_abs}/${_commondir_raw}"
+          else
+            _git_common_dir="${_commondir_raw}"
+          fi
+          GIT_COMMON_DIR_BIND=$(cd "${_git_common_dir}" 2>/dev/null && pwd || echo "${_git_common_dir}")
+        fi
+      fi
+    fi
+    GIT_WORKTREE_BIND_SRC="${PROJECT_WORKTREE_PATH}"
+  elif [ -d "${_git_dot}" ]; then
+    # Normal repo: .git is a directory — only the worktree root bind is needed.
+    GIT_WORKTREE_BIND_SRC="${PROJECT_WORKTREE_PATH}"
+  fi
+fi
+
 # ─── Resolve the feature title ────────────────────────────────────────────────
 # --title flag takes precedence; interactive prompt if tty; fallback to NAME.
 if [ -z "${FEATURE_TITLE}" ]; then
@@ -802,6 +850,15 @@ for svc in services:
     for ef in svc.get('env_files', []):
         print(name + '\t' + ef.get('mode','') + '\t' + ef.get('path','') + '\t' + ef.get('target',''))
 " "${FLEET_SERVICES_JSON}")
+  # Read-only git context mounts — provide the feature container with a full git
+  # view at /var/fleet/git/worktree (not under /app/<svc>) so in-container git
+  # commands resolve the feature branch without altering existing service mounts.
+  if [ -n "${GIT_WORKTREE_BIND_SRC}" ]; then
+    echo "      - ${GIT_WORKTREE_BIND_SRC}:/var/fleet/git/worktree:ro"
+    # For linked worktrees, also mount the common object store at its absolute
+    # host path so the worktree's .git pointer file resolves inside the container.
+    [ -n "${GIT_COMMON_DIR_BIND}" ] && echo "      - ${GIT_COMMON_DIR_BIND}:${GIT_COMMON_DIR_BIND}:ro"
+  fi
   # Docker socket for Testcontainers (spring/gradle stacks only)
   _needs_sock=false
   for stack in "${SVC_STACKS[@]}"; do
