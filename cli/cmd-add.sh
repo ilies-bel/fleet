@@ -640,7 +640,22 @@ if lines:
 PYEOF
 
 # ─── Resolve base image tag ──────────────────────────────────────────────────
-if [ -f "${FLEET_PROJECT_ROOT}/.fleet/Dockerfile.feature-base" ]; then
+# When the project's sole service is vite, use the per-vite base image
+# produced by `fleet init` (fleet-feature-base-<project>-<svc>).  All other
+# configurations (non-vite, multi-service) are byte-identical to the
+# pre-change path: project-local combined image or the generic fallback.
+_vite_only=false
+if [ "${#SVC_NAMES[@]}" -eq 1 ] && [ "${SVC_STACKS[0]}" = "vite" ]; then
+  _vite_only=true
+fi
+
+if [ "${_vite_only}" = "true" ]; then
+  FEATURE_BASE_IMAGE="fleet-feature-base-${FLEET_PROJECT_NAME}-${SVC_NAMES[0]}"
+  if ! docker image inspect "${FEATURE_BASE_IMAGE}" >/dev/null 2>&1; then
+    error "Per-vite base image '${FEATURE_BASE_IMAGE}' not found. Run 'fleet init' to build it."
+  fi
+  info "[fleet] Using per-vite base image: ${FEATURE_BASE_IMAGE}"
+elif [ -f "${FLEET_PROJECT_ROOT}/.fleet/Dockerfile.feature-base" ]; then
   FEATURE_BASE_IMAGE="fleet-feature-base-${FLEET_PROJECT_NAME}"
   if ! docker image inspect "${FEATURE_BASE_IMAGE}" >/dev/null 2>&1; then
     error "Project-local base image '${FEATURE_BASE_IMAGE}' not found. Run 'fleet init' to build it."
