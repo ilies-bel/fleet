@@ -114,11 +114,13 @@ describe('GET /_fleet/api/features/:key/services/health', () => {
     ]);
   });
 
-  test('marks a service down when the probe returns a non-ok status', async () => {
+  test('treats any HTTP response (including non-ok) as up — service process answered', async () => {
     register('testproj', 'feat', 'main', null, 'up', [{ name: 'api', port: 3000 }]);
 
+    // Non-ok (404/405) still means the service process is reachable; only a
+    // thrown error (ECONNREFUSED / timeout) means 'down'.
     globalThis.fetch = async (url, opts) => {
-      if (typeof url === 'string' && url.startsWith('http://fleet-')) return { ok: false };
+      if (typeof url === 'string' && url.startsWith('http://fleet-')) return { ok: false, status: 404 };
       return realFetch(url, opts);
     };
 
@@ -127,7 +129,7 @@ describe('GET /_fleet/api/features/:key/services/health', () => {
       path: '/_fleet/api/features/testproj-feat/services/health',
     });
     assert.equal(status, 200);
-    assert.deepEqual(body.services, [{ name: 'api', port: 3000, status: 'down' }]);
+    assert.deepEqual(body.services, [{ name: 'api', port: 3000, status: 'up' }]);
   });
 
   test('marks services down when the probe throws (timeout / unreachable)', async () => {
@@ -152,7 +154,7 @@ describe('GET /_fleet/api/features/:key/services/health', () => {
     ]);
   });
 
-  test('probes each service at its correct fleet container URL', async () => {
+  test('probes each service via nginx path prefix on port 80 (not internal service port)', async () => {
     register('testproj', 'feat', 'main', null, 'up', [
       { name: 'api', port: 3000 },
       { name: 'web', port: 8080 },
@@ -172,8 +174,11 @@ describe('GET /_fleet/api/features/:key/services/health', () => {
       path: '/_fleet/api/features/testproj-feat/services/health',
     });
 
-    assert.ok(probeUrls.includes('http://fleet-testproj-feat:3000/'));
-    assert.ok(probeUrls.includes('http://fleet-testproj-feat:8080/'));
+    // Must use nginx path-based routing (port 80 implied), NOT the internal service ports.
+    assert.ok(probeUrls.includes('http://fleet-testproj-feat/api/'), `expected /api/ URL, got: ${JSON.stringify(probeUrls)}`);
+    assert.ok(probeUrls.includes('http://fleet-testproj-feat/web/'), `expected /web/ URL, got: ${JSON.stringify(probeUrls)}`);
+    // Must NOT probe internal ports directly.
+    assert.ok(!probeUrls.some(u => u.includes(':3000') || u.includes(':8080')), `must not probe internal ports, got: ${JSON.stringify(probeUrls)}`);
   });
 
   test('returns mixed up/down statuses correctly', async () => {
@@ -182,9 +187,11 @@ describe('GET /_fleet/api/features/:key/services/health', () => {
       { name: 'worker', port: 4000 },
     ]);
 
+    // api resolves (any HTTP response → up), worker throws (ECONNREFUSED → down).
     globalThis.fetch = async (url, opts) => {
       if (typeof url === 'string' && url.startsWith('http://fleet-')) {
-        return url.includes(':3000') ? { ok: true } : { ok: false };
+        if (url.includes('/worker/')) throw new Error('ECONNREFUSED');
+        return { ok: true };
       }
       return realFetch(url, opts);
     };
@@ -199,5 +206,30 @@ describe('GET /_fleet/api/features/:key/services/health', () => {
     const worker = body.services.find((s) => s.name === 'worker');
     assert.equal(api.status, 'up');
     assert.equal(worker.status, 'down');
+  });
+
+  test('returns empty services for cluster features without probing', async () => {
+    // Cluster features (host != null) use port-forward addresses the gateway
+    // doesn't know — return empty list rather than mis-probing.
+    register('testproj', 'feat', 'main', null, 'up', [
+      { name: 'backend', port: 8080 },
+    ], null, null, { cluster: 'test-cluster', namespace: 'default' });
+
+    let probed = false;
+    globalThis.fetch = async (url, opts) => {
+      if (typeof url === 'string' && url.startsWith('http://fleet-')) {
+        probed = true;
+        return { ok: true };
+      }
+      return realFetch(url, opts);
+    };
+
+    const { status, body } = await request(server, {
+      method: 'GET',
+      path: '/_fleet/api/features/testproj-feat/services/health',
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body, { services: [] });
+    assert.equal(probed, false, 'must not probe cluster feature containers');
   });
 });

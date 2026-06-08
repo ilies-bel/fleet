@@ -58,8 +58,15 @@ router.get('/features/:key/health', async (req, res) => {
 router.get('/features/:key/services/health', async (req, res) => {
   const { key } = req.params;
 
-  if (!getFeature(key)) {
+  const feature = getFeature(key);
+  if (!feature) {
     return res.status(404).json({ error: 'Feature not registered' });
+  }
+
+  // Cluster features route through port-forward addresses that this endpoint
+  // doesn't have access to — return an empty list rather than mis-probing them.
+  if (feature.host != null) {
+    return res.json({ services: [] });
   }
 
   const services = getServices(key);
@@ -70,13 +77,19 @@ router.get('/features/:key/services/health', async (req, res) => {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
 
-        const response = await fetch(`http://fleet-${key}:${service.port}/`, {
-          method: 'HEAD',
+        // Probe through nginx (port 80) using the path prefix nginx routes to
+        // this service. The internal service port (service.port) is only
+        // reachable on loopback inside the container — probing it directly from
+        // outside always gets ECONNREFUSED. Any received HTTP response (even
+        // 404/405) means the service process is up; only a thrown error
+        // (connection refused / timeout / DNS) means down.
+        await fetch(`http://fleet-${key}/${service.name}/`, {
+          method: 'GET',
           signal: controller.signal,
         });
 
         clearTimeout(timeout);
-        return { name: service.name, port: service.port, status: response.ok ? 'up' : 'down' };
+        return { name: service.name, port: service.port, status: 'up' };
       } catch {
         return { name: service.name, port: service.port, status: 'down' };
       }
