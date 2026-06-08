@@ -159,6 +159,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   const isNotStarted = feature.status === 'not_started';
   const presentation = describeFeature(feature, health, isStarting);
   const displayName = (titleOverride !== null ? titleOverride : title) || name;
+  const isDirectMount = typeof feature.worktreePath !== 'string' || feature.worktreePath.length === 0;
 
   /* Small sizing shared by all action buttons in this card */
   const cardBtnStyle = { fontSize: '0.68rem', padding: '2px 7px' };
@@ -256,6 +257,22 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
             }}
           >
             {displayName}
+          </span>
+        )}
+        {!editing && isDirectMount && (
+          <span style={{
+            display: 'inline-block',
+            marginLeft: '0.4rem',
+            padding: '0.1rem var(--space-15)',
+            fontSize: '0.65rem',
+            fontWeight: 600,
+            background: 'var(--color-border)',
+            color: 'var(--color-accent)',
+            letterSpacing: '0.03em',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}>
+            direct
           </span>
         )}
 

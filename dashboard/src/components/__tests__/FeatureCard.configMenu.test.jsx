@@ -189,4 +189,18 @@ describe('FeatureCard — config menu', () => {
     expect(within(dialog).getByText('Services')).toBeInTheDocument();
     expect(within(dialog).getByText('no services')).toBeInTheDocument();
   });
+
+  // ── Direct-mount tag in card header ───────────────────────────────────────
+
+  it('renders a "direct" tag in the card header when worktreePath is null', () => {
+    renderCard({ worktreePath: null });
+    // No modal open — check the card header itself (not the config dialog)
+    // The modal shows "direct mount" (two words); the tag shows exact "direct" (one word)
+    expect(screen.getByText('direct', { exact: true })).toBeInTheDocument();
+  });
+
+  it('does not render a "direct" tag when worktreePath is a non-empty string', () => {
+    renderCard({ worktreePath: '/abs/path/to/worktree' });
+    expect(screen.queryByText('direct', { exact: true })).not.toBeInTheDocument();
+  });
 });
