@@ -2,8 +2,8 @@
  * Tests for GET /_fleet/api/features/:key/diff
  *
  * Exercises the diff endpoint through a real Express HTTP server on an
- * ephemeral port. dockerExecStream is mocked so no real Docker daemon or git
- * binary is invoked — we are testing the HTTP contract, not git itself.
+ * ephemeral port. Host git execution is controlled via the _setHostGitStreamImpl
+ * seam — no real git binary or Docker daemon is invoked.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -11,7 +11,7 @@ import http from 'http';
 import { PassThrough } from 'node:stream';
 import express from 'express';
 
-// ── mock child_process before importing api.js (api.js uses spawn in other routes) ──
+// ── mock child_process before importing api.js ────────────────────────────────
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
   execFile: vi.fn(),
@@ -33,7 +33,6 @@ vi.mock('./registry.js', () => ({
 
 vi.mock('./docker.js', () => ({
   dockerExec: vi.fn(),
-  dockerExecStream: vi.fn(),
   dockerLogs: vi.fn(),
   stopContainer: vi.fn(),
   startContainer: vi.fn(),
@@ -57,22 +56,23 @@ vi.mock('./host-metrics.js', () => ({
 
 // ── import after mocks are in place ──────────────────────────────────────────
 import { getFeature } from './registry.js';
-import { dockerExec, dockerExecStream, inspectContainer } from './docker.js';
-import router from './api.js';
+import { _setHostGitStreamImpl, default as router } from './api.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/**
- * Wrap a string in a PassThrough stream so the streaming diff handler can
- * consume it like a real docker exec response.
- * @param {string} str
- * @returns {import('stream').PassThrough}
- */
 function makeStream(str) {
   const pt = new PassThrough();
   if (str) pt.write(Buffer.from(str, 'utf8'));
   pt.end();
   return pt;
+}
+
+function makeGitResult(str, exitCode = 0) {
+  return {
+    stdout: makeStream(str),
+    abort: vi.fn(),
+    exitCode: Promise.resolve(exitCode),
+  };
 }
 
 // ── test server lifecycle ─────────────────────────────────────────────────────
@@ -99,10 +99,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Default: probe succeeds (git is available inside the container).
-  dockerExec.mockResolvedValue('true\n');
-  // Default: container has BACKEND_DIR=backend so the handler resolves /app/backend.
-  inspectContainer.mockResolvedValue({ Config: { Env: ['BACKEND_DIR=backend'] } });
+  // Default: empty diff, successful exit.
+  _setHostGitStreamImpl(() => makeGitResult(''));
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -125,7 +123,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       branch: 'feat',
     });
     const diffOutput = 'diff --git a/foo.js b/foo.js\n+added line\n';
-    dockerExecStream.mockResolvedValue({ stdout: makeStream(diffOutput), abort: vi.fn() });
+    _setHostGitStreamImpl(() => makeGitResult(diffOutput));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
@@ -144,7 +142,6 @@ describe('GET /_fleet/api/features/:key/diff', () => {
       worktreePath: '/tmp/worktrees/app-clean',
       branch: 'clean',
     });
-    dockerExecStream.mockResolvedValue({ stdout: makeStream(''), abort: vi.fn() });
 
     const res = await fetch(`${baseUrl}/features/app-clean/diff`);
 
@@ -153,60 +150,20 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body).toEqual({ status: 'no-changes', patch: '', isEmpty: true, truncated: false, originalBytes: 0 });
   });
 
-  it('invokes dockerExecStream with --no-optional-locks and three-dot merge-base syntax', async () => {
-    getFeature.mockReturnValue({
-      key: 'app-feat',
-      worktreePath: '/opt/worktrees/app-feat',
-      branch: 'feat',
+  it('runs host git against feature.worktreePath with --no-optional-locks and three-dot syntax', async () => {
+    const worktreePath = '/opt/worktrees/app-feat';
+    getFeature.mockReturnValue({ key: 'app-feat', worktreePath, branch: 'feat' });
+
+    const capturedPaths = [];
+    _setHostGitStreamImpl((wt) => {
+      capturedPaths.push(wt);
+      return makeGitResult('');
     });
-    dockerExecStream.mockResolvedValue({ stdout: makeStream(''), abort: vi.fn() });
 
     await fetch(`${baseUrl}/features/app-feat/diff`);
 
-    // BACKEND_DIR=backend (default from beforeEach) resolves to /app/backend.
-    expect(dockerExecStream).toHaveBeenCalledWith(
-      'fleet-app-feat',
-      ['git', '--no-optional-locks', '-C', '/app/backend', 'diff', 'main...HEAD'],
-    );
-  });
-
-  it('uses BACKEND_DIR from container env: resolves git -C to /app/backend', async () => {
-    getFeature.mockReturnValue({
-      key: 'app-feat',
-      worktreePath: '/tmp/worktrees/app-feat',
-      branch: 'feat',
-    });
-    inspectContainer.mockResolvedValue({ Config: { Env: ['BACKEND_DIR=backend'] } });
-    dockerExecStream.mockResolvedValue({ stdout: makeStream(''), abort: vi.fn() });
-
-    await fetch(`${baseUrl}/features/app-feat/diff`);
-
-    expect(dockerExec).toHaveBeenCalledWith(
-      'fleet-app-feat',
-      ['git', '-C', '/app/backend', 'rev-parse', '--is-inside-work-tree'],
-    );
-    expect(dockerExecStream).toHaveBeenCalledWith(
-      'fleet-app-feat',
-      ['git', '--no-optional-locks', '-C', '/app/backend', 'diff', 'main...HEAD'],
-    );
-  });
-
-  it('returns 200 { status: "unavailable" } when inspectContainer returns null (container not found)', async () => {
-    getFeature.mockReturnValue({
-      key: 'app-feat',
-      worktreePath: '/tmp/worktrees/app-feat',
-      branch: 'feat',
-    });
-    inspectContainer.mockResolvedValue(null);
-
-    const res = await fetch(`${baseUrl}/features/app-feat/diff`);
-
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.status).toBe('unavailable');
-    expect(body.reason).toMatch(/container not found/i);
-    expect(body.patch).toBe('');
-    expect(body.isEmpty).toBe(true);
+    // The seam is called with the feature's worktreePath — not a container path.
+    expect(capturedPaths).toEqual([worktreePath]);
   });
 
   it('returns 422 when the feature has no worktreePath', async () => {
@@ -223,29 +180,13 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body.error).toMatch(/worktree/i);
   });
 
-  it('returns 500 when dockerExecStream rejects after a successful probe', async () => {
+  it('returns 200 { status: "unavailable" } when git exits non-zero (worktree gone / not a repo)', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
-    // Probe succeeds (already set in beforeEach); diff stream fails unexpectedly.
-    dockerExecStream.mockRejectedValue(new Error('docker exec stream error'));
-
-    const res = await fetch(`${baseUrl}/features/app-feat/diff`);
-
-    expect(res.status).toBe(500);
-    const body = await res.json();
-    expect(body.error).toMatch(/docker exec stream error/i);
-  });
-
-  it('returns 200 { status: "unavailable" } when the probe exec throws (container not running)', async () => {
-    getFeature.mockReturnValue({
-      key: 'app-feat',
-      worktreePath: '/tmp/worktrees/app-feat',
-      branch: 'feat',
-    });
-    dockerExec.mockRejectedValue(new Error("Container 'fleet-app-feat' is not running"));
+    _setHostGitStreamImpl(() => makeGitResult('', 128));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
@@ -260,20 +201,22 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body.originalBytes).toBe(0);
   });
 
-  it('returns 200 { status: "unavailable" } when the probe output does not contain "true" (not a git repo)', async () => {
+  it('returns 200 { status: "unavailable" } when the git spawn itself fails (binary not found)', async () => {
     getFeature.mockReturnValue({
       key: 'app-feat',
       worktreePath: '/tmp/worktrees/app-feat',
       branch: 'feat',
     });
-    dockerExec.mockResolvedValue('fatal: not a git repository\n');
+    _setHostGitStreamImpl(() => {
+      throw new Error('spawn ENOENT');
+    });
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe('unavailable');
-    expect(body.reason).toBe('not a git repository');
+    expect(body.reason).toMatch(/ENOENT/i);
     expect(body.patch).toBe('');
     expect(body.isEmpty).toBe(true);
   });

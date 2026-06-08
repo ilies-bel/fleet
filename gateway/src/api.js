@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
 import { getAll, getFeature, setActiveFeature, getActiveFeature, unregister, updateStatus, updateTitle, getContainerStatus, appendBuildLog, getBuildLog, subscribeBuildLog, getServices } from './registry.js';
-import { dockerExec, dockerExecStream, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
+import { dockerExec, dockerLogs, stopContainer, startContainer, getContainerStats, inspectContainer, DockerSocketError, DockerContainerError } from './docker.js';
 import { bootstrap } from './cluster/bootstrap.js';
 import { stopFeature } from './backend.js';
 import { getHostMetrics } from './host-metrics.js';
@@ -556,9 +556,7 @@ async function runRebuild(key) {
 
   // Extract image name and service name from compose file.
   // image line looks like `    image: fleet-feature-base-myproject`
-  // service name is the first indented key under `services:`
   let imageName;
-  let composeServiceName;
   try {
     const composeContent = fs.readFileSync(composeFile, 'utf8');
     const imageMatch = composeContent.match(/^\s+image:\s+(.+)$/m);
@@ -566,30 +564,9 @@ async function runRebuild(key) {
       throw new Error(`No 'image:' line found in ${composeFile}`);
     }
     imageName = imageMatch[1].trim();
-    const serviceMatch = composeContent.match(/^services:\s*\n\s+(\S+):/m);
-    composeServiceName = serviceMatch ? serviceMatch[1] : null;
   } catch (err) {
     updateStatus(key, 'failed', `rebuild: could not read compose file: ${err.message}`);
     throw err;
-  }
-
-  // For linked-worktree features, write a compose override that mounts the git
-  // directories read-only so that `git diff main...HEAD` resolves inside the container.
-  const feature = getFeature(key);
-  const gitLinksOverrideFile = path.join(FLEET_PROJECT_ROOT, '.fleet', key, 'docker-compose.gitlinks.yml');
-  if (feature?.gitDir && feature?.gitCommonDir && composeServiceName) {
-    const overrideYaml = [
-      'services:',
-      `  ${composeServiceName}:`,
-      '    volumes:',
-      `      - ${feature.gitDir}:${feature.gitDir}:ro`,
-      `      - ${feature.gitCommonDir}:${feature.gitCommonDir}:ro`,
-      '',
-    ].join('\n');
-    fs.writeFileSync(gitLinksOverrideFile, overrideYaml, 'utf8');
-  } else {
-    // Remove any stale override from a previous registration
-    try { fs.unlinkSync(gitLinksOverrideFile); } catch { /* not present — fine */ }
   }
 
   // Resolve Dockerfile: project-local first, fallback to FLEET_ROOT
@@ -662,12 +639,7 @@ async function runRebuild(key) {
 
     // Step 5 — recreate container with new image
     log(`[rebuild] Recreating container via docker compose up -d...`);
-    const composeArgs = ['compose', '-f', composeFile];
-    if (feature?.gitDir && feature?.gitCommonDir && composeServiceName && fs.existsSync(gitLinksOverrideFile)) {
-      composeArgs.push('-f', gitLinksOverrideFile);
-    }
-    composeArgs.push('up', '-d');
-    await runCommand('docker', composeArgs);
+    await runCommand('docker', ['compose', '-f', composeFile, 'up', '-d']);
 
     // Step 6 — transition to starting
     updateStatus(key, 'starting', null);
@@ -863,15 +835,19 @@ router.post('/cluster/bootstrap', async (req, res) => {
 /**
  * GET /_fleet/api/features/:key/diff
  * Returns the git diff of the feature branch against the merge-base of main,
- * computed inside the feature's running container via Docker exec (three-dot
+ * computed on the HOST directly against feature.worktreePath (three-dot
  * syntax: `git diff main...HEAD`). The read-only `--no-optional-locks` flag
  * ensures the index lock is never taken, so the command cannot collide with
  * in-progress edits.
  *
- * A probe step runs `git rev-parse --is-inside-work-tree` first. If that exec
- * fails (container not running, Docker socket error) or the stdout does not
- * contain "true" (not a git repository), the endpoint responds 200 with
- * `status: 'unavailable'` and a short human-readable reason rather than 500.
+ * The gateway runs as a plain host process and the registry already stores
+ * feature.worktreePath — a fully-resolvable git working tree on the host
+ * filesystem whose .git pointer, per-worktree gitDir, and common object store
+ * all exist on the same host. No container exec or bind-mount is required.
+ *
+ * When git cannot run (worktree path gone, git binary missing, non-zero exit),
+ * the endpoint responds 200 with `status: 'unavailable'` and a short
+ * human-readable reason rather than 500.
  *
  * Output is capped at DIFF_CAP_BYTES. When the underlying git output exceeds
  * the cap, the response carries `truncated: true` and `originalBytes` reflects
@@ -879,7 +855,7 @@ router.post('/cluster/bootstrap', async (req, res) => {
  *
  * Response: { status: 'ok'|'no-changes'|'unavailable', patch: string, isEmpty: boolean, truncated: boolean, originalBytes: number }
  *   status        — 'ok' when patch is non-empty, 'no-changes' when branch matches main,
- *                   'unavailable' when git is not accessible inside the container
+ *                   'unavailable' when git cannot produce a diff
  *   reason        — present only when status is 'unavailable'; short human-readable explanation
  *   patch         — raw unified diff output (empty string when there are no changes)
  *   isEmpty       — true when patch is the empty string
@@ -888,19 +864,30 @@ router.post('/cluster/bootstrap', async (req, res) => {
  *
  * 404 — feature not registered
  * 422 — feature has no worktreePath (cluster-hosted features, for example)
- * 500 — unexpected error after a successful git availability probe
  */
 const DIFF_CAP_BYTES = 1_048_576;
 
-// Mutable shims so tests can swap out docker implementations without module mocking.
-let _dockerExecStreamImpl = dockerExecStream;
-let _dockerExecImpl = dockerExec;
+/**
+ * Mutable shim: spawns `git diff main...HEAD` in the given worktree on the host.
+ * Returns { stdout: Readable, abort: fn, exitCode: Promise<number> }.
+ * exitCode resolves with the process exit code (null SIGTERM → 0); rejects on spawn error.
+ * @internal — tests replace this via _setHostGitStreamImpl to avoid requiring a real git binary.
+ * @param {string} worktreePath
+ * @returns {{ stdout: import('stream').Readable, abort: () => void, exitCode: Promise<number> }}
+ */
+let _hostGitStreamImpl = (worktreePath) => {
+  const proc = spawn('git', ['--no-optional-locks', '-C', worktreePath, 'diff', 'main...HEAD'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const exitCode = new Promise((resolve, reject) => {
+    proc.on('error', reject);
+    proc.on('close', (code) => resolve(code ?? 0));
+  });
+  return { stdout: proc.stdout, abort: () => proc.kill('SIGTERM'), exitCode };
+};
 
-/** @internal — test seam, allows tests to replace the dockerExecStream implementation. */
-export function _setDockerExecStreamImpl(fn) { _dockerExecStreamImpl = fn; }
-
-/** @internal — test seam, allows tests to replace the dockerExec implementation (probe step). */
-export function _setDockerExecImpl(fn) { _dockerExecImpl = fn; }
+/** @internal — test seam, replaces the host git spawn implementation. */
+export function _setHostGitStreamImpl(fn) { _hostGitStreamImpl = fn; }
 
 router.get('/features/:key/diff', async (req, res) => {
   const { key } = req.params;
@@ -912,138 +899,79 @@ router.get('/features/:key/diff', async (req, res) => {
     return res.status(422).json({ error: 'Feature has no worktree path' });
   }
 
-  const containerName = `fleet-${key}`;
-
-  // Resolve source directories from the container's env (same pattern as runSync).
-  // Feature repos are mounted at /app/<subdir>, not at /app itself.
-  let sourceDirs;
   try {
-    const info = await inspectContainer(containerName);
-    if (!info) {
+    const { stdout, abort, exitCode: exitCodePromise } = _hostGitStreamImpl(feature.worktreePath);
+
+    const chunks = [];
+    let originalBytes = 0;
+    let truncated = false;
+    let localCollected = 0;
+
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = () => { if (!settled) { settled = true; resolve(); } };
+      const fail = (err) => { if (!settled) { settled = true; reject(err); } };
+
+      stdout.on('data', (chunk) => {
+        originalBytes += chunk.length;
+        if (truncated) return;
+        const avail = DIFF_CAP_BYTES - localCollected;
+        if (chunk.length <= avail) {
+          chunks.push(chunk);
+          localCollected += chunk.length;
+        } else {
+          if (avail > 0) chunks.push(chunk.slice(0, avail));
+          localCollected = DIFF_CAP_BYTES;
+          truncated = true;
+          abort();
+          finish();
+        }
+      });
+
+      stdout.on('end', finish);
+      stdout.on('close', finish);
+      stdout.on('error', fail);
+    });
+
+    // Wait for process exit; rejects on spawn error (e.g. git binary not found).
+    let exitCode;
+    try {
+      exitCode = await exitCodePromise;
+    } catch (spawnErr) {
       return res.json({
         status: 'unavailable',
-        reason: 'container not found',
+        reason: spawnErr.message || 'git spawn failed',
         patch: '',
         isEmpty: true,
         truncated: false,
         originalBytes: 0,
       });
     }
-    const envMap = Object.fromEntries(
-      (info.Config?.Env ?? []).map(e => {
-        const idx = e.indexOf('=');
-        return idx === -1 ? [e, ''] : [e.slice(0, idx), e.slice(idx + 1)];
-      }),
-    );
-    const candidates = [envMap.BACKEND_DIR, envMap.FRONTEND_DIR].filter(Boolean);
-    sourceDirs = candidates.length > 0 ? candidates.map(d => `/app/${d}`) : ['/app'];
-  } catch (err) {
-    return res.json({
-      status: 'unavailable',
-      reason: err.message || 'container inspect failed',
-      patch: '',
-      isEmpty: true,
-      truncated: false,
-      originalBytes: 0,
-    });
-  }
 
-  // Probe each source dir; keep only the ones that contain a git repo.
-  const repoDirs = [];
-  for (const dir of sourceDirs) {
-    try {
-      const probeOut = await _dockerExecImpl(containerName, [
-        'git', '-C', dir, 'rev-parse', '--is-inside-work-tree',
-      ]);
-      if (probeOut && probeOut.trim().includes('true')) {
-        repoDirs.push(dir);
-      }
-    } catch {
-      // Not a git repo or exec unavailable — skip.
-    }
-  }
-
-  if (repoDirs.length === 0) {
-    return res.json({
-      status: 'unavailable',
-      reason: 'not a git repository',
-      patch: '',
-      isEmpty: true,
-      truncated: false,
-      originalBytes: 0,
-    });
-  }
-
-  // Stream and assemble the diff, respecting DIFF_CAP_BYTES across all repos.
-  // When multiple repos are present each gets a section header so paths are unambiguous.
-  try {
-    const multiRepo = repoDirs.length > 1;
-    const patchParts = [];
-    let globalCollected = 0;
-    let truncated = false;
-    let originalBytes = 0;
-
-    for (const dir of repoDirs) {
-      if (truncated) break;
-
-      const { stdout, abort } = await _dockerExecStreamImpl(containerName, [
-        'git', '--no-optional-locks', '-C', dir, 'diff', 'main...HEAD',
-      ]);
-
-      const repoPatch = await new Promise((resolve, reject) => {
-        const chunks = [];
-        let localCollected = globalCollected;
-        let partOriginalBytes = 0;
-        let didTruncate = false;
-        let responded = false;
-
-        const finish = () => {
-          if (responded) return;
-          responded = true;
-          resolve({ text: Buffer.concat(chunks).toString('utf8'), partOriginalBytes, didTruncate });
-        };
-
-        stdout.on('data', (chunk) => {
-          partOriginalBytes += chunk.length;
-          if (didTruncate) return;
-          const avail = DIFF_CAP_BYTES - localCollected;
-          if (chunk.length <= avail) {
-            chunks.push(chunk);
-            localCollected += chunk.length;
-          } else {
-            if (avail > 0) chunks.push(chunk.slice(0, avail));
-            localCollected = DIFF_CAP_BYTES;
-            didTruncate = true;
-            abort();
-            finish();
-          }
-        });
-
-        stdout.on('end', finish);
-        stdout.on('close', finish);
-        stdout.on('error', (err) => {
-          if (responded) return;
-          responded = true;
-          reject(err);
-        });
+    // Non-zero exit without truncation means git actually failed (worktree gone, not a repo, etc.)
+    if (exitCode !== 0 && !truncated) {
+      return res.json({
+        status: 'unavailable',
+        reason: `git exited with code ${exitCode}`,
+        patch: '',
+        isEmpty: true,
+        truncated: false,
+        originalBytes: 0,
       });
-
-      originalBytes += repoPatch.partOriginalBytes;
-      globalCollected += Buffer.byteLength(repoPatch.text, 'utf8');
-      if (repoPatch.didTruncate) truncated = true;
-
-      if (repoPatch.text.length > 0) {
-        const header = multiRepo ? `# === ${dir.replace('/app/', '')} ===\n` : '';
-        patchParts.push(header + repoPatch.text);
-      }
     }
 
-    const patch = patchParts.join('');
+    const patch = Buffer.concat(chunks).toString('utf8');
     const isEmpty = patch.length === 0;
-    const status = isEmpty ? 'no-changes' : 'ok';
-    res.json({ status, patch, isEmpty, truncated, originalBytes });
+    res.json({ status: isEmpty ? 'no-changes' : 'ok', patch, isEmpty, truncated, originalBytes });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.json({
+      status: 'unavailable',
+      reason: err.message || 'git command failed',
+      patch: '',
+      isEmpty: true,
+      truncated: false,
+      originalBytes: 0,
+    });
   }
 });
 

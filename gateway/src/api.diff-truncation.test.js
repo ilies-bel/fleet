@@ -1,9 +1,9 @@
 /**
  * Tests for the 1 MB cap on GET /_fleet/api/features/:key/diff
  *
- * Uses Vitest. No module-level mocking is needed: a test seam
- * (_setDockerExecStreamImpl) lets tests inject a fake streaming exec, and
- * the real registry module is used to register a throwaway test feature.
+ * Uses Vitest. The _setHostGitStreamImpl seam lets tests inject a fake
+ * streaming git result without requiring a real git binary. The real registry
+ * module is used to register a throwaway test feature.
  *
  * Run with:
  *   cd gateway && npx vitest run src/api.diff-truncation.test.js
@@ -23,7 +23,6 @@ vi.mock('child_process', () => ({
 // ── mock heavy docker collaborators — not needed for this test ────────────────
 vi.mock('./docker.js', () => ({
   dockerExec: vi.fn(),
-  dockerExecStream: vi.fn(),
   dockerLogs: vi.fn(),
   stopContainer: vi.fn(),
   startContainer: vi.fn(),
@@ -38,8 +37,7 @@ vi.mock('./backend.js', () => ({ stopFeature: vi.fn() }));
 vi.mock('./host-metrics.js', () => ({ getHostMetrics: vi.fn() }));
 
 // ── import after mocks ────────────────────────────────────────────────────────
-import { _setDockerExecStreamImpl, default as router } from './api.js';
-import { dockerExecStream } from './docker.js';
+import { _setHostGitStreamImpl, default as router } from './api.js';
 import { register, unregister } from './registry.js';
 
 const DIFF_CAP_BYTES = 1_048_576;
@@ -70,20 +68,19 @@ beforeAll(async () => {
 
 afterAll(async () => {
   unregister(TEST_KEY);
-  _setDockerExecStreamImpl(dockerExecStream); // restore real impl
   await new Promise((resolve) => server.close(resolve));
 });
 
-// ── Helper: fake streaming exec that emits chunks then closes ─────────────────
+// ── Helper: fake streaming git result that emits chunks then closes ───────────
 
 /**
- * Creates a fake streaming exec result with a stdout EventEmitter that emits
+ * Creates a fake host git stream result with a stdout EventEmitter that emits
  * the given chunks as data events then fires end/close. When abort() is called,
  * emission stops and close fires on the next tick — the in-flight git process
  * is considered terminated.
  *
  * @param {Array<Buffer|string>} chunks
- * @returns {{ stdout: EventEmitter, abort: () => void }}
+ * @returns {{ stdout: EventEmitter, abort: () => void, exitCode: Promise<number> }}
  */
 function makeFakeStream(chunks) {
   const stdout = new EventEmitter();
@@ -106,7 +103,7 @@ function makeFakeStream(chunks) {
     setImmediate(emitNext, remaining.slice(1));
   }, [...chunks]);
 
-  return { stdout, abort };
+  return { stdout, abort, exitCode: Promise.resolve(0) };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -115,7 +112,7 @@ describe('GET /features/:key/diff — 1 MB cap', () => {
   it('truncates a 2 MB patch to <= 1 MB and sets truncated=true', async () => {
     // 2 MB of ASCII 'A' bytes — byte length == string length, so patch.length is predictable
     const twoMB = Buffer.alloc(2 * 1024 * 1024, 65);
-    _setDockerExecStreamImpl(() => Promise.resolve(makeFakeStream([twoMB])));
+    _setHostGitStreamImpl(() => makeFakeStream([twoMB]));
 
     const res = await fetch(`${baseUrl}/features/${TEST_KEY}/diff`);
     expect(res.status).toBe(200);
@@ -128,7 +125,7 @@ describe('GET /features/:key/diff — 1 MB cap', () => {
 
   it('does not set truncated for a below-cap patch', async () => {
     const smallPatch = 'diff --git a/foo.js b/foo.js\n+small change\n';
-    _setDockerExecStreamImpl(() => Promise.resolve(makeFakeStream([smallPatch])));
+    _setHostGitStreamImpl(() => makeFakeStream([smallPatch]));
 
     const res = await fetch(`${baseUrl}/features/${TEST_KEY}/diff`);
     expect(res.status).toBe(200);

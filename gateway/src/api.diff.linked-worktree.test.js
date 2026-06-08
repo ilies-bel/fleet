@@ -1,17 +1,16 @@
 /**
- * Tests for GET /_fleet/api/features/:key/diff when the feature is a linked
- * git worktree (the worktree's .git is a pointer file, not a directory).
+ * Tests for GET /_fleet/api/features/:key/diff when the feature lives in a
+ * git linked worktree.
  *
- * For linked-worktree features the registry carries `gitDir` and `gitCommonDir`
- * fields that are used to mount the main repo's object store read-only into the
- * feature container.  The diff endpoint itself is unchanged — it still runs
- * `git diff main...HEAD` via dockerExec — so these tests verify that the
- * presence of the extra registry fields does not break the response contract
- * and that the same patch is returned as for a normal-repo feature.
+ * Host-side diff runs `git -C feature.worktreePath diff main...HEAD` directly
+ * on the host. The worktree root resolves the full repo through its .git pointer
+ * file, so no special container-mount logic is needed — a single git invocation
+ * against worktreePath covers the whole feature branch.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'http';
+import { PassThrough } from 'node:stream';
 import express from 'express';
 
 // ── mock child_process before importing api.js ────────────────────────────────
@@ -59,8 +58,24 @@ vi.mock('./host-metrics.js', () => ({
 
 // ── import after mocks are in place ──────────────────────────────────────────
 import { getFeature } from './registry.js';
-import { dockerExec } from './docker.js';
-import router from './api.js';
+import { _setHostGitStreamImpl, default as router } from './api.js';
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function makeStream(str) {
+  const pt = new PassThrough();
+  if (str) pt.write(Buffer.from(str, 'utf8'));
+  pt.end();
+  return pt;
+}
+
+function makeGitResult(str, exitCode = 0) {
+  return {
+    stdout: makeStream(str),
+    abort: vi.fn(),
+    exitCode: Promise.resolve(exitCode),
+  };
+}
 
 // ── test server lifecycle ─────────────────────────────────────────────────────
 let server;
@@ -86,16 +101,13 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _setHostGitStreamImpl(() => makeGitResult(''));
 });
 
-// ── a linked-worktree feature entry ──────────────────────────────────────────
+// ── a linked-worktree feature entry (worktreePath is the only field the diff endpoint reads) ──
 const LINKED_FEATURE = {
   key: 'app-feat',
   worktreePath: '/main/.worktrees/feat',
-  // .git pointer file inside the worktree points here:
-  gitDir: '/main/.git/worktrees/feat',
-  // main repo's object store (two levels up from the per-worktree gitdir):
-  gitCommonDir: '/main/.git',
   branch: 'feat',
 };
 
@@ -105,7 +117,7 @@ describe('GET /_fleet/api/features/:key/diff — linked-worktree feature', () =>
   it('returns { patch, isEmpty: false } for a linked-worktree feature with a non-empty diff', async () => {
     getFeature.mockReturnValue(LINKED_FEATURE);
     const diffOutput = 'diff --git a/src/Foo.java b/src/Foo.java\n+  // new line\n';
-    dockerExec.mockResolvedValue(diffOutput);
+    _setHostGitStreamImpl(() => makeGitResult(diffOutput));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
@@ -117,38 +129,42 @@ describe('GET /_fleet/api/features/:key/diff — linked-worktree feature', () =>
     expect(body.originalBytes).toBe(diffOutput.length);
   });
 
-  it('returns { patch: "", isEmpty: true } for a linked-worktree feature with no changes', async () => {
+  it('returns { status: "no-changes", patch: "", isEmpty: true } for a linked-worktree feature with no changes', async () => {
     getFeature.mockReturnValue(LINKED_FEATURE);
-    dockerExec.mockResolvedValue('');
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ patch: '', isEmpty: true, truncated: false, originalBytes: 0 });
+    expect(body).toEqual({ status: 'no-changes', patch: '', isEmpty: true, truncated: false, originalBytes: 0 });
   });
 
-  it('invokes dockerExec with the same args as for a normal-repo feature', async () => {
+  it('runs host git against the worktreePath (not a container path)', async () => {
     getFeature.mockReturnValue(LINKED_FEATURE);
-    dockerExec.mockResolvedValue('');
+    const capturedPaths = [];
+    _setHostGitStreamImpl((wt) => {
+      capturedPaths.push(wt);
+      return makeGitResult('');
+    });
 
     await fetch(`${baseUrl}/features/app-feat/diff`);
 
-    expect(dockerExec).toHaveBeenCalledWith(
-      'fleet-app-feat',
-      ['git', '--no-optional-locks', '-C', '/app', 'diff', 'main...HEAD'],
-    );
+    // The seam receives the host worktreePath, not any /app container path.
+    expect(capturedPaths).toEqual([LINKED_FEATURE.worktreePath]);
   });
 
-  it('returns 500 when dockerExec rejects for a linked-worktree feature', async () => {
+  it('returns 200 { status: "unavailable" } when git exits non-zero for a linked-worktree feature', async () => {
     getFeature.mockReturnValue(LINKED_FEATURE);
-    dockerExec.mockRejectedValue(new Error('fatal: not a git repository'));
+    _setHostGitStreamImpl(() => makeGitResult('', 128));
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toMatch(/not a git repository/i);
+    expect(body.status).toBe('unavailable');
+    expect(typeof body.reason).toBe('string');
+    expect(body.patch).toBe('');
+    expect(body.isEmpty).toBe(true);
   });
 
   it('returns 422 when a linked-worktree feature has no worktreePath', async () => {

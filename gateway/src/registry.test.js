@@ -7,7 +7,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -214,83 +214,3 @@ describe('loadPersistedActive', () => {
   });
 });
 
-// ── gitDir / gitCommonDir detection ───────────────────────────────────────────
-
-describe('register() — gitDir/gitCommonDir detection', () => {
-  beforeEach(() => { for (const f of getAll()) unregister(f.key); });
-  afterEach(() => { for (const f of getAll()) unregister(f.key); });
-
-  test('normal repo: .git is a directory → gitDir and gitCommonDir are non-null', () => {
-    // Create a temp directory that looks like a normal git repo root:
-    // <repoRoot>/.git/ is a directory (not a gitdir pointer file).
-    const repoRoot = mkdtempSync(join(tmpdir(), 'fleet-normal-repo-'));
-    mkdirSync(join(repoRoot, '.git'));
-    try {
-      register('proj', 'nr', 'main', repoRoot, 'up');
-      const feature = getAll().find(f => f.key === 'proj-nr');
-      assert.ok(feature, 'feature must be registered');
-      assert.ok(feature.gitDir !== null, 'gitDir must be non-null for a normal repo');
-      assert.ok(feature.gitCommonDir !== null, 'gitCommonDir must be non-null for a normal repo');
-      assert.equal(feature.gitDir, join(repoRoot, '.git'), 'gitDir must point to <repoRoot>/.git');
-      assert.equal(feature.gitCommonDir, join(repoRoot, '.git'), 'gitCommonDir must equal gitDir for a normal repo');
-    } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
-    }
-  });
-
-  test('normal repo: gitDir equals gitCommonDir (same path)', () => {
-    const repoRoot = mkdtempSync(join(tmpdir(), 'fleet-normal-repo-'));
-    mkdirSync(join(repoRoot, '.git'));
-    try {
-      register('proj', 'nr2', 'main', repoRoot, 'up');
-      const feature = getAll().find(f => f.key === 'proj-nr2');
-      assert.ok(feature, 'feature must be registered');
-      assert.equal(feature.gitDir, feature.gitCommonDir, 'gitDir and gitCommonDir must be the same path for a normal repo');
-    } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
-    }
-  });
-
-  test('linked worktree: .git is a pointer file → gitDir/gitCommonDir derived from pointer', () => {
-    // Simulate a linked worktree: worktreePath/.git is a file with "gitdir: " content.
-    const tmpDir = mkdtempSync(join(tmpdir(), 'fleet-linked-wt-'));
-    const mainGit = join(tmpDir, 'main.git');
-    const wtGitDir = join(mainGit, 'worktrees', 'feat');
-    const worktreePath = join(tmpDir, 'worktree-feat');
-    mkdirSync(mainGit, { recursive: true });
-    mkdirSync(wtGitDir, { recursive: true });
-    mkdirSync(worktreePath, { recursive: true });
-    // Write the gitdir pointer file
-    writeFileSync(join(worktreePath, '.git'), `gitdir: ${wtGitDir}\n`, 'utf8');
-    try {
-      register('proj', 'lw', 'feat', worktreePath, 'up');
-      const feature = getAll().find(f => f.key === 'proj-lw');
-      assert.ok(feature, 'feature must be registered');
-      assert.equal(feature.gitDir, wtGitDir, 'gitDir must be the resolved per-worktree git dir');
-      assert.equal(feature.gitCommonDir, mainGit, 'gitCommonDir must be the common .git dir (two levels up from gitDir)');
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  test('no .git at all → gitDir and gitCommonDir remain null', () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'fleet-no-git-'));
-    try {
-      register('proj', 'ng', 'main', tmpDir, 'up');
-      const feature = getAll().find(f => f.key === 'proj-ng');
-      assert.ok(feature, 'feature must be registered');
-      assert.equal(feature.gitDir, null, 'gitDir must be null when no .git exists');
-      assert.equal(feature.gitCommonDir, null, 'gitCommonDir must be null when no .git exists');
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  test('null worktreePath → gitDir and gitCommonDir remain null', () => {
-    register('proj', 'nw', 'main', null, 'up');
-    const feature = getAll().find(f => f.key === 'proj-nw');
-    assert.ok(feature, 'feature must be registered');
-    assert.equal(feature.gitDir, null, 'gitDir must be null when worktreePath is null');
-    assert.equal(feature.gitCommonDir, null, 'gitCommonDir must be null when worktreePath is null');
-  });
-});

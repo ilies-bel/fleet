@@ -1,6 +1,6 @@
 import { inspectContainer } from './docker.js';
-import { writeFileSync, renameSync, readFileSync, statSync } from 'node:fs';
-import { dirname, resolve as resolvePath } from 'node:path';
+import { writeFileSync, renameSync, readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
 /**
@@ -157,7 +157,7 @@ export function loadPersistedActive() {
 /**
  * @typedef {{ name: string, port: number }} ServiceEntry
  * @typedef {{ cluster: string, namespace: string }} HostDescriptor
- * @typedef {{ project: string, name: string, key: string, branch: string, worktreePath: string|null, gitDir: string|null, gitCommonDir: string|null, title: string|null, host: HostDescriptor|null, addedAt: Date, status: string, error: string|null, services: ServiceEntry[] }} FeatureEntry
+ * @typedef {{ project: string, name: string, key: string, branch: string, worktreePath: string|null, title: string|null, host: HostDescriptor|null, addedAt: Date, status: string, error: string|null, services: ServiceEntry[] }} FeatureEntry
  * @type {Map<string, FeatureEntry>}
  */
 const features = new Map();
@@ -302,41 +302,13 @@ export function register(project, name, branch, worktreePath = null, status = 'u
   const key = `${project}-${name}`;
   const normalised = normaliseStatus(status);
 
-  // Detect linked worktree: if worktreePath/.git is a file starting with "gitdir: ",
-  // resolve the per-worktree gitdir and the common gitdir (the main repo's .git/).
-  let gitDir = null;
-  let gitCommonDir = null;
-  if (worktreePath) {
-    try {
-      const gitFileContent = readFileSync(`${worktreePath}/.git`, 'utf8').trim();
-      if (gitFileContent.startsWith('gitdir: ')) {
-        const rel = gitFileContent.slice('gitdir: '.length).trim();
-        gitDir = resolvePath(worktreePath, rel);
-        // Standard layout: gitDir = /main/.git/worktrees/<name>
-        // so gitCommonDir = gitDir/../../ = /main/.git
-        gitCommonDir = resolvePath(gitDir, '..', '..');
-      }
-    } catch {
-      // .git may be a directory (normal repo root) — check with statSync.
-      try {
-        const s = statSync(`${worktreePath}/.git`);
-        if (s.isDirectory()) {
-          gitDir = resolvePath(worktreePath, '.git');
-          gitCommonDir = gitDir;
-        }
-      } catch {
-        // No .git at all — leave null.
-      }
-    }
-  }
-
   // When re-registering an existing key with title=null (the common case for
   // `fleet add` re-runs), preserve any user-set title from the titles store so
   // a dashboard rename is not clobbered.  A non-null title from the caller
   // (explicit registration title) always wins and also updates the store.
   const effectiveTitle = title ?? persistedTitles[key] ?? null;
   if (title !== null) persistedTitles[key] = title;
-  features.set(key, { project, name, key, branch, worktreePath, gitDir, gitCommonDir, title: effectiveTitle, host, addedAt: new Date(), status: normalised, error, services });
+  features.set(key, { project, name, key, branch, worktreePath, title: effectiveTitle, host, addedAt: new Date(), status: normalised, error, services });
   persistRegistryBaseline();
   if (activeFeature === null && normalised === 'up') {
     activeFeature = key;
