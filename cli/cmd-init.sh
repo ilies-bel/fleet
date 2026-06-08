@@ -748,8 +748,13 @@ for i in "${!SVC_NAMES[@]}"; do
 done
 
 # ─── Build per-vite-service base images via buildx + BUILDKIT_SYNTAX ─────────
-# Pin the railpack-frontend image tag here — bump this single variable to upgrade.
-_RAILPACK_FRONTEND_TAG="latest"
+# Derive the railpack-frontend tag from the installed railpack binary so the
+# BuildKit frontend matches the plan format.  Falls back to "latest" when the
+# binary is absent or --version output is unparseable.
+_RAILPACK_VER=$(railpack --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+_RAILPACK_FRONTEND_TAG="${_RAILPACK_VER:+v${_RAILPACK_VER}}"
+_RAILPACK_FRONTEND_TAG="${_RAILPACK_FRONTEND_TAG:-latest}"
+
 _HAS_VITE=0
 for i in "${!SVC_NAMES[@]}"; do
   [ "${SVC_STACKS[$i]}" = "vite" ] || continue
@@ -758,11 +763,18 @@ for i in "${!SVC_NAMES[@]}"; do
 done
 
 if [ "${_HAS_VITE}" -eq 1 ]; then
+  # railpack's BuildKit frontend uses the mergeop LLB primitive, which the
+  # default Docker daemon (overlay2 storage driver) disables.  A dedicated
+  # docker-container driver builder enables the containerd worker that
+  # supports mergeop.  Create it once; subsequent runs reuse the existing one.
+  docker buildx inspect fleet-railpack >/dev/null 2>&1 \
+    || docker buildx create --name fleet-railpack --driver docker-container --bootstrap
   for i in "${!SVC_NAMES[@]}"; do
     [ "${SVC_STACKS[$i]}" = "vite" ] || continue
     VITE_IMAGE="fleet-feature-base-${PROJECT_NAME}-${SVC_NAMES[$i]}"
-    info "Building vite base image ${VITE_IMAGE} from railpack plan..."
+    info "Building vite base image ${VITE_IMAGE} from railpack plan (builder: fleet-railpack, tag: ${_RAILPACK_FRONTEND_TAG})..."
     docker buildx build \
+      --builder fleet-railpack \
       --load \
       --build-arg "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend:${_RAILPACK_FRONTEND_TAG}" \
       -t "${VITE_IMAGE}" \
