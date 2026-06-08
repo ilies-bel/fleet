@@ -747,6 +747,30 @@ for i in "${!SVC_NAMES[@]}"; do
   info "Generated railpack plan: ${plan_path}"
 done
 
+# ─── Build per-vite-service base images via buildx + BUILDKIT_SYNTAX ─────────
+# Pin the railpack-frontend image tag here — bump this single variable to upgrade.
+_RAILPACK_FRONTEND_TAG="latest"
+_HAS_VITE=0
+for i in "${!SVC_NAMES[@]}"; do
+  [ "${SVC_STACKS[$i]}" = "vite" ] || continue
+  _HAS_VITE=1
+  break
+done
+
+if [ "${_HAS_VITE}" -eq 1 ]; then
+  for i in "${!SVC_NAMES[@]}"; do
+    [ "${SVC_STACKS[$i]}" = "vite" ] || continue
+    VITE_IMAGE="fleet-feature-base-${PROJECT_NAME}-${SVC_NAMES[$i]}"
+    info "Building vite base image ${VITE_IMAGE} from railpack plan..."
+    docker buildx build \
+      --load \
+      --build-arg "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend:${_RAILPACK_FRONTEND_TAG}" \
+      -t "${VITE_IMAGE}" \
+      -f "${FLEET_DIR}/${SVC_DIRS[$i]}/railpack.json" \
+      "${PROJECT_ROOT}/${SVC_DIRS[$i]}"
+  done
+fi
+
 # ─── Generate and build project-scoped base image ────────────────────────────
 PROJECT_LOCAL_DOCKERFILE="${PWD}/.fleet/Dockerfile.feature-base"
 
