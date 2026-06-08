@@ -77,6 +77,7 @@ const [logFeature, setLogFeature] = useState(null);
   const [isCapture, setIsCapture] = useState(false);
   const toggleCapture = useCallback(() => setIsCapture(prev => !prev), []);
   const [notesOpen, setNotesOpen] = useState(false);
+  useEffect(() => { if (!isCapture) setNotesOpen(false); }, [isCapture]);
   const { notesByWorktree, addNote, removeNote, clearForWorktree } = useReviewNotes();
 
   // Key the user just clicked [ACTIVATE] on; suppresses poll-driven
@@ -187,14 +188,14 @@ const activeTitle = activeFeature?.title || activeFeature?.name || '';
         onToggleNotes={() => setNotesOpen(o => !o)}
       />
 
-      {activePreview && (
+      {activePreview && isCapture && (
         <ReviewNotesPanel
           notes={notesByWorktree[activePreview] ?? []}
           worktree={activePreview}
           addNote={addNote}
           removeNote={removeNote}
           clearForWorktree={clearForWorktree}
-          open={notesOpen}
+          open={isCapture && notesOpen}
           onClose={() => setNotesOpen(false)}
         />
       )}

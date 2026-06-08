@@ -118,7 +118,7 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
             >
               [CAPTURE]
             </Button>
-            {notes && notes.length > 0 && (
+            {isCapture && notes && notes.length > 0 && (
               <button
                 onClick={onToggleNotes}
                 style={notesOpen
