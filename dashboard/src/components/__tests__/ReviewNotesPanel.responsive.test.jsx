@@ -24,7 +24,7 @@ vi.mock('../../api.js', () => ({
  * Minimal wrapper that owns notesOpen state and wires both components together,
  * mirroring how FeaturesPage in App.jsx connects them.
  */
-function NotesDrawerWrapper({ notes }) {
+function NotesDrawerWrapper({ notes, isCapture = true }) {
   const [notesOpen, setNotesOpen] = useState(false);
   return (
     <>
@@ -32,7 +32,7 @@ function NotesDrawerWrapper({ notes }) {
         activePreview="feat-test"
         branch="test-branch"
         previewKey={0}
-        isCapture={false}
+        isCapture={isCapture}
         onToggleCapture={() => {}}
         addNote={() => {}}
         notes={notes}
