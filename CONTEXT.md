@@ -30,7 +30,7 @@ A dashboard preview state in which clicks inside the previewed app are intercept
 _Avoid_: picker mode, inspect mode
 
 **feature diff**:
-The set of changes in a feature's branch relative to main (git diff main...HEAD), computed read-only against the feature's own git metadata and shown in the dashboard DIFF tab.
+The set of changes in a feature's branch relative to main (git diff main...HEAD), produced read-only by the feature's own container from a full git context (worktree root plus the repo object store, both mounted read-only) and shown in the dashboard DIFF tab.
 _Avoid_: patch, changeset
 
 **feature backend**:
