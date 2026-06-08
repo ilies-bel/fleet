@@ -149,3 +149,13 @@
     transform: translateX(0);
   }
 }
+
+/* Touch target: coarse-pointer devices need >=44px tap surface.
+   The visual ✕ glyph stays small; only the hit area grows. */
+@media (pointer: coarse) {
+  .review-notes-panel__delete-btn {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0.75rem 0.5rem;
+  }
+}

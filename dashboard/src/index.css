@@ -135,6 +135,15 @@ input {
   }
 }
 
+/* ── Preview toolbar: title ellipsis hook ─────────────────────────────────── */
+/* min-width:0 lets the flex item shrink below its text content width so
+   overflow:hidden + text-overflow:ellipsis (set inline) can actually fire.
+   Applied globally — not just at narrow widths — because the item can
+   squeeze at any viewport when the action buttons fill the available space. */
+.preview-toolbar__title {
+  min-width: 0;
+}
+
 /* ── Responsive: off-canvas feature drawer (< 768px) ─────────────────────── */
 
 @media (max-width: 767px) {
@@ -230,6 +239,43 @@ input {
   .resource-table .cpu-bar-track {
     flex: 1 !important;
     width: auto !important;
+  }
+
+  /* Preview toolbar: wrap at narrow viewports instead of clipping.
+     The inline height:40px is overridden so a second row has room.
+     Row 1 holds the tabs + title (title ellipsizes via min-width:0 above);
+     Row 2 holds the action buttons if they cannot share Row 1. */
+  .preview-toolbar {
+    height: auto !important;
+    min-height: 40px;
+    flex-wrap: wrap;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    row-gap: var(--space-2);
+    align-content: center;
+  }
+}
+
+/* ── Touch targets: coarse-pointer devices (touch screens) ────────────────── */
+/* Only applied when the primary pointing device is coarse (finger/stylus).
+   pointer:fine (mouse, trackpad) is unaffected — desktop density is a feature.
+   !important is intentional: these buttons carry inline padding styles that
+   would otherwise take cascade precedence over this rule. */
+@media (pointer: coarse) {
+  .toolbar-btn {
+    min-height: 44px !important;
+    padding-top: 0.75rem !important;
+    padding-bottom: 0.75rem !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .card-config-trigger {
+    min-height: 44px;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    padding-left: 14px;
+    padding-right: 14px;
   }
 }
 

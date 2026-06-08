@@ -8,9 +8,10 @@
  * All other props (onClick, disabled, style, aria-*, title …) are forwarded
  * to the underlying <button> via the rest spread.
  */
-export function Button({ tone = 'primary', children, ...rest }) {
+export function Button({ tone = 'primary', className, children, ...rest }) {
+  const cls = className ? `btn btn-${tone} ${className}` : `btn btn-${tone}`;
   return (
-    <button className={`btn btn-${tone}`} {...rest}>
+    <button className={cls} {...rest}>
       {children}
     </button>
   );

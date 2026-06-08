@@ -57,24 +57,29 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
       {/* Toolbar */}
-      <div style={{
-        height: '40px',
-        background: '#0d0d0d',
-        borderBottom: '1px solid var(--color-border)',
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 var(--space-3)',
-        gap: 'var(--space-2)',
-        flexShrink: 0,
-      }}>
+      <div
+        className="preview-toolbar"
+        style={{
+          height: '40px',
+          background: '#0d0d0d',
+          borderBottom: '1px solid var(--color-border)',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 var(--space-3)',
+          gap: 'var(--space-2)',
+          flexShrink: 0,
+        }}
+      >
         {/* View-mode tabs — left-aligned */}
         <button
+          className="toolbar-btn"
           onClick={() => setViewMode('preview')}
           style={viewMode === 'preview' ? activeTabBtn : toolbarBtn}
         >
           [PREVIEW]
         </button>
         <button
+          className="toolbar-btn"
           onClick={() => setViewMode('diff')}
           style={viewMode === 'diff' ? activeTabBtn : toolbarBtn}
         >
@@ -83,6 +88,7 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
 
         {/* Feature title — expands to fill available space */}
         <span
+          className="preview-toolbar__title"
           title={`${activePreview} // ${branch}`}
           style={{
             fontFamily: 'var(--font-mono)',
@@ -101,6 +107,7 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
         {viewMode === 'preview' && (
           <>
             <Button
+              className="toolbar-btn"
               tone="primary"
               aria-pressed={isCapture}
               onClick={onToggleCapture}
@@ -126,12 +133,14 @@ export default function PreviewFrame({ activePreview, branch, previewKey, title,
               </button>
             )}
             <button
+              className="toolbar-btn"
               onClick={() => window.open(PROXY_URL, '_blank')}
               style={toolbarBtn}
             >
               [↗ OPEN IN TAB]
             </button>
             <button
+              className="toolbar-btn"
               onClick={() => { if (iframeRef.current) iframeRef.current.src = PROXY_URL; }}
               style={toolbarBtn}
             >
