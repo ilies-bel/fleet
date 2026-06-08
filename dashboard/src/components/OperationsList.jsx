@@ -25,7 +25,7 @@ export default function OperationsList({ onSelect }) {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4)' }}>
-      <table style={{
+      <table className="ops-table" style={{
         width: '100%',
         maxWidth: '1100px',
         borderCollapse: 'collapse',
@@ -61,16 +61,16 @@ export default function OperationsList({ onSelect }) {
                 cursor: onSelect ? 'pointer' : 'default',
               }}
             >
-              <td style={tdStyle}>{op.kind}</td>
-              <td style={tdStyle}>{op.key}</td>
-              <td style={tdStyle}>
+              <td data-label="KIND" style={tdStyle}>{op.kind}</td>
+              <td data-label="KEY" style={tdStyle}>{op.key}</td>
+              <td data-label="STARTED" style={tdStyle}>
                 <span title={absoluteTime(op.startedAt)}>{relativeTime(op.startedAt)}</span>
               </td>
-              <td style={tdStyle}>
+              <td data-label="ENDED" style={tdStyle}>
                 <span title={absoluteTime(op.endedAt)}>{relativeTime(op.endedAt)}</span>
               </td>
-              <td style={{ ...tdStyle, color: outcomeColor(op.outcome) }}>{op.outcome ?? '…'}</td>
-              <td style={tdStyle}>
+              <td data-label="OUTCOME" style={{ ...tdStyle, color: outcomeColor(op.outcome) }}>{op.outcome ?? '…'}</td>
+              <td data-label="REASON" style={tdStyle}>
                 {op.outcome === 'failure' && op.reasonCode
                   ? <span className={`badge badge-${op.reasonCode.split(':')[0]}`} style={reasonBadgeStyle(op.reasonCode)}>{op.reasonCode}</span>
                   : null}

@@ -173,6 +173,37 @@ input {
     padding: 0.4rem 1rem;
     row-gap: 0.3rem;
   }
+
+  /* ── ops-table: stacked-row layout below 768px ────────────────────────────
+     Each <tr> becomes a labeled block; the column headers are hidden and
+     replaced by data-label::before pseudo-elements inside each <td>.
+     Focus ring and role=button keyboard behaviour are preserved because
+     focusability lives on the <tr> element, unaffected by display:block.  */
+  .ops-table thead { display: none; }
+  .ops-table tr {
+    display: block;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .ops-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-1) var(--space-2);
+    border-bottom: none;
+  }
+  .ops-table td::before {
+    content: attr(data-label);
+    color: var(--color-muted);
+    font-size: 0.6rem;
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+  }
+  /* Empty-state cell spans all columns — restore block + center so the
+     "no operations recorded" text doesn't get split by space-between. */
+  .ops-table td[colspan] {
+    display: block;
+    text-align: center;
+  }
 }
 
 /* ── Diff pane ─────────────────────────────────────────────────────────────── */
