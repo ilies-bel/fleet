@@ -41,7 +41,7 @@ function CpuBar({ percent }) {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-      <div style={{
+      <div className="cpu-bar-track" style={{
         width: '80px',
         height: '6px',
         background: 'var(--color-border)',
@@ -167,7 +167,7 @@ export default function ResourceMonitor() {
         </div>
       )}
 
-      <table style={{ width: '100%', maxWidth: '1100px', borderCollapse: 'collapse' }}>
+      <table className="resource-table" style={{ width: '100%', maxWidth: '1100px', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
             <th style={{ ...th, textAlign: 'left' }}>FEATURE</th>
@@ -204,19 +204,19 @@ export default function ResourceMonitor() {
 
               return (
                 <tr key={r.key} style={{ background: '#0d0d0d' }}>
-                  <td style={{ ...col, color: 'var(--color-ink)', fontWeight: 700 }}>{r.name}</td>
-                  <td style={{ ...col, color: 'var(--color-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.project || '—'}</td>
-                  <td style={{ ...col, color: 'var(--color-muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch}</td>
-                  <td style={{ ...col, color: statusColor }}>{r.status.toUpperCase()}</td>
-                  <td style={col}>
+                  <td data-label="FEATURE" style={{ ...col, color: 'var(--color-ink)', fontWeight: 700 }}>{r.name}</td>
+                  <td data-label="PROJECT" style={{ ...col, color: 'var(--color-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.project || '—'}</td>
+                  <td data-label="BRANCH" style={{ ...col, color: 'var(--color-muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch}</td>
+                  <td data-label="STATUS" style={{ ...col, color: statusColor }}>{r.status.toUpperCase()}</td>
+                  <td data-label="CPU" style={col}>
                     {r.status === 'running'
                       ? <CpuBar percent={r.cpuPercent} />
                       : <span style={{ color: 'var(--color-ink-dim)' }}>—</span>}
                   </td>
-                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : 'var(--color-ink-dim)' }}>
+                  <td data-label="MEMORY" style={{ ...col, color: r.status === 'running' ? '#ccc' : 'var(--color-ink-dim)' }}>
                     {r.status === 'running' ? fmtMem(r.memUsageMB, r.memLimitMB) : '—'}
                   </td>
-                  <td style={{ ...col, color: r.status === 'running' ? '#ccc' : 'var(--color-ink-dim)' }}>
+                  <td data-label="NETWORK" style={{ ...col, color: r.status === 'running' ? '#ccc' : 'var(--color-ink-dim)' }}>
                     {r.status === 'running' ? fmtNet(r.netRxMB, r.netTxMB) : '—'}
                   </td>
                 </tr>

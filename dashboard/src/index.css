@@ -204,6 +204,33 @@ input {
     display: block;
     text-align: center;
   }
+
+  /* ── Resource table: stacked-row layout < 768px ─────────────────────── */
+  /* thead is hidden; each tr becomes a block; labeled cells stack vertically.
+     Only cells carrying data-label get the flex treatment — skeleton rows and
+     the empty-state colspan row (no data-label) stay as plain block cells. */
+  .resource-table thead { display: none; }
+  .resource-table tr { display: block; border-bottom: 1px solid var(--color-border); }
+  .resource-table td[data-label] {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-1) var(--space-3);
+    border-bottom: none;
+    max-width: none !important;
+  }
+  .resource-table td[data-label]::before {
+    content: attr(data-label);
+    color: var(--color-muted);
+    font-size: 0.6rem;
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+  }
+  /* Let the CpuBar track fill the available flex space instead of staying 80px */
+  .resource-table .cpu-bar-track {
+    flex: 1 !important;
+    width: auto !important;
+  }
 }
 
 /* ── Diff pane ─────────────────────────────────────────────────────────────── */
