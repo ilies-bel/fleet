@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests for fleet init's railpack plan generation for Vite subprojects.
+# Tests for fleet init's railpack plan generation for Spring subprojects.
 # These tests verify behaviour through the public interface (running cmd-init.sh)
 # with all Docker/external commands stubbed.
 
@@ -32,8 +32,7 @@ STUB
   printf '#!/bin/bash\nexit 0\n' > "${STUB_BIN}/curl"
   chmod +x "${STUB_BIN}/curl"
 
-  # Default railpack stub: emits a minimal valid JSON plan on `plan`, and a
-  # parseable version string on `--version`.
+  # railpack stub: emits a minimal valid JSON plan on `plan`.
   cat > "${STUB_BIN}/railpack" <<'STUB'
 #!/bin/bash
 case "${1:-}" in
@@ -50,7 +49,7 @@ teardown() {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-_write_vite_toml() {
+_write_spring_toml() {
   cat > "${PROJ_DIR}/.fleet/fleet.toml" <<TOML
 [project]
 name = "test-proj"
@@ -63,32 +62,32 @@ admin = 4000
 db    = 5432
 
 [[services]]
-name  = "frontend"
-dir   = "frontend"
-stack = "vite"
-port  = 5173
-build = "npm run build"
-run   = "npm run dev"
+name  = "backend"
+dir   = "backend"
+stack = "spring"
+port  = 8081
+build = "mvn package -DskipTests -q"
+run   = "java -jar /home/developer/backend.jar"
 TOML
 }
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-@test "fleet init writes .fleet/<sub>/railpack-plan.json for a vite subproject" {
-  _write_vite_toml
-  mkdir -p "${PROJ_DIR}/frontend"
-  touch "${PROJ_DIR}/frontend/vite.config.js" "${PROJ_DIR}/frontend/package.json"
+@test "fleet init writes .fleet/<sub>/railpack-plan.json for a spring subproject" {
+  _write_spring_toml
+  mkdir -p "${PROJ_DIR}/backend"
+  printf '<project/>\n' > "${PROJ_DIR}/backend/pom.xml"
 
   run env PATH="${STUB_BIN}:${PATH}" bash -c "cd '${PROJ_DIR}' && bash '${SCRIPT_PATH}' 2>&1"
 
   [ "$status" -eq 0 ]
-  [ -f "${PROJ_DIR}/.fleet/frontend/railpack-plan.json" ]
+  [ -f "${PROJ_DIR}/.fleet/backend/railpack-plan.json" ]
 }
 
-@test "fleet init --override overwrites rather than appends railpack-plan.json" {
-  _write_vite_toml
-  mkdir -p "${PROJ_DIR}/frontend"
-  touch "${PROJ_DIR}/frontend/vite.config.js" "${PROJ_DIR}/frontend/package.json"
+@test "fleet init --override regenerates railpack-plan.json for a spring subproject" {
+  _write_spring_toml
+  mkdir -p "${PROJ_DIR}/backend"
+  printf '<project/>\n' > "${PROJ_DIR}/backend/pom.xml"
 
   # First run — plan contains run-1 marker
   cat > "${STUB_BIN}/railpack" <<'STUB'
@@ -114,36 +113,22 @@ STUB
   run env PATH="${STUB_BIN}:${PATH}" bash -c "cd '${PROJ_DIR}' && bash '${SCRIPT_PATH}' --override 2>&1"
   [ "$status" -eq 0 ]
 
-  plan_file="${PROJ_DIR}/.fleet/frontend/railpack-plan.json"
-  [ -f "$plan_file" ]
+  plan_file="${PROJ_DIR}/.fleet/backend/railpack-plan.json"
+  [ -f "${plan_file}" ]
 
-  plan_content=$(cat "$plan_file")
-  # Must contain the second run's content
-  [[ "$plan_content" == *'"run":2'* ]]
-  # Must NOT contain the first run's content (overwrite, not append)
-  [[ "$plan_content" != *'"run":1'* ]]
+  plan_content=$(cat "${plan_file}")
+  [[ "${plan_content}" == *'"run":2'* ]]
+  [[ "${plan_content}" != *'"run":1'* ]]
 }
 
-@test "fleet init aborts with non-zero exit and error message when railpack helper fails" {
-  _write_vite_toml
-  mkdir -p "${PROJ_DIR}/frontend"
-  touch "${PROJ_DIR}/frontend/vite.config.js" "${PROJ_DIR}/frontend/package.json"
-
-  # Stub railpack to fail on 'plan' so railpack_emit_plan's error handler fires
-  cat > "${STUB_BIN}/railpack" <<'STUB'
-#!/bin/bash
-case "${1:-}" in
-  --version) echo "railpack 0.1.0" ;;
-  plan)
-    echo "railpack: analysis failed" >&2
-    exit 1
-    ;;
-esac
-STUB
-  chmod +x "${STUB_BIN}/railpack"
-
-  run env PATH="${STUB_BIN}:${PATH}" bash -c "cd '${PROJ_DIR}' && bash '${SCRIPT_PATH}' 2>&1"
+@test "regression: Dockerfile.feature-base.spring is not referenced in cli, gateway/src, or dashboard/src" {
+  # Exclude *.bats files: this test's own name contains the string as its search target,
+  # and bats test files in general are not production source references.
+  run rg --fixed-strings 'Dockerfile.feature-base.spring' \
+    --glob '!*.bats' \
+    "${WORKTREE_ROOT}/cli/" \
+    "${WORKTREE_ROOT}/gateway/src/" \
+    "${WORKTREE_ROOT}/dashboard/src/"
 
   [ "$status" -ne 0 ]
-  [[ "$output" =~ "railpack" ]]
 }

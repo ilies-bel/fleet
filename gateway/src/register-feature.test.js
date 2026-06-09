@@ -365,14 +365,14 @@ describe('POST /register-feature — composite key contract', () => {
         name: 'broken',
         branch: 'main',
         status: 'failed',
-        error: 'docker build step 3: ENOENT Dockerfile.feature-base.spring',
+        error: 'docker build step 3: ENOENT Dockerfile.feature-base',
       },
     });
 
     const list = await request(server, { method: 'GET', path: '/_fleet/api/features' });
     const feature = list.body.find((f) => f.key === 'myproj-broken');
     assert.equal(feature.status, 'failed');
-    assert.equal(feature.error, 'docker build step 3: ENOENT Dockerfile.feature-base.spring');
+    assert.equal(feature.error, 'docker build step 3: ENOENT Dockerfile.feature-base');
     assert.equal(feature.isActive, false);
   });
 

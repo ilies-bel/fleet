@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # Tests that fleet init routes the warm-build step through build_feature_image:
-# vite services  → docker buildx with BUILDKIT_SYNTAX
-# other stacks   → plain docker build with Dockerfile.feature-base
+# vite/spring services → docker buildx with BUILDKIT_SYNTAX (railpack plan)
+# other stacks         → plain docker build with Dockerfile.feature-base
 #
 # Behaviour is verified through the public interface (running cmd-init.sh) with
 # all Docker/external commands stubbed.
@@ -114,7 +114,7 @@ TOML
   grep -q "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend" "${DOCKER_LOG}"
 }
 
-@test "fleet init against spring fixture uses fragment Dockerfile, not buildx" {
+@test "fleet init against spring fixture invokes docker buildx with BUILDKIT_SYNTAX" {
   _write_spring_toml
   mkdir -p "${PROJ_DIR}/backend"
   printf '<project/>\n' > "${PROJ_DIR}/backend/pom.xml"
@@ -123,9 +123,9 @@ TOML
 
   [ "$status" -eq 0 ]
 
-  # build_feature_image must have issued plain docker build with the fragment Dockerfile
-  grep -q "Dockerfile.feature-base" "${DOCKER_LOG}"
+  # Spring now generates a railpack plan; build_feature_image must issue docker buildx
+  grep -q "^buildx " "${DOCKER_LOG}"
 
-  # Must NOT have invoked buildx with BUILDKIT_SYNTAX
-  ! grep -q "BUILDKIT_SYNTAX" "${DOCKER_LOG}"
+  # The BUILDKIT_SYNTAX build-arg must reference the railpack frontend
+  grep -q "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend" "${DOCKER_LOG}"
 }
