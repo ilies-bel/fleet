@@ -75,24 +75,25 @@ describe('POST /register-feature — composite key contract', () => {
   let server;
 
   // Reset registry state before each test so tests are isolated
-  beforeEach((t, done) => {
+  beforeEach(async () => {
     for (const f of getAll()) {
       unregister(f.key);
     }
     _clearPersistedTitles();
 
     if (server) {
-      server.close(() => {
-        server = buildApp().listen(0, '127.0.0.1', done);
-      });
-    } else {
-      server = buildApp().listen(0, '127.0.0.1', done);
+      await new Promise((resolve) => server.close(resolve));
     }
+    await new Promise((resolve) => {
+      server = buildApp().listen(0, '127.0.0.1', resolve);
+    });
   });
 
-  after((t, done) => {
-    if (server) server.close(done);
-    else done();
+  after(async () => {
+    if (server) {
+      await new Promise((resolve) => server.close(resolve));
+      server = null;
+    }
   });
 
   // ── Happy path: project + name ────────────────────────────────────────────

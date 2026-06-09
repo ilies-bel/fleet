@@ -2,10 +2,10 @@
  * Tests for runRebuild artifact selection.
  *
  * Verifies that runRebuild branches on railpack.json presence:
- *   - vite feature (railpack.json present at .fleet/<key>/railpack.json)
+ *   - vite feature (railpack-plan.json present at .fleet/<key>/railpack-plan.json)
  *     → docker buildx build --load --no-cache --build-arg BUILDKIT_SYNTAX=...
- *       -t <image> -f <railpack.json> <FLEET_PROJECT_ROOT>/<key>
- *   - non-vite feature (no railpack.json present)
+ *       -t <image> -f <railpack-plan.json> <FLEET_PROJECT_ROOT>/<key>
+ *   - non-vite feature (no railpack-plan.json present)
  *     → docker build --load --no-cache -t <image> -f Dockerfile.feature-base <FLEET_ROOT>
  *       (byte-identical to the pre-vite path)
  *
@@ -102,7 +102,7 @@ describe('runRebuild artifact selection', () => {
 
   // ── Vite feature path ───────────────────────────────────────────────────────
 
-  test('vite feature: railpack.json present → docker buildx build with BUILDKIT_SYNTAX arg', async () => {
+  test('plan feature: railpack-plan.json present → docker buildx build with BUILDKIT_SYNTAX arg', async () => {
     const key = 'myproj-frontend';
 
     // Build the fake fleet directory tree
@@ -116,8 +116,8 @@ describe('runRebuild artifact selection', () => {
       `    image: fleet-feature-vite-${key}`,
     ].join('\n'));
 
-    // railpack.json presence signals this is a vite-only feature
-    writeFileSync(join(fleetDir, 'railpack.json'), '{}');
+    // railpack-plan.json presence signals this feature has a generated build plan
+    writeFileSync(join(fleetDir, 'railpack-plan.json'), '{}');
 
     register('myproj', 'frontend', 'main');
 
@@ -141,12 +141,12 @@ describe('runRebuild artifact selection', () => {
       '--build-arg value must be BUILDKIT_SYNTAX=<railpack-frontend>',
     );
 
-    // -f must point at the per-vite railpack.json
+    // -f must point at the per-feature railpack-plan.json
     const fIdx = buildCall.args.indexOf('-f');
     assert.notEqual(fIdx, -1, '-f must be present');
     assert.ok(
-      buildCall.args[fIdx + 1].endsWith('railpack.json'),
-      `-f must point at railpack.json, got: ${buildCall.args[fIdx + 1]}`,
+      buildCall.args[fIdx + 1].endsWith('railpack-plan.json'),
+      `-f must point at railpack-plan.json, got: ${buildCall.args[fIdx + 1]}`,
     );
     assert.ok(
       buildCall.args[fIdx + 1].includes(key),
