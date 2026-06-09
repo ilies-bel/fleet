@@ -924,6 +924,44 @@ apply_stack_template() {
 }
 export -f apply_stack_template
 
+# ─── build_feature_image ──────────────────────────────────────────────────────
+# build_feature_image <sub_name> <image_tag> <context_dir>
+#
+# Builds the base image for a feature's subproject, dispatching on whether a
+# railpack plan file exists for that subproject:
+#
+#   • Plan present  (.fleet/<sub_name>/railpack-plan.json):
+#       docker buildx build --build-arg BUILDKIT_SYNTAX=<railpack-frontend> \
+#         -f .fleet/<sub_name>/railpack-plan.json -t <image_tag> <context_dir>
+#
+#   • Plan absent:
+#       docker build -f .fleet/Dockerfile.feature-base -t <image_tag> <context_dir>
+#
+# Requires FLEET_CONFIG_ROOT to be set (load_fleet_toml exports it).
+build_feature_image() {
+  local sub_name="$1"
+  local image_tag="$2"
+  local context_dir="$3"
+
+  local fleet_dir="${FLEET_CONFIG_ROOT}/.fleet"
+  local plan_file=""
+  [[ -n "${sub_name}" ]] && plan_file="${fleet_dir}/${sub_name}/railpack-plan.json"
+
+  if [[ -n "${plan_file}" ]] && [[ -f "${plan_file}" ]]; then
+    docker buildx build \
+      --build-arg "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend:latest" \
+      -f "${plan_file}" \
+      -t "${image_tag}" \
+      "${context_dir}"
+  else
+    docker build \
+      -f "${fleet_dir}/Dockerfile.feature-base" \
+      -t "${image_tag}" \
+      "${context_dir}"
+  fi
+}
+export -f build_feature_image
+
 # ─── Help ─────────────────────────────────────────────────────────────────────
 show_help() {
   echo ""

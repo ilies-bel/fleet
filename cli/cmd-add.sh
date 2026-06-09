@@ -639,30 +639,18 @@ if lines:
             fh.write(f"{k}={v}\n")
 PYEOF
 
-# ─── Resolve base image tag ──────────────────────────────────────────────────
-# When the project's sole service is vite, use the per-vite base image
-# produced by `fleet init` (fleet-feature-base-<project>-<svc>).  All other
-# configurations (non-vite, multi-service) are byte-identical to the
-# pre-change path: project-local combined image or the generic fallback.
-_vite_only=false
-if [ "${#SVC_NAMES[@]}" -eq 1 ] && [ "${SVC_STACKS[0]}" = "vite" ]; then
-  _vite_only=true
-fi
-
-if [ "${_vite_only}" = "true" ]; then
+# ─── Build feature base image ─────────────────────────────────────────────────
+# Dispatches via build_feature_image (common.sh): if a railpack plan exists for
+# the subproject, builds with docker buildx + BUILDKIT_SYNTAX; otherwise falls
+# back to the project-level .fleet/Dockerfile.feature-base fragment.
+# Single-service projects use a per-service image tag; multi-service projects
+# share one project-level image.
+if [ "${#SVC_NAMES[@]}" -eq 1 ]; then
   FEATURE_BASE_IMAGE="fleet-feature-base-${FLEET_PROJECT_NAME}-${SVC_NAMES[0]}"
-  if ! docker image inspect "${FEATURE_BASE_IMAGE}" >/dev/null 2>&1; then
-    error "Per-vite base image '${FEATURE_BASE_IMAGE}' not found. Run 'fleet init' to build it."
-  fi
-  info "[fleet] Using per-vite base image: ${FEATURE_BASE_IMAGE}"
-elif [ -f "${FLEET_PROJECT_ROOT}/.fleet/Dockerfile.feature-base" ]; then
-  FEATURE_BASE_IMAGE="fleet-feature-base-${FLEET_PROJECT_NAME}"
-  if ! docker image inspect "${FEATURE_BASE_IMAGE}" >/dev/null 2>&1; then
-    error "Project-local base image '${FEATURE_BASE_IMAGE}' not found. Run 'fleet init' to build it."
-  fi
-  info "[fleet] Using project-local base image: ${FEATURE_BASE_IMAGE}"
+  build_feature_image "${SVC_NAMES[0]}" "${FEATURE_BASE_IMAGE}" "${FLEET_PROJECT_ROOT}/${SVC_DIRS[0]}"
 else
-  FEATURE_BASE_IMAGE="fleet-feature-base"
+  FEATURE_BASE_IMAGE="fleet-feature-base-${FLEET_PROJECT_NAME}"
+  build_feature_image "" "${FEATURE_BASE_IMAGE}" "${FLEET_ROOT}"
 fi
 
 # ─── Generate docker-compose.yml (ONE service per feature) ───────────────────
