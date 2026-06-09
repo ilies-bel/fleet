@@ -13,6 +13,14 @@ import { tagError, FAILURE_REASONS } from './failure-reasons.js';
 const router = Router();
 const startedAt = Date.now();
 
+/** Railpack frontend builder image — pinned tag for reproducible vite builds. */
+const RAILPACK_FRONTEND_IMAGE = 'ghcr.io/railwayapp/railpack-frontend:latest';
+
+// Mutable shim so tests can intercept spawn calls without mocking child_process.
+let _spawnImpl = spawn;
+/** @internal — test seam, allows tests to replace spawn without mocking child_process. */
+export function _setSpawnImpl(fn) { _spawnImpl = fn; }
+
 /**
  * GET /_fleet/api/features
  * Returns all registered features with isActive flag.
@@ -537,7 +545,7 @@ router.post('/features/:key/rebuild', async (req, res) => {
  * @param {string} key  composite key (without the 'fleet-' prefix)
  * @returns {Promise<void>}
  */
-async function runRebuild(key) {
+export async function runRebuild(key) {
   const FLEET_PROJECT_ROOT = process.env.FLEET_PROJECT_ROOT;
   const FLEET_ROOT = process.env.FLEET_ROOT;
 
@@ -569,19 +577,28 @@ async function runRebuild(key) {
     throw err;
   }
 
+  // Detect vite-only feature: railpack.json at .fleet/<key>/railpack.json
+  const railpackJson = path.join(FLEET_PROJECT_ROOT, '.fleet', key, 'railpack.json');
+  const isVite = fs.existsSync(railpackJson);
+
   // Resolve Dockerfile: project-local first, fallback to FLEET_ROOT
+  // (only needed for non-vite features; vite uses railpack.json as the recipe)
   const projectDockerfile = path.join(FLEET_PROJECT_ROOT, '.fleet', 'Dockerfile.feature-base');
   const globalDockerfile = path.join(FLEET_ROOT, 'Dockerfile.feature-base');
   const dockerfile = fs.existsSync(projectDockerfile) ? projectDockerfile : globalDockerfile;
 
-  if (!fs.existsSync(dockerfile)) {
+  if (!isVite && !fs.existsSync(dockerfile)) {
     const msg = `rebuild: Dockerfile not found at ${projectDockerfile} or ${globalDockerfile}`;
     updateStatus(key, 'failed', msg);
     throw new Error(msg);
   }
 
   log(`[rebuild] Image:      ${imageName}`);
-  log(`[rebuild] Dockerfile: ${dockerfile}`);
+  if (isVite) {
+    log(`[rebuild] Recipe:     ${railpackJson} (vite/railpack)`);
+  } else {
+    log(`[rebuild] Dockerfile: ${dockerfile}`);
+  }
   log(`[rebuild] Compose:    ${composeFile}`);
 
   /**
@@ -594,7 +611,7 @@ async function runRebuild(key) {
   const runCommand = (cmd, args, { ignoreExitCode = false } = {}) =>
     new Promise((resolve, reject) => {
       log(`[rebuild] + ${cmd} ${args.join(' ')}`);
-      const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const proc = _spawnImpl(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
       const onLine = (chunk) => {
         const text = chunk.toString();
@@ -630,12 +647,22 @@ async function runRebuild(key) {
 
     // Step 4 — rebuild the image
     log(`[rebuild] Building image ${imageName}...`);
-    await runCommand('docker', [
-      'build', '--load', '--no-cache',
-      '-t', imageName,
-      '-f', dockerfile,
-      FLEET_ROOT,
-    ]);
+    if (isVite) {
+      await runCommand('docker', [
+        'buildx', 'build', '--load', '--no-cache',
+        '--build-arg', `BUILDKIT_SYNTAX=${RAILPACK_FRONTEND_IMAGE}`,
+        '-t', imageName,
+        '-f', railpackJson,
+        path.join(FLEET_PROJECT_ROOT, key),
+      ]);
+    } else {
+      await runCommand('docker', [
+        'build', '--load', '--no-cache',
+        '-t', imageName,
+        '-f', dockerfile,
+        FLEET_ROOT,
+      ]);
+    }
 
     // Step 5 — recreate container with new image
     log(`[rebuild] Recreating container via docker compose up -d...`);
