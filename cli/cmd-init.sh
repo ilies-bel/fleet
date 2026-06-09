@@ -739,9 +739,9 @@ fi
 # ─── Discover .env files → .fleet/shared.env ─────────────────────────────────
 discover_env_files "${PROJECT_ROOT}"
 
-# ─── Generate railpack plans for vite services ───────────────────────────────
+# ─── Generate railpack plans for vite and next services ──────────────────────
 for i in "${!SVC_NAMES[@]}"; do
-  [ "${SVC_STACKS[$i]}" = "vite" ] || continue
+  case "${SVC_STACKS[$i]}" in vite|next) ;; *) continue ;; esac
   plan_path="${FLEET_DIR}/${SVC_DIRS[$i]}/railpack-plan.json"
   if [ -f "${plan_path}" ] && [ "${OVERRIDE}" -ne 1 ]; then
     info "Keeping existing ${plan_path} (pass --override to regenerate)"
