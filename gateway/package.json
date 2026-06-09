@@ -5,7 +5,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "bash ../scripts/lint-no-direct-docker.sh && node --test src/**/*.test.js test/**/*.test.js"
+    "test": "bash ../scripts/lint-no-direct-docker.sh && node --test src/**/*.test.js test/**/*.test.js",
+    "test:vitest": "vitest run"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
