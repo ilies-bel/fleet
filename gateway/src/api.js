@@ -1,4 +1,3 @@
-import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import express, { Router } from 'express';
@@ -9,15 +8,14 @@ import { stopFeature } from './backend.js';
 import { getHostMetrics } from './host-metrics.js';
 import { startOperation, endOperation, listOperations, listFailureClusters, appendEvent, getOperation } from './log-store.js';
 import { tagError, FAILURE_REASONS } from './failure-reasons.js';
-import { buildFeatureImage } from './build-dispatch.js';
+import * as containerDispatch from './container-dispatch.js';
+
+// Re-export the spawn seam so existing tests that import _setSpawnImpl from
+// api.js continue to work without modification.
+export { _setSpawnImpl } from './container-dispatch.js';
 
 const router = Router();
 const startedAt = Date.now();
-
-// Mutable shim so tests can intercept spawn calls without mocking child_process.
-let _spawnImpl = spawn;
-/** @internal — test seam, allows tests to replace spawn without mocking child_process. */
-export function _setSpawnImpl(fn) { _spawnImpl = fn; }
 
 /**
  * GET /_fleet/api/features
@@ -579,38 +577,17 @@ export async function runRebuild(key) {
   log(`[rebuild] Compose:    ${composeFile}`);
 
   /**
-   * Run a CLI command, streaming stdout+stderr lines to the build-log.
-   * Resolves when the process exits 0, rejects with an Error otherwise.
+   * Run a docker command, streaming stdout+stderr lines to the build-log.
+   * Delegates spawn to containerDispatch.run so all docker calls go through
+   * the single dispatch seam.
    * @param {string} cmd
    * @param {string[]} args
    * @param {{ ignoreExitCode?: boolean }} [opts]
    */
-  const runCommand = (cmd, args, { ignoreExitCode = false } = {}) =>
-    new Promise((resolve, reject) => {
-      log(`[rebuild] + ${cmd} ${args.join(' ')}`);
-      const proc = _spawnImpl(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-
-      const onLine = (chunk) => {
-        const text = chunk.toString();
-        for (const line of text.split('\n')) {
-          const trimmed = line.trimEnd();
-          if (trimmed.length > 0) log(trimmed);
-        }
-      };
-
-      proc.stdout.on('data', onLine);
-      proc.stderr.on('data', onLine);
-
-      proc.on('error', (err) => reject(new Error(`spawn error for '${cmd}': ${err.message}`)));
-
-      proc.on('close', (code) => {
-        if (ignoreExitCode || code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`'${cmd} ${args.join(' ')}' exited with code ${code}`));
-        }
-      });
-    });
+  const runCommand = (cmd, args, opts = {}) => {
+    log(`[rebuild] + ${cmd} ${args.join(' ')}`);
+    return containerDispatch.run(args, (line) => log(line), opts);
+  };
 
   try {
     // Step 3 — stop the running container (ignore error if already stopped/missing)
@@ -624,7 +601,7 @@ export async function runRebuild(key) {
 
     // Step 4 — rebuild the image
     log(`[rebuild] Building image ${imageName}...`);
-    await buildFeatureImage({
+    await containerDispatch.build({
       subName: key,
       imageTag: imageName,
       contextDir: FLEET_ROOT,
