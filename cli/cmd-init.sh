@@ -566,6 +566,7 @@ write_fleet_gitignore() {
     '*/feature.env'
     '*/info.toml'
     '*/state.json'
+    '*/run.env'
   )
 
   if [ ! -f "${gi}" ]; then
@@ -745,6 +746,15 @@ for i in "${!SVC_NAMES[@]}"; do
   mkdir -p "$(dirname "${plan_path}")"
   railpack_emit_plan "${PROJECT_ROOT}/${SVC_DIRS[$i]}" "${plan_path}"
   info "Generated railpack plan: ${plan_path}"
+  # Persist run command + artifact path so fleet start and gateway dispatch can
+  # consume them without re-parsing the full plan JSON at runtime.
+  run_env_path="${FLEET_DIR}/${SVC_DIRS[$i]}/run.env"
+  if railpack_extract_run_meta "${plan_path}" > "${run_env_path}"; then
+    info "Persisted run metadata: ${run_env_path}"
+  else
+    warn "Could not extract run/artifact metadata from railpack plan — ${run_env_path} skipped"
+    rm -f "${run_env_path}"
+  fi
 done
 
 # ─── Build per-vite-service base images via buildx + BUILDKIT_SYNTAX ─────────

@@ -904,6 +904,42 @@ PYEOF
 }
 export -f _read_info_toml
 
+# ─── Railpack run-meta extraction ─────────────────────────────────────────────
+# railpack_extract_run_meta PLAN_PATH — emits shell-assignment lines for the
+# run command and artifact path derived from a railpack plan JSON:
+#
+#   RUN_CMD=<shell-quoted deploy.startCommand>
+#   ARTIFACT_PATH=<shell-quoted first include[] from the build step>
+#
+# Source the output to populate RUN_CMD and ARTIFACT_PATH:
+#   eval "$(railpack_extract_run_meta "$plan")"
+#
+# Returns 0 on success, 1 if the plan file is missing or required fields are
+# absent.  Requires jq on PATH.
+railpack_extract_run_meta() {
+  local plan_path="${1:-}"
+  [ -n "${plan_path}" ] && [ -f "${plan_path}" ] || return 1
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "[fleet] railpack_extract_run_meta: jq is required but not on PATH" >&2
+    return 1
+  fi
+
+  local run_cmd artifact_path
+  run_cmd=$(jq -r '.deploy.startCommand // empty' "${plan_path}" 2>/dev/null)
+  artifact_path=$(jq -r \
+    '(.deploy.inputs // [])[] | select(.step == "build") | (.include // [])[0] // empty' \
+    "${plan_path}" 2>/dev/null | head -1)
+
+  [ -n "${run_cmd}" ] && [ -n "${artifact_path}" ] || return 1
+
+  # Use printf %q so the output is always safely sourceable by bash regardless
+  # of spaces or shell metacharacters in the values.
+  printf 'RUN_CMD=%q\n' "${run_cmd}"
+  printf 'ARTIFACT_PATH=%q\n' "${artifact_path}"
+}
+export -f railpack_extract_run_meta
+
 # ─── Stack Dockerfile templating ─────────────────────────────────────────────
 # apply_stack_template SRC DEST
 # Copy a stack Dockerfile template, substituting whitelisted fleet.conf vars.

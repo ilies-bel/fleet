@@ -70,8 +70,23 @@ _start_one() {
 }
 
 # ─── Dispatch ────────────────────────────────────────────────────────────────
+if [ "${ARG}" != "--all" ]; then
+  validate_feature_name "${ARG}"
+fi
+load_fleet_toml
+
+# Source run metadata written by fleet init for plan-based (Vite) services so
+# that RUN_CMD and ARTIFACT_PATH are available in the shell environment.
+# Falls back gracefully when no run.env files exist (non-Vite stacks or
+# projects that have not yet run fleet init with railpack support).
+shopt -s nullglob
+for _renv in "${FLEET_CONFIG_ROOT}/.fleet/"*/run.env; do
+  # shellcheck source=/dev/null
+  source "${_renv}"
+done
+shopt -u nullglob
+
 if [ "${ARG}" = "--all" ]; then
-  load_fleet_toml
   shopt -s nullglob
   for info_toml in "${FLEET_CONFIG_ROOT}/.fleet/"*/info.toml; do
     local_name=$(basename "$(dirname "${info_toml}")")
@@ -80,7 +95,5 @@ if [ "${ARG}" = "--all" ]; then
   shopt -u nullglob
   info "All feature containers started."
 else
-  validate_feature_name "${ARG}"
-  load_fleet_toml
   _start_one "${ARG}" "true"
 fi
