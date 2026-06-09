@@ -963,15 +963,14 @@ export -f apply_stack_template
 # ─── build_feature_image ──────────────────────────────────────────────────────
 # build_feature_image <sub_name> <image_tag> <context_dir>
 #
-# Builds the base image for a feature's subproject, dispatching on whether a
-# railpack plan file exists for that subproject:
+# Builds the base image for a feature's subproject using the railpack plan.
+# Errors if no railpack plan file exists for the subproject.
 #
 #   • Plan present  (.fleet/<sub_name>/railpack-plan.json):
 #       docker buildx build --build-arg BUILDKIT_SYNTAX=<railpack-frontend> \
 #         -f .fleet/<sub_name>/railpack-plan.json -t <image_tag> <context_dir>
 #
-#   • Plan absent:
-#       docker build -f .fleet/Dockerfile.feature-base -t <image_tag> <context_dir>
+#   • Plan absent: prints an error to stderr and returns 1.
 #
 # Requires FLEET_CONFIG_ROOT to be set (load_fleet_toml exports it).
 build_feature_image() {
@@ -990,10 +989,8 @@ build_feature_image() {
       -t "${image_tag}" \
       "${context_dir}"
   else
-    docker build \
-      -f "${fleet_dir}/Dockerfile.feature-base" \
-      -t "${image_tag}" \
-      "${context_dir}"
+    echo "no railpack plan for ${sub_name}" >&2
+    return 1
   fi
 }
 export -f build_feature_image

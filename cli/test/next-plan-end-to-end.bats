@@ -144,36 +144,6 @@ STUB
   [[ "$plan_content" != *'"run":1'* ]]
 }
 
-@test "fleet init does not write railpack-plan.json for a spring subproject" {
-  cat > "${PROJ_DIR}/.fleet/fleet.toml" <<TOML
-[project]
-name = "test-proj"
-root = "${PROJ_DIR}"
-path = ".worktrees/{name}"
-
-[ports]
-proxy = 3000
-admin = 4000
-db    = 5432
-
-[[services]]
-name  = "backend"
-dir   = "backend"
-stack = "spring"
-port  = 8081
-build = "mvn package -DskipTests -q"
-run   = "java -jar /home/developer/backend.jar"
-TOML
-
-  mkdir -p "${PROJ_DIR}/backend"
-  printf '<project/>\n' > "${PROJ_DIR}/backend/pom.xml"
-
-  run env PATH="${STUB_BIN}:${PATH}" bash -c "cd '${PROJ_DIR}' && bash '${SCRIPT_PATH}' 2>&1"
-
-  [ "$status" -eq 0 ]
-  plan_count=$(find "${PROJ_DIR}/.fleet" -name 'railpack-plan.json' | wc -l | tr -d ' ')
-  [ "$plan_count" -eq 0 ]
-}
 
 @test "Dockerfile.feature-base.next does not exist in the fleet repo" {
   # This test asserts the fragment file has been deleted as required by the PRD.

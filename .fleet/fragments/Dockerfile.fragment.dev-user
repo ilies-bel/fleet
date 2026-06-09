@@ -1,6 +1,0 @@
-# ── OpenShift-compatible non-root home dir ────────────────────────────────────
-# No fixed-UID useradd: OpenShift injects an arbitrary UID at runtime.
-# /home/developer exists so entrypoint jar-copy paths keep working under any UID.
-RUN mkdir -p /home/developer \
- && chgrp 0 /home/developer \
- && chmod g+rwX /home/developer

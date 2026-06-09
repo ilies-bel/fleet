@@ -2,12 +2,12 @@
  * Tests for runRebuild artifact selection.
  *
  * Verifies that runRebuild branches on railpack.json presence:
- *   - vite feature (railpack-plan.json present at .fleet/<key>/railpack-plan.json)
+ *   - plan feature (railpack-plan.json present at .fleet/<key>/railpack-plan.json)
  *     → docker buildx build --load --no-cache --build-arg BUILDKIT_SYNTAX=...
  *       -t <image> -f <railpack-plan.json> <FLEET_PROJECT_ROOT>/<key>
- *   - non-vite feature (no railpack-plan.json present)
- *     → docker build --load --no-cache -t <image> -f Dockerfile.feature-base <FLEET_ROOT>
- *       (byte-identical to the pre-vite path)
+ *   - no plan (railpack-plan.json absent)
+ *     → runRebuild rejects with a clear error naming the feature key
+ *       (fragment Dockerfiles are no longer supported)
  *
  * Strategy:
  *   - Real registry (seeded via register(), cleared after each test).
@@ -160,66 +160,35 @@ describe('runRebuild artifact selection', () => {
     assert.equal(plainBuild, undefined, 'plain docker build must NOT be invoked for a vite feature');
   });
 
-  // ── Non-vite feature path ───────────────────────────────────────────────────
+  // ── No-plan path ─────────────────────────────────────────────────────────────
 
-  test('non-vite feature: no railpack.json → docker build with Dockerfile.feature-base and FLEET_ROOT context', async () => {
+  test('no railpack-plan.json → runRebuild rejects with a clear error naming the feature key', async () => {
     const key = 'myproj-backend';
 
-    // Build the fake fleet directory tree
+    // Build the fake fleet directory tree — deliberately no railpack-plan.json
     const fleetDir = join(tmpDir, '.fleet', key);
-    const fleetRootDir = join(tmpDir, 'fleet-root');
     mkdirSync(fleetDir, { recursive: true });
-    mkdirSync(fleetRootDir, { recursive: true });
 
-    // Compose file — no railpack.json in this directory
     writeFileSync(join(fleetDir, 'docker-compose.yml'), [
       'services:',
       '  backend:',
       `    image: fleet-feature-base-${key}`,
     ].join('\n'));
 
-    // Dockerfile.feature-base lives in FLEET_ROOT (the global fallback)
-    writeFileSync(join(fleetRootDir, 'Dockerfile.feature-base'), 'FROM node:20\n');
-
     register('myproj', 'backend', 'main');
 
-    await runRebuild(key);
-
-    // The build call must use plain 'docker build' (no buildx)
-    const buildCall = capturedCalls.find(
-      (c) => c.cmd === 'docker' && c.args[0] === 'build',
-    );
-    assert.ok(buildCall, 'docker build must be invoked for a non-vite feature');
-
-    // Exact arg sequence matches the pre-existing path
-    assert.deepEqual(
-      buildCall.args.slice(0, 3),
-      ['build', '--load', '--no-cache'],
-      'first three args must be build --load --no-cache',
+    await assert.rejects(
+      () => runRebuild(key),
+      (err) => {
+        assert.ok(
+          err.message.includes(key) || err.message.includes('backend'),
+          `error message must name the feature/subproject, got: ${err.message}`,
+        );
+        return true;
+      },
     );
 
-    // -f must point at Dockerfile.feature-base
-    const fIdx = buildCall.args.indexOf('-f');
-    assert.notEqual(fIdx, -1, '-f must be present');
-    assert.ok(
-      buildCall.args[fIdx + 1].includes('Dockerfile.feature-base'),
-      `-f must point at Dockerfile.feature-base, got: ${buildCall.args[fIdx + 1]}`,
-    );
-
-    // Build context must be FLEET_ROOT
-    const lastArg = buildCall.args[buildCall.args.length - 1];
-    assert.equal(lastArg, fleetRootDir, 'build context must be FLEET_ROOT');
-
-    // No buildx must be invoked
-    const buildxCall = capturedCalls.find(
-      (c) => c.cmd === 'docker' && c.args[0] === 'buildx',
-    );
-    assert.equal(buildxCall, undefined, 'docker buildx must NOT be invoked for a non-vite feature');
-
-    // No --build-arg BUILDKIT_SYNTAX in any docker call
-    const hasBuildkitSyntax = capturedCalls.some(
-      (c) => c.args.some((a) => typeof a === 'string' && a.startsWith('BUILDKIT_SYNTAX')),
-    );
-    assert.equal(hasBuildkitSyntax, false, 'BUILDKIT_SYNTAX must not appear in any command for non-vite feature');
+    // Docker must NOT have been called at all
+    assert.equal(capturedCalls.length, 0, 'docker must not be called when no plan is present');
   });
 });

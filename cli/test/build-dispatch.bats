@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 # Tests for build_feature_image dispatch logic in common.sh.
 # Verifies that the function routes to docker buildx (railpack) when a plan
-# file is present, and to plain docker build (fragment Dockerfile) when it is
-# not — using only the public function signature as the observable interface.
+# file is present, and errors clearly when no plan is found — fragment
+# Dockerfiles are no longer supported.
 
 WORKTREE_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../.." && pwd)"
 COMMON_SH="${WORKTREE_ROOT}/cli/common.sh"
@@ -56,9 +56,8 @@ teardown() {
 
 # ── Plan-absent branch ────────────────────────────────────────────────────────
 
-@test "build_feature_image: plan absent → plain docker build with Dockerfile.feature-base" {
-  # No plan file; provide the fragment Dockerfile so the fallback has a target.
-  touch "${PROJ_DIR}/.fleet/Dockerfile.feature-base"
+@test "build_feature_image: plan absent → non-zero exit with error message naming the subproject" {
+  # No plan file exists for this subproject.
 
   run env \
     FLEET_CONFIG_ROOT="${PROJ_DIR}" \
@@ -66,14 +65,12 @@ teardown() {
     PATH="${STUB_BIN}:${PATH}" \
     bash -c "source '${COMMON_SH}' && build_feature_image 'backend' 'test-image:latest' '/ctx'"
 
-  [ "$status" -eq 0 ]
+  # Must fail
+  [ "$status" -ne 0 ]
 
-  # Must NOT invoke docker buildx
-  ! grep -q "^buildx " "${DOCKER_LOG}"
+  # Error message must mention the subproject name
+  [[ "$output" == *"backend"* ]]
 
-  # Must reference Dockerfile.feature-base
-  grep -q "Dockerfile.feature-base" "${DOCKER_LOG}"
-
-  # Must NOT reference BUILDKIT_SYNTAX
-  ! grep -q "BUILDKIT_SYNTAX" "${DOCKER_LOG}"
+  # Docker must NOT have been called at all
+  [ ! -s "${DOCKER_LOG}" ]
 }
