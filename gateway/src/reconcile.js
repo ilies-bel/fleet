@@ -1,6 +1,6 @@
 import * as _dockerDefault from './docker.js';
 import * as _clusterStatusDefault from './cluster/status.js';
-import { register, isRegistered, getAll, unregister, probeContainerState, commitProbedStatus, loadPersistedRegistry } from './registry.js';
+import { register, isRegistered, getAll, unregister, probeContainerState, commitProbedStatus } from './registry.js';
 
 const GATEWAY_NAME = 'fleet-gateway';
 
@@ -151,21 +151,17 @@ function filterFeatureContainers(containers) {
 /**
  * Reconcile a single container into the registry.
  *
- * The `baseline` option carries the persisted registry-status snapshot loaded
- * at boot. When a container's baseline status was 'up' but it is currently
- * cleanly stopped (probed === 'stopped'), the container is restarted so that
- * features that were running before the gateway went down come back up
- * automatically. A 'failed'/crashed container is never auto-restarted; the
- * operator must intervene.
- *
- * When baseline is empty (the default — sweep path), no container is ever
- * started. The sweep must never auto-start anything.
+ * Read-only with respect to container lifecycle: classifies the container's
+ * live Docker state and registers it — never starts anything. A container
+ * that is stopped or exited (regardless of prior recorded status) is
+ * registered at whatever state Docker reports. This invariant is shared
+ * with the sweep path: neither boot reconcile nor sweep ever auto-start
+ * a container.
  *
  * @param {{ Names: string[], State: string }} container  Docker container summary
- * @param {{ baseline?: Record<string, { status: string }> }} [opts]
  * @returns {Promise<boolean>} true when a new registration was made
  */
-export async function reconcileOne(container, { baseline = {} } = {}) {
+export async function reconcileOne(container) {
   const containerName = bareContainerName(container);
 
   let info = await _docker.inspectContainer(containerName);
@@ -185,27 +181,7 @@ export async function reconcileOne(container, { baseline = {} } = {}) {
   // Classify the live container state rather than a bare Running boolean so a
   // crashed (non-zero exit / OOM) container is restored as 'failed', not
   // 'stopped'. probeContainerState reuses the inspect we already have.
-  let probed = await probeContainerState(containerName, async () => info);
-
-  // Boot path: restart only when the baseline recorded this feature as 'up'
-  // and it is now cleanly stopped (clean exit / no crash). A 'failed'/crashed
-  // container is intentionally left down so the operator can inspect it.
-  if (baseline[key]?.status === 'up' && probed === 'stopped') {
-    try {
-      await _docker.startContainer(containerName);
-      console.log(`[reconcile] started: ${containerName}`);
-      // Re-inspect to get the post-start container state so the registry
-      // reflects the real live status (not the stale pre-start snapshot).
-      const freshInfo = await _docker.inspectContainer(containerName);
-      if (freshInfo) {
-        info = freshInfo;
-        probed = await probeContainerState(containerName, async () => freshInfo);
-      }
-    } catch (err) {
-      console.warn(`[reconcile] could not start ${containerName}:`, err.message);
-      // Keep the pre-start probed status ('stopped') for registration.
-    }
-  }
+  const probed = await probeContainerState(containerName, async () => info);
 
   const status = probed === 'unknown' || probed === 'missing' ? 'stopped' : probed;
 
@@ -225,11 +201,12 @@ export async function reconcileOne(container, { baseline = {} } = {}) {
 }
 
 /**
- * At startup, scan Docker for all fleet-* containers (running or stopped),
- * and register them. Uses the persisted registry-status baseline to decide
- * which stopped containers to restart: only features that were 'up' before
- * the gateway went down and are now cleanly stopped are restarted. Features
- * that crashed or were deliberately stopped are left as-is.
+ * At startup, scan Docker for all fleet-* containers (running or stopped)
+ * and register them at their live Docker state. Read-only with respect to
+ * container lifecycle — no container is ever started. A feature that was
+ * already running continues running; a feature that was stopped or exited
+ * (deliberately or otherwise) is registered as stopped/failed and left down.
+ * Feature lifecycle states are preserved as-is across a gateway-only restart.
  */
 export async function reconcileFromDocker() {
   let containers;
@@ -247,14 +224,9 @@ export async function reconcileFromDocker() {
     return;
   }
 
-  // Load the on-disk baseline to determine which features were intentionally
-  // running before the last gateway exit. This drives per-container start
-  // decisions without mass-starting the entire fleet.
-  const baseline = loadPersistedRegistry();
-
   let registered = 0;
   for (const container of qaContainers) {
-    const added = await reconcileOne(container, { baseline });
+    const added = await reconcileOne(container);
     if (added) registered++;
   }
 
