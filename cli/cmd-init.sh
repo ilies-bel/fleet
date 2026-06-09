@@ -737,7 +737,7 @@ discover_env_files "${PROJECT_ROOT}"
 # ─── Generate railpack plans for vite services ───────────────────────────────
 for i in "${!SVC_NAMES[@]}"; do
   [ "${SVC_STACKS[$i]}" = "vite" ] || continue
-  plan_path="${FLEET_DIR}/${SVC_DIRS[$i]}/railpack.json"
+  plan_path="${FLEET_DIR}/${SVC_DIRS[$i]}/railpack-plan.json"
   if [ -f "${plan_path}" ] && [ "${OVERRIDE}" -ne 1 ]; then
     info "Keeping existing ${plan_path} (pass --override to regenerate)"
     continue
@@ -778,7 +778,7 @@ if [ "${_HAS_VITE}" -eq 1 ]; then
       --load \
       --build-arg "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend:${_RAILPACK_FRONTEND_TAG}" \
       -t "${VITE_IMAGE}" \
-      -f "${FLEET_DIR}/${SVC_DIRS[$i]}/railpack.json" \
+      -f "${FLEET_DIR}/${SVC_DIRS[$i]}/railpack-plan.json" \
       "${PROJECT_ROOT}/${SVC_DIRS[$i]}"
   done
 fi

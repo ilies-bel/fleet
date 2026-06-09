@@ -40,7 +40,8 @@ railpack_emit_plan() {
   fi
 
   info "Running railpack plan on '${subproject_dir}' …"
-  railpack plan "${subproject_dir}" >"${out_path}"
+  railpack plan "${subproject_dir}" >"${out_path}" \
+    || error "railpack plan failed for '${subproject_dir}' — aborting fleet init"
 
   if ! [ -s "${out_path}" ]; then
     error "railpack emitted empty plan for '${subproject_dir}'"
