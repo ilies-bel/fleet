@@ -42,6 +42,10 @@ done
 # directory (PWD), not into the CLI install directory (FLEET_ROOT).
 FLEET_DIR="${PWD}/.fleet"
 FLEET_TOML="${FLEET_DIR}/fleet.toml"
+# FLEET_CONFIG_ROOT is the project root (parent of .fleet/).  build_feature_image
+# in common.sh uses it to locate per-service railpack plan files and the shared
+# Dockerfile.feature-base fallback.
+FLEET_CONFIG_ROOT="${PWD}"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -757,49 +761,12 @@ for i in "${!SVC_NAMES[@]}"; do
   fi
 done
 
-# ─── Build per-vite-service base images via buildx + BUILDKIT_SYNTAX ─────────
-# Derive the railpack-frontend tag from the installed railpack binary so the
-# BuildKit frontend matches the plan format.  Falls back to "latest" when the
-# binary is absent or --version output is unparseable.
-_RAILPACK_VER=$(railpack --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-_RAILPACK_FRONTEND_TAG="${_RAILPACK_VER:+v${_RAILPACK_VER}}"
-_RAILPACK_FRONTEND_TAG="${_RAILPACK_FRONTEND_TAG:-latest}"
+# ─── Generate and build per-service feature base images ──────────────────────
 
-_HAS_VITE=0
-for i in "${!SVC_NAMES[@]}"; do
-  [ "${SVC_STACKS[$i]}" = "vite" ] || continue
-  _HAS_VITE=1
-  break
-done
-
-if [ "${_HAS_VITE}" -eq 1 ]; then
-  # railpack's BuildKit frontend uses the mergeop LLB primitive, which the
-  # default Docker daemon (overlay2 storage driver) disables.  A dedicated
-  # docker-container driver builder enables the containerd worker that
-  # supports mergeop.  Create it once; subsequent runs reuse the existing one.
-  docker buildx inspect fleet-railpack >/dev/null 2>&1 \
-    || docker buildx create --name fleet-railpack --driver docker-container --bootstrap
-  for i in "${!SVC_NAMES[@]}"; do
-    [ "${SVC_STACKS[$i]}" = "vite" ] || continue
-    VITE_IMAGE="fleet-feature-base-${PROJECT_NAME}-${SVC_NAMES[$i]}"
-    info "Building vite base image ${VITE_IMAGE} from railpack plan (builder: fleet-railpack, tag: ${_RAILPACK_FRONTEND_TAG})..."
-    docker buildx build \
-      --builder fleet-railpack \
-      --load \
-      --build-arg "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend:${_RAILPACK_FRONTEND_TAG}" \
-      -t "${VITE_IMAGE}" \
-      -f "${FLEET_DIR}/${SVC_DIRS[$i]}/railpack-plan.json" \
-      "${PROJECT_ROOT}/${SVC_DIRS[$i]}"
-  done
-fi
-
-# ─── Generate and build project-scoped base image ────────────────────────────
-PROJECT_LOCAL_DOCKERFILE="${PWD}/.fleet/Dockerfile.feature-base"
-
-if [ -f "${PROJECT_LOCAL_DOCKERFILE}" ] && [ "${OVERRIDE}" -ne 1 ]; then
+if [ -f "${FLEET_DIR}/Dockerfile.feature-base" ] && [ "${OVERRIDE}" -ne 1 ]; then
   info "Keeping existing .fleet/Dockerfile.feature-base (pass --override to regenerate)"
 else
-  generate_feature_base_dockerfile SVC_STACKS "${PROJECT_LOCAL_DOCKERFILE}"
+  generate_feature_base_dockerfile SVC_STACKS "${FLEET_DIR}/Dockerfile.feature-base"
 fi
 
 # Emit the stacks label
@@ -812,9 +779,15 @@ for _s in "${SVC_STACKS[@]}"; do
 done
 info "Generated .fleet/Dockerfile.feature-base from stacks: ${UNIQUE_STACKS[*]}"
 
-FEATURE_BASE_IMAGE="fleet-feature-base-${PROJECT_NAME}"
-info "Building project base image ${FEATURE_BASE_IMAGE}..."
-docker build -t "${FEATURE_BASE_IMAGE}" -f "${PROJECT_LOCAL_DOCKERFILE}" "${FLEET_ROOT}"
+# Build each service's feature base image via the plan-first dispatcher.
+# build_feature_image routes to docker buildx (railpack plan) when a plan file
+# exists for the service directory, and falls back to plain docker build with
+# Dockerfile.feature-base otherwise.
+for i in "${!SVC_NAMES[@]}"; do
+  _svc_img="fleet-feature-base-${PROJECT_NAME}-${SVC_NAMES[$i]}"
+  info "Building feature base image ${_svc_img}..."
+  build_feature_image "${SVC_DIRS[$i]}" "${_svc_img}" "${PROJECT_ROOT}/${SVC_DIRS[$i]}"
+done
 
 # ─── Infra bootstrap ─────────────────────────────────────────────────────────
 
