@@ -101,7 +101,7 @@ function passesFilter(record, levelFilter) {
 
 // ── LogRow ─────────────────────────────────────────────────────────────────
 
-function LogRow({ record, traces, showSource }) {
+function LogRow({ record, traces, showSource, wrap }) {
   const [expanded, setExpanded] = useState(false);
   const hasTraces = traces.length > 0;
 
@@ -152,11 +152,11 @@ function LogRow({ record, traces, showSource }) {
 
         {/* Message body */}
         <span style={{
-          flex:       1,
-          color:      '#ccc',
-          whiteSpace: 'pre-wrap',
-          wordBreak:  'break-all',
-          minWidth:   0,
+          flex:         1,
+          color:        '#ccc',
+          ...(wrap
+            ? { whiteSpace: 'pre-wrap', wordBreak: 'normal', overflowWrap: 'anywhere', minWidth: 0 }
+            : { whiteSpace: 'pre' }),
         }}>
           {record.message || record.raw}
         </span>
@@ -195,8 +195,9 @@ function LogRow({ record, traces, showSource }) {
             lineHeight:   1.4,
             color:        'var(--color-ink-faint)',
             fontFamily:   'var(--font-mono)',
-            whiteSpace:   'pre-wrap',
-            wordBreak:    'break-all',
+            ...(wrap
+              ? { whiteSpace: 'pre-wrap', wordBreak: 'normal', overflowWrap: 'anywhere' }
+              : { whiteSpace: 'pre' }),
           }}
         >
           {frame.raw}
@@ -253,6 +254,7 @@ function RunMarkerSeparator({ label, isCurrent, markerRef }) {
 
 export default function LogPanel({ featureName, onClose }) {
   const [source, setSource]           = useState('backend');
+  const [wrap, setWrap]               = useState(false);
   // Structured format: record objects { ts, level, source, message, isTrace, raw }.
   const [records, setRecords]         = useState([]);
   // Run-attempt markers from the gateway: { kind:'run-marker', run, ts, reason }[].
@@ -379,9 +381,11 @@ export default function LogPanel({ featureName, onClose }) {
   }, [fetchLogs, autoTail, source]);
 
   // Auto-scroll to bottom when records change.
+  // block:'end', inline:'nearest' scrolls only the vertical axis when tailing,
+  // so horizontal position is preserved in no-wrap mode.
   useEffect(() => {
     if (autoTail && sentinelRef.current) {
-      sentinelRef.current.scrollIntoView({ behavior: 'smooth' });
+      sentinelRef.current.scrollIntoView({ behavior: 'smooth', block: 'end', inline: 'nearest' });
     }
   }, [buffer, records, markers, autoTail]);
 
@@ -544,6 +548,23 @@ export default function LogPanel({ featureName, onClose }) {
             {autoTail ? '[TAIL]' : '[PAUSED]'}
           </Button>
 
+          {/* Wrap toggle — active (wrap on) gets filled accent treatment */}
+          <Button
+            tone="primary"
+            onClick={() => setWrap(v => !v)}
+            aria-pressed={wrap}
+            title={wrap ? 'Switch to no-wrap (horizontal scroll)' : 'Switch to word-wrap mode'}
+            style={{
+              fontSize: '0.68rem',
+              padding:  '2px 7px',
+              ...(wrap
+                ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' }
+                : {}),
+            }}
+          >
+            {wrap ? '[WRAP]' : '[NOWRAP]'}
+          </Button>
+
           {/* Close — restores focus to the element that opened the panel */}
           <Button
             tone="primary"
@@ -595,6 +616,7 @@ export default function LogPanel({ featureName, onClose }) {
           <div style={{
             flex:               1,
             overflowY:          'auto',
+            overflowX:          wrap ? undefined : 'auto',
             overscrollBehavior: 'contain',
             background:         '#050505',
             border:             '1px solid var(--color-surface-header)',
@@ -608,8 +630,9 @@ export default function LogPanel({ featureName, onClose }) {
                 fontSize:   '0.72rem',
                 lineHeight: 1.5,
                 color:      '#ccc',
-                whiteSpace: 'pre-wrap',
-                wordBreak:  'break-all',
+                ...(wrap
+                  ? { whiteSpace: 'pre-wrap', wordBreak: 'normal', overflowWrap: 'anywhere' }
+                  : { whiteSpace: 'pre' }),
               }}>
                 {buffer}
               </pre>
@@ -642,6 +665,7 @@ export default function LogPanel({ featureName, onClose }) {
                       record={item.row.record}
                       traces={item.row.traces}
                       showSource={showSource}
+                      wrap={wrap}
                     />
                   )
                 ))}
