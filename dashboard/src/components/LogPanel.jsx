@@ -15,19 +15,68 @@ const SOURCE_COLOR = {
 /** Empty per-source snapshot */
 const EMPTY_ALL = { backend: '', nginx: '', postgresql: '', supervisord: '' };
 
+/**
+ * Format an ISO timestamp to local HH:MM:SS for display in run-marker labels.
+ * Used by both TimelineView and AllSourcesView.
+ */
+function formatTime(iso) {
+  return new Date(iso).toLocaleTimeString([], {
+    hour:   '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+/**
+ * A full-width run-attempt separator row.
+ *   ════ run #N · HH:MM:SS · started/restarted ════
+ * Used in both TimelineView and AllSourcesView.
+ */
+function RunMarkerSeparator({ label, isCurrent, markerRef }) {
+  return (
+    <div
+      ref={markerRef}
+      role="separator"
+      aria-label={label}
+      data-run-marker
+      style={{
+        display:     'flex',
+        alignItems:  'center',
+        padding:     '4px var(--space-3)',
+        userSelect:  'none',
+        color:       'var(--color-accent)',
+        fontFamily:  'var(--font-mono)',
+        fontSize:    '0.72rem',
+        fontWeight:  isCurrent ? 700 : 400,
+        opacity:     isCurrent ? 1 : 0.65,
+        gap:         '0.5rem',
+      }}
+    >
+      <span style={{ flex: 1, height: '1px', background: 'var(--color-accent)', opacity: 0.4 }} />
+      <span>{'════ ' + label + ' ════'}</span>
+      <span style={{ flex: 1, height: '1px', background: 'var(--color-accent)', opacity: 0.4 }} />
+    </div>
+  );
+}
+
 export default function LogPanel({ featureName, onClose }) {
-  const [source, setSource] = useState('backend');
-  // Per-source (non-all) mode: plain string
+  const [source, setSource]         = useState('backend');
+  // Per-source (non-all) legacy mode: plain string (also used by build/SSE path)
   const [buffer, setBuffer]         = useState('');
+  // New format: array of record objects  { ts, message, ... }
+  const [records, setRecords]       = useState([]);
+  // Run-attempt markers from the gateway
+  const [markers, setMarkers]       = useState([]);
   // ALL mode: { backend, nginx, postgresql, supervisord }
   const [allSources, setAllSources] = useState(EMPTY_ALL);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState(null);
   const [autoTail, setAutoTail]     = useState(true);
   const [fetchedAt, setFetchedAt]   = useState(null);
-  const sentinelRef  = useRef(null);
-  const dialogRef    = useRef(null);
-  const prevFocusRef = useRef(null);
+  const sentinelRef   = useRef(null);
+  const latestRunRef  = useRef(null);
+  const dialogRef     = useRef(null);
+  const prevFocusRef  = useRef(null);
 
   // Save the previously-focused element and move focus into the dialog on mount.
   useEffect(() => {
@@ -81,6 +130,8 @@ export default function LogPanel({ featureName, onClose }) {
   // Reset state when source or feature changes
   useEffect(() => {
     setBuffer('');
+    setRecords([]);
+    setMarkers([]);
     setAllSources(EMPTY_ALL);
     setError(null);
   }, [featureName, source]);
@@ -92,6 +143,7 @@ export default function LogPanel({ featureName, onClose }) {
       if (source === 'all') {
         const data = await getLogs(featureName, { source, tail: 200 });
         setFetchedAt(data.fetchedAt);
+        setMarkers(data.markers ?? []);
         // data.sources: { backend, nginx, postgresql, supervisord }
         const snap = data.sources ?? EMPTY_ALL;
         setAllSources({
@@ -103,7 +155,17 @@ export default function LogPanel({ featureName, onClose }) {
       } else {
         const data = await getLogs(featureName, { source, tail: 200 });
         setFetchedAt(data.fetchedAt);
-        setBuffer(data.lines ?? '');
+        if (Array.isArray(data.records)) {
+          // New format: array of record objects with timestamps
+          setRecords(data.records);
+          setMarkers(data.markers ?? []);
+          setBuffer('');
+        } else {
+          // Legacy format: plain string (backwards compat)
+          setBuffer(data.lines ?? '');
+          setRecords([]);
+          setMarkers([]);
+        }
       }
     } catch (err) {
       setError(err.message);
@@ -156,14 +218,19 @@ export default function LogPanel({ featureName, onClose }) {
     if (autoTail && sentinelRef.current) {
       sentinelRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [buffer, allSources, autoTail]);
+  }, [buffer, allSources, records, markers, autoTail]);
 
-  // Line count: sum all sources for 'all', plain split for others
+  // Highest run number — used to identify the "current" (latest) run for emphasis
+  const maxRun = markers.length > 0 ? Math.max(...markers.map(m => m.run)) : 0;
+
+  // Line count: sum all sources for 'all', record count for new format, plain split for legacy
   const lineCount = source === 'all'
     ? Object.values(allSources).reduce((sum, text) => {
         return sum + (text ? text.split('\n').length : 0);
       }, 0)
-    : (buffer ? buffer.split('\n').length : 0);
+    : records.length > 0
+      ? records.length
+      : (buffer ? buffer.split('\n').length : 0);
 
   const fetchedTime = fetchedAt
     ? new Date(fetchedAt).toLocaleTimeString()
@@ -174,8 +241,13 @@ export default function LogPanel({ featureName, onClose }) {
       setAllSources(EMPTY_ALL);
     } else {
       setBuffer('');
+      setRecords([]);
+      setMarkers([]);
     }
   }
+
+  const hasMarkers = markers.length > 0;
+  const useTimeline = records.length > 0 || hasMarkers;
 
   return (
     <div
@@ -293,7 +365,7 @@ export default function LogPanel({ featureName, onClose }) {
               {error}
             </div>
           )}
-          {loading && source !== 'all' && !buffer && (
+          {loading && source !== 'all' && !buffer && !useTimeline && (
             <div
               role="status"
               aria-live="polite"
@@ -316,20 +388,34 @@ export default function LogPanel({ featureName, onClose }) {
             margin: 'var(--space-2) var(--space-3) 0',
           }}>
             {source === 'all'
-              ? <AllSourcesView sources={allSources} loading={loading} />
-              : (
-                <pre style={{
-                  margin: 0,
-                  padding: 'var(--space-2) var(--space-3)',
-                  fontSize: '0.72rem',
-                  lineHeight: 1.5,
-                  color: '#ccc',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                }}>
-                  {buffer || (loading ? '' : '// no output')}
-                </pre>
-              )
+              ? <AllSourcesView
+                  sources={allSources}
+                  markers={markers}
+                  maxRun={maxRun}
+                  latestRunRef={latestRunRef}
+                  loading={loading}
+                />
+              : useTimeline
+                ? <TimelineView
+                    records={records}
+                    markers={markers}
+                    maxRun={maxRun}
+                    latestRunRef={latestRunRef}
+                    loading={loading}
+                  />
+                : (
+                  <pre style={{
+                    margin: 0,
+                    padding: 'var(--space-2) var(--space-3)',
+                    fontSize: '0.72rem',
+                    lineHeight: 1.5,
+                    color: '#ccc',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                  }}>
+                    {buffer || (loading ? '' : '// no output')}
+                  </pre>
+                )
             }
             <div ref={sentinelRef} />
           </div>
@@ -348,15 +434,28 @@ export default function LogPanel({ featureName, onClose }) {
             {lineCount} lines | fetched {fetchedTime}
             {loading && autoTail ? ' | refreshing…' : ''}
           </span>
-          {/* Clear — caution, not destructive: only clears the display buffer */}
-          <Button
-            tone="caution"
-            onClick={handleClear}
-            aria-label="Clear log output"
-            style={{ fontSize: '0.65rem', padding: '1px 6px' }}
-          >
-            [CLEAR]
-          </Button>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+            {/* Jump to latest run — only shown when run markers are present */}
+            {hasMarkers && maxRun > 0 && (
+              <Button
+                tone="primary"
+                onClick={() => latestRunRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                title={`Jump to run #${maxRun}`}
+                style={{ fontSize: '0.65rem', padding: '1px 6px' }}
+              >
+                [→ run #{maxRun}]
+              </Button>
+            )}
+            {/* Clear — caution, not destructive: only clears the display buffer */}
+            <Button
+              tone="caution"
+              onClick={handleClear}
+              aria-label="Clear log output"
+              style={{ fontSize: '0.65rem', padding: '1px 6px' }}
+            >
+              [CLEAR]
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -364,14 +463,25 @@ export default function LogPanel({ featureName, onClose }) {
 }
 
 /**
- * Renders the ALL view: four color-coded source blocks, each with a header.
- * Non-empty sources only.
+ * Renders the merged timeline of log records and run-marker separators,
+ * sorted by ts with markers before records at the same timestamp.
  */
-function AllSourcesView({ sources, loading }) {
-  const names = ['backend', 'nginx', 'postgresql', 'supervisord'];
-  const hasAny = names.some(n => sources[n]);
+function TimelineView({ records, markers, maxRun, latestRunRef, loading }) {
+  // Merge records and markers into a single sorted list.
+  // Marker before record when timestamps are equal (stable ordering spec).
+  const timeline = [
+    ...records.map(r => ({ ...r, _type: 'record' })),
+    ...(markers ?? []).map(m => ({ ...m, _type: 'marker' })),
+  ].sort((a, b) => {
+    if (a.ts < b.ts) return -1;
+    if (a.ts > b.ts) return 1;
+    // Same ts: marker wins
+    if (a._type === 'marker' && b._type !== 'marker') return -1;
+    if (a._type !== 'marker' && b._type === 'marker') return 1;
+    return 0;
+  });
 
-  if (!hasAny) {
+  if (timeline.length === 0) {
     return (
       <pre style={{
         margin: 0,
@@ -387,7 +497,88 @@ function AllSourcesView({ sources, loading }) {
   }
 
   return (
+    <div style={{ padding: 'var(--space-2) 0' }}>
+      {timeline.map((item, idx) => {
+        if (item._type === 'marker') {
+          const isCurrent      = item.run === maxRun;
+          const displayReason  = item.reason === 'started' ? 'started' : 'restarted';
+          const label          = `run #${item.run} · ${formatTime(item.ts)} · ${displayReason}`;
+          return (
+            <RunMarkerSeparator
+              key={`marker-${item.run}-${item.ts}`}
+              label={label}
+              isCurrent={isCurrent}
+              markerRef={isCurrent ? latestRunRef : undefined}
+            />
+          );
+        }
+        return (
+          <div
+            key={idx}
+            style={{
+              padding:     '0 var(--space-3)',
+              fontSize:    '0.72rem',
+              lineHeight:  1.5,
+              color:       '#ccc',
+              whiteSpace:  'pre-wrap',
+              wordBreak:   'break-all',
+              fontFamily:  'var(--font-mono)',
+            }}
+          >
+            {item.message ?? item.line ?? ''}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Renders the ALL view: run-marker separators (if any) followed by
+ * four color-coded source blocks, each with a header.
+ * Non-empty sources only.
+ */
+function AllSourcesView({ sources, markers, maxRun, latestRunRef, loading }) {
+  const names  = ['backend', 'nginx', 'postgresql', 'supervisord'];
+  const hasAny = names.some(n => sources[n]);
+
+  if (!hasAny && (!markers || markers.length === 0)) {
+    return (
+      <pre style={{
+        margin: 0,
+        padding: 'var(--space-2) var(--space-3)',
+        fontSize: '0.72rem',
+        lineHeight: 1.5,
+        color: 'var(--color-muted)',
+        whiteSpace: 'pre-wrap',
+      }}>
+        {loading ? '' : '// no output'}
+      </pre>
+    );
+  }
+
+  // Sort markers by ts ascending so they appear in chronological order
+  const sortedMarkers = [...(markers ?? [])].sort((a, b) =>
+    a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0,
+  );
+
+  return (
     <div style={{ padding: 'var(--space-2) var(--space-3)' }}>
+      {/* Run markers as orientation separators above the source blocks */}
+      {sortedMarkers.map(m => {
+        const isCurrent     = m.run === maxRun;
+        const displayReason = m.reason === 'started' ? 'started' : 'restarted';
+        const label         = `run #${m.run} · ${formatTime(m.ts)} · ${displayReason}`;
+        return (
+          <RunMarkerSeparator
+            key={`all-marker-${m.run}-${m.ts}`}
+            label={label}
+            isCurrent={isCurrent}
+            markerRef={isCurrent ? latestRunRef : undefined}
+          />
+        );
+      })}
+
       {names.map(name => {
         const text = sources[name];
         if (!text) return null;
