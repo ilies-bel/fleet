@@ -29,6 +29,21 @@
   --color-source-nginx: #66d9ef;      /* nginx log stream                        */
   --color-source-postgresql: #e6a700; /* postgresql log stream                   */
 
+  /* ── Log-panel highlight palette ──────────────────────────────────────────── */
+  /* Five distinct background-tint + foreground pairs for multi-term highlights.  */
+  /* Background: semi-transparent tint visible on the #050505 log area.           */
+  /* Foreground: bright-but-readable text of the same hue.                        */
+  --log-hl-1-bg: rgba(255, 210, 0, 0.28);    /* amber  */
+  --log-hl-1-fg: #ffe040;
+  --log-hl-2-bg: rgba(0, 210, 100, 0.22);    /* mint   */
+  --log-hl-2-fg: #00d464;
+  --log-hl-3-bg: rgba(255, 70, 70, 0.30);    /* coral  */
+  --log-hl-3-fg: #ff7070;
+  --log-hl-4-bg: rgba(80, 160, 255, 0.26);   /* blue   */
+  --log-hl-4-fg: #78b8ff;
+  --log-hl-5-bg: rgba(255, 80, 220, 0.26);   /* pink   */
+  --log-hl-5-fg: #ff80e0;
+
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 
   /* ── Interaction-state tokens ─────────────────────────────────────────── */

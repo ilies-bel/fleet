@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { getLogs } from '../api.js';
 import { Button } from './Button.jsx';
 
@@ -26,6 +26,18 @@ const LEVEL_COLOR = {
 const LEVEL_ORDER = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
 
 const LEVEL_FILTERS = ['ALL', 'ERROR', 'WARN', 'INFO'];
+
+/**
+ * Five-slot highlight palette. Each entry references CSS vars declared in
+ * index.css — background tint + accessible foreground for the #050505 log area.
+ */
+const HIGHLIGHT_PALETTE = [
+  { bg: 'var(--log-hl-1-bg)', fg: 'var(--log-hl-1-fg)' },
+  { bg: 'var(--log-hl-2-bg)', fg: 'var(--log-hl-2-fg)' },
+  { bg: 'var(--log-hl-3-bg)', fg: 'var(--log-hl-3-fg)' },
+  { bg: 'var(--log-hl-4-bg)', fg: 'var(--log-hl-4-fg)' },
+  { bg: 'var(--log-hl-5-bg)', fg: 'var(--log-hl-5-fg)' },
+];
 
 // ── Client-side log-line parser for the SSE build stream ──────────────────
 // Mirrors gateway/src/log-parse.js — kept inline to avoid a network import.
@@ -99,15 +111,114 @@ function passesFilter(record, levelFilter) {
   return (LEVEL_ORDER[record.level] ?? 99) <= (LEVEL_ORDER[levelFilter] ?? 99);
 }
 
+/**
+ * Returns true if a record matches the text filter query.
+ * Checks record.raw (full original line) case-insensitively — substring match.
+ *
+ * Single responsibility: swap operator syntax here in a follow-up without
+ * touching the rest of the filter pipeline.
+ *
+ * @param {{ raw?: string, message?: string }} record
+ * @param {string | undefined | null} query
+ */
+export function matchesFilter(record, query) {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return (record.raw ?? record.message ?? '').toLowerCase().includes(q);
+}
+
+/**
+ * Apply text filter to a level-filtered record array.
+ * Trace records pass through iff their immediately preceding parent record
+ * matched — so filtering by an error message keeps that error's stack frames
+ * available to expand.
+ *
+ * @param {object[]} records
+ * @param {string} query
+ */
+export function applyTextFilter(records, query) {
+  const trimmed = (query ?? '').trim();
+  if (!trimmed) return records;
+  const result = [];
+  let lastParentMatched = false;
+  for (const rec of records) {
+    if (rec.isTrace) {
+      if (lastParentMatched) result.push(rec);
+    } else {
+      lastParentMatched = matchesFilter(rec, trimmed);
+      if (lastParentMatched) result.push(rec);
+    }
+  }
+  return result;
+}
+
+/**
+ * Split text into React nodes, wrapping each highlight match in a colored
+ * <mark> span. compiledHighlights is an array of { term, colorIndex, re }
+ * produced by useMemo — re.lastIndex is reset before each use.
+ *
+ * Returns the original string (unchanged) when there are no highlights or no
+ * matches, avoiding unnecessary node creation.
+ *
+ * @param {string} text
+ * @param {{ term: string, colorIndex: number, re: RegExp }[]} compiledHighlights
+ */
+function highlightText(text, compiledHighlights) {
+  if (!text || compiledHighlights.length === 0) return text;
+
+  // Collect all match intervals from all terms.
+  const intervals = [];
+  for (const h of compiledHighlights) {
+    h.re.lastIndex = 0;
+    let m;
+    while ((m = h.re.exec(text)) !== null) {
+      intervals.push({ start: m.index, end: m.index + m[0].length, colorIndex: h.colorIndex, matched: m[0] });
+      if (m[0].length === 0) { h.re.lastIndex++; break; } // guard against zero-width matches
+    }
+  }
+  if (intervals.length === 0) return text;
+
+  // Sort by start position; resolve overlaps by keeping the first match.
+  intervals.sort((a, b) => a.start - b.start || b.end - a.end);
+  const noOverlap = [];
+  let lastEnd = 0;
+  for (const iv of intervals) {
+    if (iv.start >= lastEnd) {
+      noOverlap.push(iv);
+      lastEnd = iv.end;
+    }
+  }
+
+  // Build the React node array — plain strings interspersed with <mark> spans.
+  const nodes = [];
+  let pos = 0;
+  for (const { start, end, colorIndex, matched } of noOverlap) {
+    if (start > pos) nodes.push(text.slice(pos, start));
+    const { bg, fg } = HIGHLIGHT_PALETTE[colorIndex % HIGHLIGHT_PALETTE.length];
+    nodes.push(
+      <mark key={`hl-${start}`} style={{ background: bg, color: fg }}>
+        {matched}
+      </mark>
+    );
+    pos = end;
+  }
+  if (pos < text.length) nodes.push(text.slice(pos));
+
+  return nodes;
+}
+
 // ── LogRow ─────────────────────────────────────────────────────────────────
 
-function LogRow({ record, traces, showSource, wrap }) {
+function LogRow({ record, traces, showSource, wrap, compiledHighlights }) {
   const [expanded, setExpanded] = useState(false);
   const hasTraces = traces.length > 0;
 
   const ts          = formatTs(record.ts);
   const levelColor  = LEVEL_COLOR[record.level] ?? 'var(--color-ink-dim)';
   const sourceColor = SOURCE_COLOR[record.source] ?? 'var(--color-muted)';
+
+  const messageText     = record.message || record.raw;
+  const renderedMessage = highlightText(messageText, compiledHighlights);
 
   return (
     <>
@@ -158,7 +269,7 @@ function LogRow({ record, traces, showSource, wrap }) {
             ? { whiteSpace: 'pre-wrap', wordBreak: 'normal', overflowWrap: 'anywhere', minWidth: 0 }
             : { whiteSpace: 'pre' }),
         }}>
-          {record.message || record.raw}
+          {renderedMessage}
         </span>
 
         {/* Stack-trace expand/collapse toggle — default collapsed */}
@@ -200,7 +311,7 @@ function LogRow({ record, traces, showSource, wrap }) {
               : { whiteSpace: 'pre' }),
           }}
         >
-          {frame.raw}
+          {highlightText(frame.raw, compiledHighlights)}
         </div>
       ))}
     </>
@@ -266,6 +377,22 @@ export default function LogPanel({ featureName, onClose }) {
   const [error, setError]             = useState(null);
   const [autoTail, setAutoTail]       = useState(true);
   const [fetchedAt, setFetchedAt]     = useState(null);
+
+  // ── Filter / highlight state ──────────────────────────────────────────────
+  /** Raw value of the filter text input (debounced before applying) */
+  const [filterInput, setFilterInput]         = useState('');
+  /** Debounced filter — 150ms delay to avoid filtering on every keystroke */
+  const [debouncedFilter, setDebouncedFilter] = useState('');
+  /** Controlled value of the "type to add" highlight input */
+  const [highlightInput, setHighlightInput]   = useState('');
+  /**
+   * Active highlight terms: [{ term: string, colorIndex: number }]
+   * colorIndex cycles through HIGHLIGHT_PALETTE (0–4 wrapping).
+   */
+  const [highlightTerms, setHighlightTerms]   = useState([]);
+  /** Monotonically-incrementing counter — drives palette cycling on add */
+  const nextColorRef = useRef(0);
+
   const sentinelRef  = useRef(null);
   const latestRunRef = useRef(null);
   const dialogRef    = useRef(null);
@@ -316,6 +443,12 @@ export default function LogPanel({ featureName, onClose }) {
     setMarkers([]);
     setError(null);
   }, [featureName, source]);
+
+  // Debounce filter input — 150ms
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedFilter(filterInput), 150);
+    return () => clearTimeout(id);
+  }, [filterInput]);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -392,30 +525,87 @@ export default function LogPanel({ featureName, onClose }) {
   // Highest run number — identifies the "current" (latest) run for emphasis.
   const maxRun = markers.length > 0 ? Math.max(...markers.map(m => m.run)) : 0;
 
-  // lineCount = logical events (non-trace records), NOT raw physical stack frames.
-  // A 60-frame Java exception counts as 1 here because it renders as one row.
-  // Falls back to physical line count for legacy plain-string responses.
-  const lineCount = records.length > 0
-    ? records.filter(r => !r.isTrace).length
-    : (buffer ? buffer.split('\n').length : 0);
-
-  const fetchedTime = fetchedAt ? new Date(fetchedAt).toLocaleTimeString() : '—';
-
   function handleClear() {
     setBuffer('');
     setRecords([]);
     setMarkers([]);
   }
 
-  // Apply level filter, then group consecutive trace lines under their parent row.
-  const filteredRecords = records.filter(r => passesFilter(r, levelFilter));
-  const rows            = groupIntoRows(filteredRecords);
-  const showSource      = source === 'all';
-  const hasMarkers      = markers.length > 0;
+  function addHighlightTerm(term) {
+    const trimmed = term.trim();
+    if (!trimmed) return;
+    // Deduplicate case-insensitively
+    if (highlightTerms.some(h => h.term.toLowerCase() === trimmed.toLowerCase())) return;
+    const colorIndex = nextColorRef.current;
+    nextColorRef.current++;
+    setHighlightTerms(prev => [...prev, { term: trimmed, colorIndex }]);
+    setHighlightInput('');
+  }
+
+  function removeHighlightTerm(term) {
+    setHighlightTerms(prev => prev.filter(h => h.term !== term));
+  }
+
+  // ── Derived filtered state ────────────────────────────────────────────────
+
+  // Level filter applied first.
+  const levelFiltered = useMemo(
+    () => records.filter(r => passesFilter(r, levelFilter)),
+    [records, levelFilter],
+  );
+
+  // Text filter applied second (AND with level filter).
+  // Trace records follow their parent — they pass iff the parent matched.
+  const textFiltered = useMemo(
+    () => applyTextFilter(levelFiltered, debouncedFilter),
+    [levelFiltered, debouncedFilter],
+  );
+
+  // Group consecutive trace lines under their parent row.
+  const rows = useMemo(() => groupIntoRows(textFiltered), [textFiltered]);
+
+  /**
+   * Precomputed highlight regexes — stable per term-set; one object per term.
+   * re.lastIndex is reset before each use in highlightText/termCounts.
+   */
+  const compiledHighlights = useMemo(() =>
+    highlightTerms
+      .filter(({ term }) => term.trim().length > 0)
+      .map(({ term, colorIndex }) => ({
+        term,
+        colorIndex,
+        re: new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+      })),
+    [highlightTerms],
+  );
+
+  /**
+   * Per-term occurrence count across the currently-visible (filtered) records.
+   * Recomputed only when the term set or visible records change.
+   */
+  const termCounts = useMemo(() => {
+    if (compiledHighlights.length === 0) return [];
+    return compiledHighlights.map(({ term, colorIndex, re }) => {
+      let count = 0;
+      for (const rec of textFiltered) {
+        const text = rec.raw || rec.message || '';
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+          count++;
+          if (m[0].length === 0) { re.lastIndex++; break; }
+        }
+      }
+      return { term, colorIndex, count };
+    });
+  }, [compiledHighlights, textFiltered]);
 
   // Merge grouped rows and run markers into a single ts-sorted timeline.
   // A marker sorts before a record sharing its ts (stable ordering spec).
-  const timeline = [
+  const showSource = source === 'all';
+  const hasMarkers = markers.length > 0;
+
+  const timeline = useMemo(() => [
     ...rows.map(row => ({ _type: 'row', ts: row.record.ts, row })),
     ...markers.map(m => ({ _type: 'marker', ts: m.ts, marker: m })),
   ].sort((a, b) => {
@@ -424,7 +614,16 @@ export default function LogPanel({ featureName, onClose }) {
     if (a._type === 'marker' && b._type !== 'marker') return -1;
     if (a._type !== 'marker' && b._type === 'marker') return 1;
     return 0;
-  });
+  }), [rows, markers]);
+
+  // Footer counts — total = all records before text filter (pre-filter baseline).
+  // Falls back to physical line count for legacy plain-string responses.
+  const totalLineCount    = records.length > 0
+    ? records.filter(r => !r.isTrace).length
+    : (buffer ? buffer.split('\n').length : 0);
+  const filteredLineCount = textFiltered.filter(r => !r.isTrace).length;
+
+  const fetchedTime = fetchedAt ? new Date(fetchedAt).toLocaleTimeString() : '—';
 
   return (
     <div
@@ -462,118 +661,225 @@ export default function LogPanel({ featureName, onClose }) {
       >
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <div style={{
-          padding:      'var(--space-2) var(--space-3)',
-          borderBottom: '1px solid var(--color-border)',
-          display:      'flex',
-          alignItems:   'center',
-          gap:          'var(--space-2)',
-          flexWrap:     'wrap',
+          padding:       'var(--space-2) var(--space-3)',
+          borderBottom:  '1px solid var(--color-border)',
+          display:       'flex',
+          flexDirection: 'column',
+          gap:           'var(--space-15)',
         }}>
-          <span style={{
-            color:       'var(--color-accent)',
-            fontSize:    '0.75rem',
-            fontWeight:  700,
-            marginRight: 'var(--space-1)',
+          {/* Row 1: title · source tabs · level filters · spacer · TAIL · CLOSE */}
+          <div style={{
+            display:    'flex',
+            alignItems: 'center',
+            gap:        'var(--space-2)',
+            flexWrap:   'wrap',
           }}>
-            // LOGS — {featureName}
-          </span>
+            <span style={{
+              color:       'var(--color-accent)',
+              fontSize:    '0.75rem',
+              fontWeight:  700,
+              marginRight: 'var(--space-1)',
+            }}>
+              // LOGS — {featureName}
+            </span>
 
-          {/* Source tabs — active tab gets the filled accent inversion */}
-          <div style={{ display: 'flex', gap: '0.3rem' /* off-scale: 0.3rem micro-gap between tab buttons */ }}>
-            {SOURCES.map(s => (
-              <Button
-                key={s}
-                tone="primary"
-                onClick={() => setSource(s)}
-                aria-pressed={s === source}
-                style={{
-                  fontSize: '0.65rem',
-                  padding:  '2px 6px',
-                  ...(s === source
-                    ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' }
-                    : {}),
-                }}
-              >
-                [{s.toUpperCase()}]
-              </Button>
-            ))}
+            {/* Source tabs — active tab gets the filled accent inversion */}
+            <div style={{ display: 'flex', gap: '0.3rem' }}>
+              {SOURCES.map(s => (
+                <Button
+                  key={s}
+                  tone="primary"
+                  onClick={() => setSource(s)}
+                  aria-pressed={s === source}
+                  style={{
+                    fontSize: '0.65rem',
+                    padding:  '2px 6px',
+                    ...(s === source
+                      ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' }
+                      : {}),
+                  }}
+                >
+                  [{s.toUpperCase()}]
+                </Button>
+              ))}
+            </div>
+
+            {/* Level filter chips — ALL / ERROR / WARN / INFO */}
+            <div style={{ display: 'flex', gap: '0.3rem', marginLeft: 'var(--space-2)' }}>
+              {LEVEL_FILTERS.map(lf => (
+                <Button
+                  key={lf}
+                  tone="primary"
+                  onClick={() => setLevelFilter(lf)}
+                  aria-pressed={lf === levelFilter}
+                  style={{
+                    fontSize: '0.62rem',
+                    padding:  '2px 5px',
+                    ...(lf === levelFilter
+                      ? {
+                          background: lf === 'ALL'
+                            ? 'var(--color-accent)'
+                            : (LEVEL_COLOR[lf] ?? 'var(--color-accent)'),
+                          color: 'var(--color-bg-black)',
+                        }
+                      : {
+                          color: lf === 'ALL'
+                            ? undefined
+                            : (LEVEL_COLOR[lf] ?? undefined),
+                        }),
+                  }}
+                >
+                  {lf}
+                </Button>
+              ))}
+            </div>
+
+            <div style={{ flex: 1 }} />
+
+            {/* Auto-tail toggle — primary (tailing), caution (paused) */}
+            <Button
+              tone={autoTail ? 'primary' : 'caution'}
+              onClick={() => setAutoTail(v => !v)}
+              aria-pressed={autoTail}
+              title={autoTail ? 'Pause auto-refresh' : 'Enable auto-refresh every 3s'}
+              style={{
+                fontSize: '0.68rem',
+                padding:  '2px 7px',
+                ...(autoTail
+                  ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' }
+                  : {}),
+              }}
+            >
+              {autoTail ? '[TAIL]' : '[PAUSED]'}
+            </Button>
+
+            {/* Wrap toggle — active (wrap on) gets filled accent treatment */}
+            <Button
+              tone="primary"
+              onClick={() => setWrap(v => !v)}
+              aria-pressed={wrap}
+              title={wrap ? 'Switch to no-wrap (horizontal scroll)' : 'Switch to word-wrap mode'}
+              style={{
+                fontSize: '0.68rem',
+                padding:  '2px 7px',
+                ...(wrap
+                  ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' }
+                  : {}),
+              }}
+            >
+              {wrap ? '[WRAP]' : '[NOWRAP]'}
+            </Button>
+
+            {/* Close — restores focus to the element that opened the panel */}
+            <Button
+              tone="primary"
+              onClick={handleClose}
+              aria-label="Close log panel"
+              style={{ fontSize: '0.68rem', padding: '2px 7px' }}
+            >
+              [CLOSE]
+            </Button>
           </div>
 
-          {/* Level filter chips — ALL / ERROR / WARN / INFO */}
-          <div style={{ display: 'flex', gap: '0.3rem', marginLeft: 'var(--space-2)' }}>
-            {LEVEL_FILTERS.map(lf => (
-              <Button
-                key={lf}
-                tone="primary"
-                onClick={() => setLevelFilter(lf)}
-                aria-pressed={lf === levelFilter}
-                style={{
-                  fontSize: '0.62rem',
-                  padding:  '2px 5px',
-                  ...(lf === levelFilter
-                    ? {
-                        background: lf === 'ALL'
-                          ? 'var(--color-accent)'
-                          : (LEVEL_COLOR[lf] ?? 'var(--color-accent)'),
-                        color: 'var(--color-bg-black)',
-                      }
-                    : {
-                        color: lf === 'ALL'
-                          ? undefined
-                          : (LEVEL_COLOR[lf] ?? undefined),
-                      }),
+          {/* Row 2: filter input · highlight chip area + input */}
+          <div style={{
+            display:    'flex',
+            alignItems: 'center',
+            gap:        'var(--space-2)',
+            flexWrap:   'wrap',
+          }}>
+            {/* Filter text input — debounced 150ms */}
+            <input
+              type="text"
+              placeholder="filter…"
+              value={filterInput}
+              onChange={e => setFilterInput(e.target.value)}
+              aria-label="Filter log lines"
+              style={{
+                background: 'transparent',
+                border:     '1px solid var(--color-border)',
+                color:      'var(--color-ink)',
+                fontFamily: 'var(--font-mono)',
+                fontSize:   '0.68rem',
+                padding:    '2px 6px',
+                width:      '220px',
+                outline:    'none',
+              }}
+            />
+
+            {/* Highlight chip area + "highlight…" input */}
+            <div style={{
+              display:    'flex',
+              alignItems: 'center',
+              gap:        '0.3rem',
+              flexWrap:   'wrap',
+              flex:       1,
+            }}>
+              {/* Removable chips — one per active highlight term */}
+              {termCounts.map(({ term, colorIndex, count }) => {
+                const { bg, fg } = HIGHLIGHT_PALETTE[colorIndex % HIGHLIGHT_PALETTE.length];
+                return (
+                  <span
+                    key={term}
+                    style={{
+                      display:    'inline-flex',
+                      alignItems: 'center',
+                      gap:        '0.25em',
+                      background: bg,
+                      color:      fg,
+                      fontFamily: 'var(--font-mono)',
+                      fontSize:   '0.62rem',
+                      padding:    '1px 4px',
+                      border:     `1px solid ${fg}`,
+                    }}
+                  >
+                    <span>{term} ×{count}</span>
+                    <button
+                      onClick={() => removeHighlightTerm(term)}
+                      aria-label={`Remove highlight: ${term}`}
+                      style={{
+                        background: 'none',
+                        border:     'none',
+                        color:      'inherit',
+                        cursor:     'pointer',
+                        fontFamily: 'inherit',
+                        fontSize:   'inherit',
+                        padding:    '0 1px',
+                        lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+
+              {/* "highlight…" input — press Enter to add a term */}
+              <input
+                type="text"
+                placeholder="highlight…"
+                value={highlightInput}
+                onChange={e => setHighlightInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.stopPropagation(); // prevent dialog-level keyDown from firing
+                    addHighlightTerm(highlightInput);
+                  }
                 }}
-              >
-                {lf}
-              </Button>
-            ))}
+                aria-label="Add highlight term, press Enter to add"
+                style={{
+                  background: 'transparent',
+                  border:     '1px solid var(--color-border)',
+                  color:      'var(--color-ink)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize:   '0.68rem',
+                  padding:    '2px 6px',
+                  width:      '160px',
+                  outline:    'none',
+                }}
+              />
+            </div>
           </div>
-
-          <div style={{ flex: 1 }} />
-
-          {/* Auto-tail toggle — primary (tailing), caution (paused) */}
-          <Button
-            tone={autoTail ? 'primary' : 'caution'}
-            onClick={() => setAutoTail(v => !v)}
-            aria-pressed={autoTail}
-            title={autoTail ? 'Pause auto-refresh' : 'Enable auto-refresh every 3s'}
-            style={{
-              fontSize: '0.68rem',
-              padding:  '2px 7px',
-              ...(autoTail
-                ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' }
-                : {}),
-            }}
-          >
-            {autoTail ? '[TAIL]' : '[PAUSED]'}
-          </Button>
-
-          {/* Wrap toggle — active (wrap on) gets filled accent treatment */}
-          <Button
-            tone="primary"
-            onClick={() => setWrap(v => !v)}
-            aria-pressed={wrap}
-            title={wrap ? 'Switch to no-wrap (horizontal scroll)' : 'Switch to word-wrap mode'}
-            style={{
-              fontSize: '0.68rem',
-              padding:  '2px 7px',
-              ...(wrap
-                ? { background: 'var(--color-accent)', color: 'var(--color-bg-black)' }
-                : {}),
-            }}
-          >
-            {wrap ? '[WRAP]' : '[NOWRAP]'}
-          </Button>
-
-          {/* Close — restores focus to the element that opened the panel */}
-          <Button
-            tone="primary"
-            onClick={handleClose}
-            aria-label="Close log panel"
-            style={{ fontSize: '0.68rem', padding: '2px 7px' }}
-          >
-            [CLOSE]
-          </Button>
         </div>
 
         {/* ── Log area ────────────────────────────────────────────────────── */}
@@ -645,7 +951,9 @@ export default function LogPanel({ featureName, onClose }) {
                     color:      'var(--color-muted)',
                     fontFamily: 'var(--font-mono)',
                   }}>
-                    // no output
+                    {debouncedFilter
+                      ? `// no lines match ${debouncedFilter}`
+                      : '// no output'}
                   </div>
                 )}
 
@@ -666,6 +974,7 @@ export default function LogPanel({ featureName, onClose }) {
                       traces={item.row.traces}
                       showSource={showSource}
                       wrap={wrap}
+                      compiledHighlights={compiledHighlights}
                     />
                   )
                 ))}
@@ -686,8 +995,11 @@ export default function LogPanel({ featureName, onClose }) {
           flexShrink:     0,
         }}>
           <span style={{ color: 'var(--color-muted)', fontSize: '0.65rem' }}>
-            {/* lineCount = non-trace records (logical events), not raw physical lines */}
-            {lineCount} lines | fetched {fetchedTime}
+            {/* Show "F of T lines" when text filter is active; plain "T lines" otherwise */}
+            {debouncedFilter
+              ? `${filteredLineCount} of ${totalLineCount} lines`
+              : `${totalLineCount} lines`
+            } | fetched {fetchedTime}
             {loading && autoTail ? ' | refreshing…' : ''}
           </span>
           <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
