@@ -53,33 +53,74 @@ for arg in "${@:2}"; do
 done
 
 # ─── Plan-aware in-container rebuild ─────────────────────────────────────────
-# For each subproject that was initialised with a railpack plan, replay the run
-# command recorded at init time directly inside the running container — no
-# gateway round-trip needed.  A non-zero exit from docker exec is logged as a
-# warning; the container is kept running regardless (no docker kill).
+# For each subproject that was initialised with a railpack plan:
+#   • Normal sync (default): replay the run command recorded at init time
+#     directly inside the running container — no gateway round-trip needed.
+#   • --rebuild: build a fresh Docker image from current sources and recreate
+#     the container from it.  This is a full image rebuild via buildx, not
+#     just an in-container re-run.
+# A non-zero exit from docker exec is logged as a warning; the container is
+# kept running regardless (no docker kill).
 # When at least one plan branch ran, skip the fragment-based gateway path.
 _plan_sync_done=false
+_plan_rebuild_needed=false
 shopt -s nullglob
 for _plan in "${FLEET_CONFIG_ROOT}/.fleet/"*/railpack-plan.json; do
   sub="$(basename "$(dirname "${_plan}")")"
-  renv="${FLEET_CONFIG_ROOT}/.fleet/${sub}/run.env"
-  if [[ -f "${renv}" ]]; then
-    # shellcheck source=/dev/null
-    source "${renv}"
-    if [[ -z "${RUN_CMD:-}" ]]; then
-      warn "run.env for '${sub}' has no RUN_CMD — skipping in-container sync"
-      continue
-    fi
-    info "Syncing '${name}' (${sub}) in container '${container}'..."
-    if ! docker exec "${container}" bash -c "${RUN_CMD}"; then
-      warn "Sync rebuild for '${sub}' failed — container '${container}' kept running"
-    else
-      info "Sync rebuild for '${sub}' complete"
-    fi
+
+  if [[ "${rebuild}" = true ]]; then
+    # --rebuild path: build a fresh image; container is recreated after the loop.
+    info "Rebuilding image for '${name}' (${sub})..."
+    fleet_preflight
+    _image_tag="fleet-feature-base-${FLEET_PROJECT_NAME}-${sub}"
+    # Determine the service source directory from fleet.toml services JSON.
+    # Falls back to the subproject name when no matching service entry is found.
+    _ctx_dir=$(python3 -c "
+import sys, json
+try:
+    svcs = json.loads(sys.argv[1])
+    sub  = sys.argv[2]
+    for s in svcs:
+        if s.get('name') == sub:
+            print(s.get('dir', sub))
+            sys.exit(0)
+except Exception:
+    pass
+print(sys.argv[2])
+" "${FLEET_SERVICES_JSON:-[]}" "${sub}" 2>/dev/null || echo "${sub}")
+    _ctx_dir="${_ctx_dir:-${sub}}"
+    build_feature_image "${sub}" "${_image_tag}" "${FLEET_PROJECT_ROOT}/${_ctx_dir}"
+    _plan_rebuild_needed=true
     _plan_sync_done=true
+  else
+    renv="${FLEET_CONFIG_ROOT}/.fleet/${sub}/run.env"
+    if [[ -f "${renv}" ]]; then
+      # shellcheck source=/dev/null
+      source "${renv}"
+      if [[ -z "${RUN_CMD:-}" ]]; then
+        warn "run.env for '${sub}' has no RUN_CMD — skipping in-container sync"
+        continue
+      fi
+      info "Syncing '${name}' (${sub}) in container '${container}'..."
+      if ! docker exec "${container}" bash -c "${RUN_CMD}"; then
+        warn "Sync rebuild for '${sub}' failed — container '${container}' kept running"
+      else
+        info "Sync rebuild for '${sub}' complete"
+      fi
+      _plan_sync_done=true
+    fi
   fi
 done
 shopt -u nullglob
+
+# After all images are rebuilt, recreate the container once so the new image
+# is picked up without disrupting other running features.
+if [[ "${_plan_rebuild_needed}" = true ]]; then
+  _compose_file="${FLEET_CONFIG_ROOT}/.fleet/${name}/docker-compose.yml"
+  info "Recreating container '${container}' from rebuilt image..."
+  docker compose -f "${_compose_file}" up -d --force-recreate
+  info "Rebuild and container recreate complete for '${name}'"
+fi
 
 if [[ "${_plan_sync_done}" = true ]]; then
   exit 0

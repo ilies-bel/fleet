@@ -76,6 +76,13 @@ cat
 exit 0
 STUB
   chmod +x "${STUB_BIN}/python3"
+
+  # railpack stub: needed for fleet_preflight's `command -v railpack` check
+  cat > "${STUB_BIN}/railpack" <<'STUB'
+#!/bin/bash
+exit 0
+STUB
+  chmod +x "${STUB_BIN}/railpack"
 }
 
 teardown() {
@@ -190,4 +197,50 @@ STUB
   [ "$status" -eq 0 ]
   # docker kill must NOT have been invoked
   ! grep -q "^kill " "${DOCKER_LOG}"
+}
+
+# ── Plan-present with --rebuild ───────────────────────────────────────────────
+# These tests verify that fleet sync --rebuild respects the plan-based path:
+# rather than exec-ing into the running container, it rebuilds the Docker image
+# and recreates the container from the new image.
+
+@test "cmd-sync: plan present with --rebuild → docker buildx build is called, NOT docker exec" {
+  _write_vite_plan
+
+  run env \
+    FLEET_GATEWAY="http://localhost:9999" \
+    PATH="${STUB_BIN}:${PATH}" \
+    bash -c "cd '${PROJ_DIR}' && bash '${CMD_SYNC}' my-feature --rebuild"
+
+  [ "$status" -eq 0 ]
+  # Image rebuild must have been triggered via buildx
+  grep -q "buildx build" "${DOCKER_LOG}"
+  # docker exec must NOT have been called — rebuild replaces in-container run
+  ! grep -q "^exec " "${DOCKER_LOG}"
+}
+
+@test "cmd-sync: plan present with --rebuild → container recreated via compose up --force-recreate" {
+  _write_vite_plan
+
+  run env \
+    FLEET_GATEWAY="http://localhost:9999" \
+    PATH="${STUB_BIN}:${PATH}" \
+    bash -c "cd '${PROJ_DIR}' && bash '${CMD_SYNC}' my-feature --rebuild"
+
+  [ "$status" -eq 0 ]
+  # Container must be recreated (not just restarted) so the new image is picked up
+  grep -q "force-recreate" "${DOCKER_LOG}"
+}
+
+@test "cmd-sync: plan present with --rebuild → gateway curl is NOT called" {
+  _write_vite_plan
+
+  run env \
+    FLEET_GATEWAY="http://localhost:9999" \
+    PATH="${STUB_BIN}:${PATH}" \
+    bash -c "cd '${PROJ_DIR}' && bash '${CMD_SYNC}' my-feature --rebuild"
+
+  [ "$status" -eq 0 ]
+  # Rebuild via plan bypasses the gateway API entirely
+  [ ! -s "${CURL_LOG}" ]
 }
