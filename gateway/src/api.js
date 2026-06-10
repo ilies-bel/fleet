@@ -9,6 +9,8 @@ import { getHostMetrics } from './host-metrics.js';
 import { startOperation, endOperation, listOperations, listFailureClusters, appendEvent, getOperation } from './log-store.js';
 import { tagError, FAILURE_REASONS } from './failure-reasons.js';
 import * as containerDispatch from './container-dispatch.js';
+import { parseLogText } from './log-parse.js';
+import { detectRunMarkers } from './run-markers.js';
 
 // Re-export the spawn seam so existing tests that import _setSpawnImpl from
 // api.js continue to work without modification.
@@ -278,8 +280,17 @@ router.get('/features/:key/logs', async (req, res) => {
 
   const source = req.query.source || 'backend';
   const tail = Math.min(Math.max(parseInt(req.query.tail) || 200, 1), 2000);
-  const since = Math.max(parseInt(req.query.since) || 0, 0);
   const containerName = `fleet-${key}`;
+
+  // Attempt to obtain container start time for run-marker anchoring.
+  // Non-fatal: markers work from log banners alone if inspect fails.
+  let containerStartedAt = null;
+  try {
+    const info = await inspectContainer(containerName);
+    containerStartedAt = info?.State?.StartedAt ?? null;
+  } catch {
+    // ignore
+  }
 
   try {
     if (source === 'all') {
@@ -291,11 +302,26 @@ router.get('/features/:key/logs', async (req, res) => {
             .catch(() => ''),
         ),
       );
-      const sources = Object.fromEntries(LOG_SOURCES.map((src, i) => [src, results[i]]));
-      return res.json({ sources, fetchedAt: Date.now() });
+
+      // Parse each source and collect into one flat record array
+      const allRecords = LOG_SOURCES.flatMap((src, i) => parseLogText(results[i], src));
+
+      // Merge into a single timeline: timestamped records sorted by ts, then
+      // un-timestamped records in their original relative order at the end.
+      allRecords.sort((a, b) => {
+        if (!a.ts && !b.ts) return 0;
+        if (!a.ts) return 1;
+        if (!b.ts) return -1;
+        return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0;
+      });
+
+      const markers = detectRunMarkers(allRecords, { containerStartedAt });
+      return res.json({ records: allRecords, markers, fetchedAt: Date.now() });
     } else if (ALLOWED_SOURCES.has(source)) {
-      const lines = await dockerExec(containerName, ['tail', '-n', String(tail), `/var/log/supervisor/${source}.log`]);
-      return res.json({ lines, fetchedAt: Date.now() });
+      const text = await dockerExec(containerName, ['tail', '-n', String(tail), `/var/log/supervisor/${source}.log`]);
+      const records = parseLogText(text, source);
+      const markers = detectRunMarkers(records, { containerStartedAt });
+      return res.json({ records, markers, fetchedAt: Date.now() });
     } else {
       return res.status(400).json({ error: `Invalid source '${source}'. Use: backend, nginx, postgresql, supervisord, all` });
     }
