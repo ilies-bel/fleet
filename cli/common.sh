@@ -960,6 +960,65 @@ apply_stack_template() {
 }
 export -f apply_stack_template
 
+# ─── ensure_fleet_builder ─────────────────────────────────────────────────────
+# ensure_fleet_builder
+#
+# Idempotently creates the 'fleet-railpack' buildx builder using the
+# docker-container driver.  The docker-container driver runs BuildKit in its
+# own container where the 'mergeop' feature (required by the railpack frontend)
+# is always available, regardless of the host's container image store setting.
+#
+# Tolerate "already exists" — a second call is a no-op.
+ensure_fleet_builder() {
+  if ! docker buildx inspect fleet-railpack >/dev/null 2>&1; then
+    info "Creating buildx builder 'fleet-railpack' (docker-container driver)…"
+    docker buildx create --driver docker-container --name fleet-railpack \
+      || { echo "docker buildx create failed" >&2; return 1; }
+    info "Builder 'fleet-railpack' created."
+  fi
+}
+export -f ensure_fleet_builder
+
+# ─── fleet_preflight ──────────────────────────────────────────────────────────
+# fleet_preflight
+#
+# Hard-gate that runs before any railpack/buildx work.  Checks three
+# prerequisites in order:
+#   1. Docker daemon is running   (docker info)
+#   2. railpack binary is on PATH (command -v railpack)
+#   3. fleet-railpack builder exists — auto-creates it if not (idempotent)
+#
+# Exits non-zero with a copy-pasteable install instruction if 1 or 2 fail.
+# For check 3 it creates the builder rather than blocking.
+fleet_preflight() {
+  # ── 1. Docker daemon ────────────────────────────────────────────────────────
+  if ! docker info >/dev/null 2>&1; then
+    echo "" >&2
+    echo "ERROR: Docker is not running or not installed." >&2
+    echo "" >&2
+    echo "  Start Docker Desktop (or your Docker daemon) and re-run fleet." >&2
+    echo "" >&2
+    exit 1
+  fi
+
+  # ── 2. railpack binary ──────────────────────────────────────────────────────
+  if ! command -v railpack >/dev/null 2>&1; then
+    echo "" >&2
+    echo "ERROR: railpack is not installed." >&2
+    echo "" >&2
+    echo "  Install it with:" >&2
+    echo "    curl -sSL https://railpack.com/install.sh | sh" >&2
+    echo "" >&2
+    echo "  Or visit https://railpack.com for alternative install methods." >&2
+    echo "" >&2
+    exit 1
+  fi
+
+  # ── 3. fleet-railpack buildx builder (auto-create, idempotent) ─────────────
+  ensure_fleet_builder
+}
+export -f fleet_preflight
+
 # ─── build_feature_image ──────────────────────────────────────────────────────
 # build_feature_image <sub_name> <image_tag> <context_dir>
 #
@@ -967,7 +1026,8 @@ export -f apply_stack_template
 # Errors if no railpack plan file exists for the subproject.
 #
 #   • Plan present  (.fleet/<sub_name>/railpack-plan.json):
-#       docker buildx build --build-arg BUILDKIT_SYNTAX=<railpack-frontend> \
+#       docker buildx build --builder fleet-railpack \
+#         --build-arg BUILDKIT_SYNTAX=<railpack-frontend> \
 #         -f .fleet/<sub_name>/railpack-plan.json -t <image_tag> <context_dir>
 #
 #   • Plan absent: prints an error to stderr and returns 1.
@@ -984,6 +1044,7 @@ build_feature_image() {
 
   if [[ -n "${plan_file}" ]] && [[ -f "${plan_file}" ]]; then
     docker buildx build \
+      --builder fleet-railpack \
       --build-arg "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend:latest" \
       -f "${plan_file}" \
       -t "${image_tag}" \
@@ -1015,6 +1076,7 @@ show_help() {
   echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] [--rebuild]  Pull latest code and rebuild"
   echo -e "  ${BLUE}migrate-names${RESET}                        Identify and remove pre-migration bare-named containers"
   echo -e "  ${BLUE}install-claude${RESET} [--local|--global] [--force]  Install Claude Code assets"
+  echo -e "  ${BLUE}doctor${RESET}                               Check fleet prerequisites (Docker, railpack, builder)"
   echo -e "  ${BLUE}help${RESET}    [<command>]                  Show this help, or help for <command>"
   echo ""
   echo "Top-level flags:"

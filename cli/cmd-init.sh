@@ -46,6 +46,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ─── Preflight prerequisite gate ─────────────────────────────────────────────
+# Check Docker, railpack, and ensure the fleet-railpack buildx builder exists
+# before any railpack/buildx work starts.
+fleet_preflight
+
 # ─── Constants ───────────────────────────────────────────────────────────────
 # fleet init is a per-project bootstrap: write .fleet/ into the project working
 # directory (PWD), not into the CLI install directory (FLEET_ROOT).

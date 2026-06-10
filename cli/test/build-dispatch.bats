@@ -14,6 +14,8 @@ setup() {
   mkdir -p "${PROJ_DIR}/.fleet"
 
   # Docker stub: records every invocation as a single space-joined line.
+  # buildx inspect returns 0 (builder already exists) so ensure_fleet_builder
+  # skips creation.  All other invocations also return 0.
   # DOCKER_LOG is embedded at stub-creation time (expanded in the heredoc).
   cat > "${STUB_BIN}/docker" <<STUB
 #!/bin/bash
@@ -45,6 +47,9 @@ teardown() {
 
   # Must invoke docker buildx
   grep -q "^buildx " "${DOCKER_LOG}"
+
+  # Must target the fleet-railpack builder
+  grep -q "\-\-builder fleet-railpack" "${DOCKER_LOG}"
 
   # Must pass BUILDKIT_SYNTAX pointing at the railpack frontend
   grep -q "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend" "${DOCKER_LOG}"
