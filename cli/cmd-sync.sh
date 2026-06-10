@@ -53,15 +53,21 @@ for arg in "${@:2}"; do
 done
 
 # ─── Plan-aware in-container rebuild ─────────────────────────────────────────
-# For each subproject that was initialised with a railpack plan:
-#   • Normal sync (default): replay the run command recorded at init time
-#     directly inside the running container — no gateway round-trip needed.
-#   • --rebuild: build a fresh Docker image from current sources and recreate
-#     the container from it.  This is a full image rebuild via buildx, not
-#     just an in-container re-run.
+# For each subproject initialised with a railpack plan:
+#   • Normal sync (default): rebuild the artifact in-container, then restart the
+#     server.
+#       1. Run BUILD_CMD (e.g. "npm run build") to regenerate the build artifact
+#          from the bind-mounted source files inside the running container.
+#       2. If a RUN_CMD (e.g. "caddy run …") is also present, restart the server:
+#          send SIGTERM to the existing process and launch a fresh copy in the
+#          background (nohup + &) so docker exec returns without a port conflict.
+#          Server restart is skipped when the build step fails.
+#   • --rebuild: build a fresh Docker image from current sources and recreate the
+#     container from it.  This is a full image rebuild via buildx, not just an
+#     in-container re-run.
 # A non-zero exit from docker exec is logged as a warning; the container is
-# kept running regardless (no docker kill).
-# When at least one plan branch ran, skip the fragment-based gateway path.
+# kept running regardless (no docker kill).  When at least one plan branch ran,
+# skip the fragment-based gateway path.
 _plan_sync_done=false
 _plan_rebuild_needed=false
 shopt -s nullglob
@@ -97,16 +103,42 @@ print(sys.argv[2])
     if [[ -f "${renv}" ]]; then
       # shellcheck source=/dev/null
       source "${renv}"
-      if [[ -z "${RUN_CMD:-}" ]]; then
-        warn "run.env for '${sub}' has no RUN_CMD — skipping in-container sync"
+      _build_cmd="${BUILD_CMD:-}"
+      _run_cmd="${RUN_CMD:-}"
+      unset BUILD_CMD RUN_CMD  # reset for the next iteration
+
+      if [[ -z "${_build_cmd}" && -z "${_run_cmd}" ]]; then
+        warn "run.env for '${sub}' has no BUILD_CMD or RUN_CMD — skipping in-container sync"
         continue
       fi
+
       info "Syncing '${name}' (${sub}) in container '${container}'..."
-      if ! docker exec "${container}" bash -c "${RUN_CMD}"; then
-        warn "Sync rebuild for '${sub}' failed — container '${container}' kept running"
-      else
-        info "Sync rebuild for '${sub}' complete"
+
+      # Step 1: Rebuild the artifact from bind-mounted source files.
+      _build_ok=true
+      if [[ -n "${_build_cmd}" ]]; then
+        if ! docker exec "${container}" bash -c "${_build_cmd}"; then
+          warn "Build for '${sub}' failed — container '${container}' kept running"
+          _build_ok=false
+        else
+          info "Build for '${sub}' complete"
+        fi
       fi
+
+      # Step 2: Restart the server (only when build succeeded, or there was no
+      # build step).  Send SIGTERM to the existing server process and start a
+      # new one in the background to avoid the "port already in use" conflict
+      # that arises when docker exec spawns a duplicate server process.
+      if [[ "${_build_ok}" = true && -n "${_run_cmd}" ]]; then
+        _proc="${_run_cmd%% *}"  # first word = process binary name (e.g. "caddy")
+        if ! docker exec "${container}" bash -c \
+          "pkill -TERM '${_proc}' 2>/dev/null || true; sleep 0.3; nohup ${_run_cmd} >/dev/null 2>&1 &"; then
+          warn "Server restart for '${sub}' failed — container '${container}' kept running"
+        else
+          info "Server restarted for '${sub}'"
+        fi
+      fi
+
       _plan_sync_done=true
     fi
   fi

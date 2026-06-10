@@ -137,3 +137,50 @@ JSON
   run bash -c "source '${WORKTREE_ROOT}/cli/common.sh' && railpack_extract_run_meta '${FIXTURE_DIR}/no-build.json'"
   [ "$status" -ne 0 ]
 }
+
+@test "railpack_extract_run_meta emits a non-empty BUILD_CMD from a Vite fixture plan" {
+  run bash -c "source '${WORKTREE_ROOT}/cli/common.sh' && railpack_extract_run_meta '${FIXTURE_DIR}/railpack-plan.json'"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ BUILD_CMD=.+ ]]
+}
+
+@test "railpack_extract_run_meta output evaluates to BUILD_CMD containing npm run build" {
+  run bash -c "
+source '${WORKTREE_ROOT}/cli/common.sh'
+eval \"\$(railpack_extract_run_meta '${FIXTURE_DIR}/railpack-plan.json')\"
+printf '%s' \"\$BUILD_CMD\"
+"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"npm run build"* ]]
+}
+
+@test "railpack_extract_run_meta emits no BUILD_CMD for a plan whose build step has no commands" {
+  cat > "${FIXTURE_DIR}/no-build-cmd.json" <<'JSON'
+{
+  "deploy": {
+    "startCommand": "caddy run --config /Caddyfile --adapter caddyfile 2>&1",
+    "inputs": [{ "include": ["dist"], "step": "build" }]
+  },
+  "steps": [
+    { "name": "build", "commands": [] }
+  ]
+}
+JSON
+  run bash -c "source '${WORKTREE_ROOT}/cli/common.sh' && railpack_extract_run_meta '${FIXTURE_DIR}/no-build-cmd.json'"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"BUILD_CMD"* ]]
+}
+
+@test "railpack_extract_run_meta emits no BUILD_CMD for a plan with no steps" {
+  cat > "${FIXTURE_DIR}/no-steps.json" <<'JSON'
+{
+  "deploy": {
+    "startCommand": "caddy run --config /Caddyfile --adapter caddyfile 2>&1",
+    "inputs": [{ "include": ["dist"], "step": "build" }]
+  }
+}
+JSON
+  run bash -c "source '${WORKTREE_ROOT}/cli/common.sh' && railpack_extract_run_meta '${FIXTURE_DIR}/no-steps.json'"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"BUILD_CMD"* ]]
+}

@@ -925,7 +925,7 @@ railpack_extract_run_meta() {
     return 1
   fi
 
-  local run_cmd artifact_path
+  local run_cmd artifact_path build_cmd
   run_cmd=$(jq -r '.deploy.startCommand // empty' "${plan_path}" 2>/dev/null)
   # Select the first relative-path include across all build inputs.  Absolute
   # paths like /app/node_modules or /root/.cache are dependency/cache dirs, not
@@ -938,6 +938,17 @@ railpack_extract_run_meta() {
       | select(startswith("/") | not)
     ][0] // empty
   ' "${plan_path}" 2>/dev/null)
+  # Extract the first command from the build step, if present.  This is the
+  # command that regenerates the build artifact (e.g. "npm run build" for Vite).
+  # Stored as BUILD_CMD in run.env; the sync path runs it before restarting the
+  # server so that edited source files are reflected without a full image rebuild.
+  build_cmd=$(jq -r '
+    [(.steps // [])[]
+     | select(.name == "build")
+     | (.commands // [])[0].cmd
+     // empty
+    ][0] // empty
+  ' "${plan_path}" 2>/dev/null)
 
   # A valid artifact path is required; startCommand is optional (static builds
   # produced by e.g. Vite legitimately have no long-running start command).
@@ -945,8 +956,9 @@ railpack_extract_run_meta() {
 
   # Use printf %q so the output is always safely sourceable by bash regardless
   # of spaces or shell metacharacters in the values.
-  # Omit RUN_CMD entirely when startCommand is absent so consumers can detect
-  # "static build, no server" vs "has a start command" without parsing empties.
+  # Omit BUILD_CMD / RUN_CMD when absent so consumers can distinguish
+  # "has a build step" / "has a server" from "static only".
+  [ -n "${build_cmd}" ] && printf 'BUILD_CMD=%q\n' "${build_cmd}"
   [ -n "${run_cmd}" ] && printf 'RUN_CMD=%q\n' "${run_cmd}"
   printf 'ARTIFACT_PATH=%q\n' "${artifact_path}"
 }

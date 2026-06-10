@@ -34,7 +34,10 @@ TOML
 _write_vite_plan() {
   mkdir -p "${PROJ_DIR}/.fleet/frontend"
   echo '{"schema":1}' > "${PROJ_DIR}/.fleet/frontend/railpack-plan.json"
-  printf 'RUN_CMD=%q\n' "npm run build" > "${PROJ_DIR}/.fleet/frontend/run.env"
+  {
+    printf 'BUILD_CMD=%q\n' "npm run build"
+    printf 'RUN_CMD=%q\n' "caddy run --config /Caddyfile --adapter caddyfile 2>&1"
+  } > "${PROJ_DIR}/.fleet/frontend/run.env"
 }
 
 # ── Setup / Teardown ──────────────────────────────────────────────────────────
@@ -91,7 +94,7 @@ teardown() {
 
 # ── Plan-present branch ───────────────────────────────────────────────────────
 
-@test "cmd-sync: plan present → docker exec is called with RUN_CMD" {
+@test "cmd-sync: plan present → docker exec is called with BUILD_CMD" {
   _write_vite_plan
 
   run env \
@@ -102,7 +105,7 @@ teardown() {
   [ "$status" -eq 0 ]
   # docker exec must have been called
   grep -q "^exec " "${DOCKER_LOG}"
-  # RUN_CMD (npm run build) must appear in the exec invocation
+  # BUILD_CMD (npm run build) must appear in the exec invocation
   grep -q "npm run build" "${DOCKER_LOG}"
 }
 
@@ -131,6 +134,84 @@ teardown() {
   [ "$status" -eq 0 ]
   # curl log must be empty — plan branch bypasses the gateway API
   [ ! -s "${CURL_LOG}" ]
+}
+
+@test "cmd-sync: plan present → server restart exec includes caddy run command" {
+  # After BUILD_CMD succeeds, the server must be restarted.  The restart exec
+  # must include the RUN_CMD (caddy run) so the live server picks up the new dist.
+  _write_vite_plan
+
+  run env \
+    FLEET_GATEWAY="http://localhost:9999" \
+    PATH="${STUB_BIN}:${PATH}" \
+    bash -c "cd '${PROJ_DIR}' && bash '${CMD_SYNC}' my-feature"
+
+  [ "$status" -eq 0 ]
+  # The caddy run command must appear in the docker exec log (restart step)
+  grep -q "caddy run" "${DOCKER_LOG}"
+}
+
+@test "cmd-sync: plan present → server restart uses pkill to avoid port conflict" {
+  # The restart exec must include pkill so the existing server is terminated
+  # before launching the new one — this avoids the "port already in use" error.
+  _write_vite_plan
+
+  run env \
+    FLEET_GATEWAY="http://localhost:9999" \
+    PATH="${STUB_BIN}:${PATH}" \
+    bash -c "cd '${PROJ_DIR}' && bash '${CMD_SYNC}' my-feature"
+
+  [ "$status" -eq 0 ]
+  grep -q "pkill" "${DOCKER_LOG}"
+}
+
+@test "cmd-sync: plan with BUILD_CMD only (no RUN_CMD) → build exec but no restart exec" {
+  # When run.env has BUILD_CMD but no RUN_CMD (pure static build, no server),
+  # only the build exec should be issued; no pkill or caddy invocation.
+  mkdir -p "${PROJ_DIR}/.fleet/frontend"
+  echo '{"schema":1}' > "${PROJ_DIR}/.fleet/frontend/railpack-plan.json"
+  printf 'BUILD_CMD=%q\n' "npm run build" > "${PROJ_DIR}/.fleet/frontend/run.env"
+
+  run env \
+    FLEET_GATEWAY="http://localhost:9999" \
+    PATH="${STUB_BIN}:${PATH}" \
+    bash -c "cd '${PROJ_DIR}' && bash '${CMD_SYNC}' my-feature"
+
+  [ "$status" -eq 0 ]
+  # Build must run
+  grep -q "npm run build" "${DOCKER_LOG}"
+  # No pkill or caddy restart
+  ! grep -q "pkill" "${DOCKER_LOG}"
+  ! grep -q "caddy run" "${DOCKER_LOG}"
+}
+
+@test "cmd-sync: failed BUILD_CMD → server restart is skipped" {
+  # If the build step fails, the running server must be left intact (no pkill).
+  _write_vite_plan
+
+  # Override docker stub: exec fails if the command contains "npm" (the build),
+  # succeeds otherwise.  DOCKER_LOG is expanded by the unquoted heredoc delimiter.
+  cat > "${STUB_BIN}/docker" <<STUB
+#!/bin/bash
+echo "\$@" >> "${DOCKER_LOG}"
+if [[ "\${1:-}" == "exec" ]]; then
+  if echo "\$@" | grep -q "npm"; then
+    exit 1
+  fi
+fi
+exit 0
+STUB
+  chmod +x "${STUB_BIN}/docker"
+
+  run env \
+    FLEET_GATEWAY="http://localhost:9999" \
+    PATH="${STUB_BIN}:${PATH}" \
+    bash -c "cd '${PROJ_DIR}' && bash '${CMD_SYNC}' my-feature"
+
+  # Script must exit cleanly even though build failed
+  [ "$status" -eq 0 ]
+  # pkill must NOT have been invoked (server not restarted after failed build)
+  ! grep -q "pkill" "${DOCKER_LOG}"
 }
 
 # ── Fragment-based branch (behaviour unchanged) ───────────────────────────────
