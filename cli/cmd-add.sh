@@ -871,7 +871,7 @@ for svc in services:
     echo "      - /var/run/docker.sock:/var/run/docker.sock"
   fi
   echo "    healthcheck:"
-  echo "      test: [\"CMD\", \"curl\", \"-sf\", \"http://127.0.0.1:80/\"]"
+  echo "      test: [\"CMD\", \"wget\", \"-q\", \"--spider\", \"http://127.0.0.1:80/\"]"
   echo "      interval: 10s"
   echo "      timeout: 5s"
   echo "      retries: 30"
