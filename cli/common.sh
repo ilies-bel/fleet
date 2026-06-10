@@ -1214,4 +1214,53 @@ with open(tmp_file, "w") as fh:
 
 os.replace(tmp_file, state_file)
 PYEOF
+
+# rebuild_gateway — build the fleet-gateway image and (re)start the container.
+#
+# Requires the following variables to be set in the caller's environment:
+#   FLEET_ROOT   — path to the fleet CLI installation directory
+#   PROXY_PORT   — host port for the proxy listener
+#   ADMIN_PORT   — host port for the admin/health API
+#   BACKEND_PORT — host port for backend services (defaults to 8080)
+#
+# This is the single source of truth for the gateway build+run recipe. Both the
+# default init path (when no healthy gateway exists) and the --rebuild-gateway
+# forced path call this function so the two never drift.
+rebuild_gateway() {
+  info "Building gateway image..."
+  docker build \
+    -f "${FLEET_ROOT}/gateway/Dockerfile" \
+    -t fleet-gateway \
+    "${FLEET_ROOT}"
+
+  if docker inspect fleet-gateway >/dev/null 2>&1; then
+    warn "Stopping existing gateway container..."
+    docker rm -f fleet-gateway
+  fi
+
+  info "Starting gateway container..."
+  docker run -d \
+    --name fleet-gateway \
+    --network fleet-net \
+    -e PROXY_PORT="${PROXY_PORT}" \
+    -e ADMIN_PORT="${ADMIN_PORT}" \
+    -e BACKEND_PORT="${BACKEND_PORT:-8080}" \
+    -p "${PROXY_PORT}:${PROXY_PORT}" \
+    -p "${ADMIN_PORT}:${ADMIN_PORT}" \
+    -p "${BACKEND_PORT:-8080}:${BACKEND_PORT:-8080}" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --security-opt label=disable \
+    --restart unless-stopped \
+    fleet-gateway
+
+  info "Waiting for gateway to be ready..."
+  local gw_attempts=0
+  until curl -sf "http://localhost:${ADMIN_PORT}/_fleet/api/status" >/dev/null 2>&1; do
+    gw_attempts=$((gw_attempts + 1))
+    [ "${gw_attempts}" -ge 30 ] && error "Gateway did not start within 30s"
+    sleep 1
+  done
+  info "Gateway is up."
+}
+export -f rebuild_gateway
 }

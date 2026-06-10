@@ -133,40 +133,8 @@ info "Building dashboard..."
   npm run build
 )
 
-info "Building gateway image..."
-docker build \
-  -f "${FLEET_ROOT}/gateway/Dockerfile" \
-  -t fleet-gateway \
-  "${FLEET_ROOT}"
-
-# Remove existing container if present
-if docker inspect fleet-gateway >/dev/null 2>&1; then
-  warn "Removing existing gateway container..."
-  docker rm -f fleet-gateway
-fi
-
-info "Starting gateway container..."
-docker run -d \
-  --name fleet-gateway \
-  --network fleet-net \
-  -e PROXY_PORT="${PROXY_PORT}" \
-  -e ADMIN_PORT="${ADMIN_PORT}" \
-  -e BACKEND_PORT="${BACKEND_PORT}" \
-  -p "${PROXY_PORT}:${PROXY_PORT}" \
-  -p "${ADMIN_PORT}:${ADMIN_PORT}" \
-  -p "${BACKEND_PORT}:${BACKEND_PORT}" \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --security-opt label=disable \
-  --restart unless-stopped \
-  fleet-gateway
-
-# Wait for gateway to be ready
-info "Waiting for gateway to be ready..."
-gw_attempts=0
-until curl -sf "http://localhost:${ADMIN_PORT}/_fleet/api/status" >/dev/null 2>&1; do
-  gw_attempts=$((gw_attempts + 1))
-  [ "${gw_attempts}" -ge 30 ] && error "Gateway did not start within 30s"
-  sleep 1
-done
+# Build+run gateway via the shared rebuild_gateway() from common.sh — single
+# source of truth for the recipe; avoids drift between ui and init paths.
+rebuild_gateway
 
 info "Dashboard is up at ${BLUE}http://localhost:${ADMIN_PORT}${RESET}"

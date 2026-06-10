@@ -13,22 +13,31 @@ source "${SCRIPT_DIR}/common.sh"
 source "${SCRIPT_DIR}/railpack.sh"
 
 OVERRIDE=0
+REBUILD_GATEWAY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --help|-h)
-      echo "Usage: fleet init [--override]"
+      echo "Usage: fleet init [--override] [--rebuild-gateway]"
       echo ""
       echo "  Initialize fleet for the project in the current directory."
       echo "  Reads .fleet/fleet.toml if present; otherwise starts an interactive wizard."
       echo ""
       echo "Options:"
-      echo "  --override    Regenerate .fleet/fleet.toml, railpack plans,"
-      echo "                and .fleet/.gitignore even if they already exist."
+      echo "  --override          Regenerate .fleet/fleet.toml, railpack plans,"
+      echo "                      and .fleet/.gitignore even if they already exist."
+      echo "  --rebuild-gateway   Force a fresh gateway image build and container"
+      echo "                      restart even when the gateway is already healthy."
+      echo "                      Use this after updating gateway/src/ to avoid"
+      echo "                      serving stale routes from an old image."
       echo ""
       exit 0
       ;;
     --override)
       OVERRIDE=1
+      shift
+      ;;
+    --rebuild-gateway|--force-gateway)
+      REBUILD_GATEWAY=1
       shift
       ;;
     *)
@@ -730,48 +739,18 @@ else
   docker network create fleet-net
 fi
 
-# Gateway: skip entire build+run block if already healthy
-if curl -sf "http://localhost:${ADMIN_PORT}/_fleet/api/status" >/dev/null 2>&1; then
-  info "Gateway already running and healthy — skipping rebuild"
+# Gateway: skip build+run if already healthy, unless --rebuild-gateway was passed.
+# rebuild_gateway() is defined in common.sh and is the single source of the
+# build+run recipe — both the default path and the forced path call it.
+if [ "${REBUILD_GATEWAY}" -eq 0 ] && curl -sf "http://localhost:${ADMIN_PORT}/_fleet/api/status" >/dev/null 2>&1; then
+  # Log image age vs. newest gateway/src commit so a stale container is visible.
+  _img_created=$(docker inspect --format '{{.Created}}' fleet-gateway 2>/dev/null || echo "unknown")
+  _gw_src_commit=$(git -C "${FLEET_ROOT}" log --max-count=1 --format="%h %ci" -- gateway/src/ 2>/dev/null || echo "unknown")
+  info "Gateway already running and healthy — skipping rebuild (pass --rebuild-gateway to force)"
+  info "  Container image built : ${_img_created}"
+  info "  Latest gateway/src commit : ${_gw_src_commit}"
 else
-  # Build gateway image
-  info "Building gateway image..."
-  docker build \
-    -f "${FLEET_ROOT}/gateway/Dockerfile" \
-    -t fleet-gateway \
-    "${FLEET_ROOT}"
-
-  # Stop existing gateway container
-  if docker inspect fleet-gateway >/dev/null 2>&1; then
-    warn "Stopping existing gateway container..."
-    docker rm -f fleet-gateway
-  fi
-
-  # Start gateway
-  info "Starting gateway container..."
-  docker run -d \
-    --name fleet-gateway \
-    --network fleet-net \
-    -e PROXY_PORT="${PROXY_PORT}" \
-    -e ADMIN_PORT="${ADMIN_PORT}" \
-    -e BACKEND_PORT="${BACKEND_PORT:-8080}" \
-    -p "${PROXY_PORT}:${PROXY_PORT}" \
-    -p "${ADMIN_PORT}:${ADMIN_PORT}" \
-    -p "${BACKEND_PORT:-8080}:${BACKEND_PORT:-8080}" \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    --security-opt label=disable \
-    --restart unless-stopped \
-    fleet-gateway
-
-  # Wait for gateway
-  info "Waiting for gateway to be ready..."
-  gw_attempts=0
-  until curl -sf "http://localhost:${ADMIN_PORT}/_fleet/api/status" >/dev/null 2>&1; do
-    gw_attempts=$((gw_attempts + 1))
-    [ "${gw_attempts}" -ge 30 ] && error "Gateway did not start within 30s"
-    sleep 1
-  done
-  info "Gateway is up."
+  rebuild_gateway
 fi
 
 # ─── Install fleet CLI ────────────────────────────────────────────────────────

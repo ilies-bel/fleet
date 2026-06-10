@@ -40,6 +40,13 @@ load_qa_config
 CONTAINER_NAME="fleet-${FLEET_PROJECT_NAME}-${NAME}"
 FEATURE_KEY="${FLEET_PROJECT_NAME}-${NAME}"
 
+# NOTE: fleet restart operates on *feature* containers only — it does not
+# rebuild or restart the fleet-gateway container.  Rebuilding the gateway
+# requires a fresh image build (see rebuild_gateway() in cli/common.sh);
+# doing that here would be destructive to all in-flight features and is out
+# of scope for a per-feature restart.  To rebuild the gateway after a source
+# change, run: fleet init --rebuild-gateway
+
 info "Restarting container ${CONTAINER_NAME}..."
 docker restart "${CONTAINER_NAME}"
 
