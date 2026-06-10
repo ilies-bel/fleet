@@ -112,19 +112,193 @@ function passesFilter(record, levelFilter) {
 }
 
 /**
- * Returns true if a record matches the text filter query.
- * Checks record.raw (full original line) case-insensitively — substring match.
+ * Tokenise a filter query string into raw tokens, handling:
+ *   - "quoted phrases" (spaces preserved)
+ *   - /regex/flags tokens
+ *   - plain words (which may carry a - or ? prefix)
  *
- * Single responsibility: swap operator syntax here in a follow-up without
- * touching the rest of the filter pipeline.
+ * @param {string} str
+ * @returns {string[]}
+ */
+function tokenizeQuery(str) {
+  const tokens = [];
+  let i = 0;
+  const len = str.length;
+
+  while (i < len) {
+    // Skip whitespace
+    while (i < len && /\s/.test(str[i])) i++;
+    if (i >= len) break;
+
+    if (str[i] === '"') {
+      // Quoted phrase: "..."
+      const start = i;
+      i++; // skip opening "
+      while (i < len && str[i] !== '"') i++;
+      if (i < len) i++; // skip closing "
+      tokens.push(str.slice(start, i));
+    } else if (str[i] === '/') {
+      // Regex: /pattern/ or /pattern/flags
+      const start = i;
+      i++; // skip opening /
+      while (i < len) {
+        if (str[i] === '\\') { i += 2; continue; } // skip escape sequence
+        if (str[i] === '/') break;
+        i++;
+      }
+      if (i < len) {
+        i++; // skip closing /
+        // Consume regex flags (g, i, m, s, u, y)
+        while (i < len && /[gimsuy]/.test(str[i])) i++;
+      }
+      tokens.push(str.slice(start, i));
+    } else {
+      // Plain word token (may carry - or ? prefix)
+      const start = i;
+      while (i < len && !/\s/.test(str[i])) i++;
+      tokens.push(str.slice(start, i));
+    }
+  }
+
+  return tokens;
+}
+
+/**
+ * Parse a CloudWatch-style filter query string into a structured term list.
+ *
+ * Supported syntax:
+ *   - `a b`          — AND: record must contain BOTH "a" and "b" (space-separated)
+ *   - `?x ?y`        — OR:  if any ?-prefixed tokens present, at least one must match
+ *   - `-x`           — EXCLUDE: record must NOT contain "x"
+ *   - `/regex/flags` — REGEX: tested as a JS RegExp (defaults to case-insensitive)
+ *   - `"exact phrase"` — AND: the literal phrase including spaces
+ *   - Mixed: bare tokens are ANDed; ?-tokens form one OR set; -tokens are excluded.
+ *
+ * An invalid regex never throws — it degrades to a literal substring match.
+ *
+ * @param {string} str
+ * @returns {{ type: 'and'|'or'|'exclude'|'regex', value: string, re?: RegExp|null }[]}
+ */
+export function parseFilterQuery(str) {
+  if (!str || !str.trim()) return [];
+
+  const tokens = tokenizeQuery(str.trim());
+  const terms = [];
+
+  for (const token of tokens) {
+    if (!token) continue;
+
+    if (token.startsWith('/') && token.length > 1) {
+      // Regex token: /pattern/ or /pattern/flags
+      // Use lastIndexOf so that escaped slashes inside the pattern don't mislead.
+      const lastSlash = token.lastIndexOf('/');
+      if (lastSlash > 0) {
+        const pattern = token.slice(1, lastSlash);
+        const flagsStr = token.slice(lastSlash + 1);
+        // Default to case-insensitive when no flags are specified.
+        const effectiveFlags = flagsStr || 'i';
+        let re = null;
+        try {
+          re = new RegExp(pattern, effectiveFlags);
+        } catch {
+          // Invalid pattern or flags — re stays null; matchesFilter falls back to literal.
+        }
+        terms.push({ type: 'regex', value: token, re });
+      } else {
+        // Single leading slash with no closing slash — treat as a literal AND term.
+        terms.push({ type: 'and', value: token });
+      }
+
+    } else if (token.startsWith('-') && token.length > 1) {
+      // Exclusion: -term or -"phrase"
+      const raw = token.slice(1);
+      const value = raw.startsWith('"') && raw.endsWith('"') && raw.length > 2
+        ? raw.slice(1, -1)
+        : raw;
+      terms.push({ type: 'exclude', value });
+
+    } else if (token.startsWith('?') && token.length > 1) {
+      // OR group: ?term or ?"phrase"
+      const raw = token.slice(1);
+      const value = raw.startsWith('"') && raw.endsWith('"') && raw.length > 2
+        ? raw.slice(1, -1)
+        : raw;
+      terms.push({ type: 'or', value });
+
+    } else if (token.startsWith('"')) {
+      // Quoted phrase (AND semantics)
+      const value = token.endsWith('"') && token.length > 2
+        ? token.slice(1, -1)
+        : token.slice(1);
+      if (value) terms.push({ type: 'and', value });
+
+    } else {
+      // Plain AND term
+      terms.push({ type: 'and', value: token });
+    }
+  }
+
+  return terms;
+}
+
+/**
+ * Returns true if a record matches the text filter query.
+ * Supports CloudWatch-style operator syntax via parseFilterQuery:
+ *   - space = AND, ?prefix = OR group, -prefix = exclude, /re/ = regex, "..." = phrase
+ *
+ * Falls back to simple substring matching for plain single-word queries,
+ * preserving exact backward-compatibility with the previous implementation.
  *
  * @param {{ raw?: string, message?: string }} record
  * @param {string | undefined | null} query
  */
 export function matchesFilter(record, query) {
   if (!query) return true;
-  const q = query.toLowerCase();
-  return (record.raw ?? record.message ?? '').toLowerCase().includes(q);
+  const trimmed = query.trim();
+  if (!trimmed) return true;
+
+  const terms = parseFilterQuery(trimmed);
+  if (terms.length === 0) return true;
+
+  const raw = record.raw ?? record.message ?? '';
+  const text = raw.toLowerCase();
+
+  // AND terms: every one must be present.
+  for (const term of terms) {
+    if (term.type === 'and' && !text.includes(term.value.toLowerCase())) {
+      return false;
+    }
+  }
+
+  // OR terms: if any exist, at least one must match.
+  const orTerms = terms.filter(t => t.type === 'or');
+  if (orTerms.length > 0) {
+    if (!orTerms.some(t => text.includes(t.value.toLowerCase()))) {
+      return false;
+    }
+  }
+
+  // EXCLUDE terms: none may match.
+  for (const term of terms) {
+    if (term.type === 'exclude' && text.includes(term.value.toLowerCase())) {
+      return false;
+    }
+  }
+
+  // REGEX terms (AND semantics): each must match the original (un-lowercased) text.
+  for (const term of terms) {
+    if (term.type === 'regex') {
+      if (term.re !== null) {
+        term.re.lastIndex = 0; // reset stateful (g/y) regexes before test
+        if (!term.re.test(raw)) return false;
+      } else {
+        // Invalid regex — fall back to case-insensitive literal substring.
+        if (!text.includes(term.value.toLowerCase())) return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 /**
