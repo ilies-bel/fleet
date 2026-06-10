@@ -1038,13 +1038,17 @@ export -f fleet_preflight
 # Errors if no railpack plan file exists for the subproject.
 #
 #   • Plan present  (.fleet/<sub_name>/railpack-plan.json):
-#       docker buildx build --builder fleet-railpack \
+#       docker buildx build --builder fleet-railpack --load \
 #         --build-arg BUILDKIT_SYNTAX=<railpack-frontend> \
 #         -f .fleet/<sub_name>/railpack-plan.json -t <image_tag> <context_dir>
 #
 #   • Plan absent: prints an error to stderr and returns 1.
 #
 # Requires FLEET_CONFIG_ROOT to be set (load_fleet_toml exports it).
+#
+# Note: --load is required because the fleet-railpack builder uses the
+# docker-container driver. Without it, the built image stays in BuildKit's
+# internal cache and is not available to `docker run` / `docker compose up`.
 build_feature_image() {
   local sub_name="$1"
   local image_tag="$2"
@@ -1057,6 +1061,7 @@ build_feature_image() {
   if [[ -n "${plan_file}" ]] && [[ -f "${plan_file}" ]]; then
     docker buildx build \
       --builder fleet-railpack \
+      --load \
       --build-arg "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend:latest" \
       -f "${plan_file}" \
       -t "${image_tag}" \
