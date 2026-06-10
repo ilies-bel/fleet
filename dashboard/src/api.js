@@ -64,10 +64,18 @@ export function getStatus() {
 /**
  * @param {string} key  Composite key: "<project>-<name>"
  * @param {{ source?: string, tail?: number, since?: number }} opts
- * @returns {Promise<
- *   | { lines: string, fetchedAt: number }
- *   | { sources: { backend: string, nginx: string, postgresql: string, supervisord: string }, fetchedAt: number }
- * >}
+ * @returns {Promise<{
+ *   records: Array<{
+ *     ts: string|null,
+ *     level: 'ERROR'|'WARN'|'INFO'|'DEBUG'|'TRACE'|null,
+ *     source: string,
+ *     message: string,
+ *     isTrace: boolean,
+ *     raw: string,
+ *   }>,
+ *   markers: Array<{ kind: 'run-marker', run: number, ts: string, reason: string }>,
+ *   fetchedAt: number,
+ * }>}
  */
 export function getLogs(key, { source = 'backend', tail = 200, since = 0 } = {}) {
   const params = new URLSearchParams({ source, tail });
