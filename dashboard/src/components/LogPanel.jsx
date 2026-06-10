@@ -27,6 +27,14 @@ const LEVEL_ORDER = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
 
 const LEVEL_FILTERS = ['ALL', 'ERROR', 'WARN', 'INFO'];
 
+/** Sparkline block chars — index 0=lightest (▁), 7=full (█) */
+const SPARK_CHARS         = '▁▂▃▄▅▆▇█';
+/** Number of 30-second buckets in the error-rate sparkline (10 × 30 s = 5 min) */
+const SPARKLINE_BUCKETS   = 10;
+const SPARKLINE_BUCKET_MS = 30_000;
+/** Rolling window for ev/s (milliseconds) */
+const INGEST_WINDOW_MS    = 10_000;
+
 /**
  * Five-slot highlight palette. Each entry references CSS vars declared in
  * index.css — background tint + accessible foreground for the #050505 log area.
@@ -805,6 +813,15 @@ export default function LogPanel({ featureName, onClose }) {
   const [autoTail, setAutoTail]       = useState(true);
   const [fetchedAt, setFetchedAt]     = useState(null);
 
+  // ── Throughput / error-rate tracking ─────────────────────────────────────
+  /** Smoothed events/sec figure shown in the footer (pre-filter ingest) */
+  const [evPerSec, setEvPerSec]         = useState(0);
+  /**
+   * ERROR counts per SPARKLINE_BUCKET_MS bucket, oldest→newest.
+   * Tracks pre-filter ingest (unaffected by active filter).
+   */
+  const [errorBuckets, setErrorBuckets] = useState(() => Array(SPARKLINE_BUCKETS).fill(0));
+
   // ── Filter / highlight state ──────────────────────────────────────────────
   /** Raw value of the filter text input (debounced before applying) */
   const [filterInput, setFilterInput]         = useState('');
@@ -819,6 +836,23 @@ export default function LogPanel({ featureName, onClose }) {
   const [highlightTerms, setHighlightTerms]   = useState([]);
   /** Monotonically-incrementing counter — drives palette cycling on add */
   const nextColorRef = useRef(0);
+
+  // ── Ingest-tracking refs ────────────────────────────────────────────────
+  /**
+   * Rolling window entries for ev/s: [{ t: performance.now(), count: number }].
+   * Entries older than INGEST_WINDOW_MS are culled on each 1 s tick.
+   */
+  const ingestWindowRef   = useRef([]);
+  /**
+   * Map<bucketKey, errorCount> — bucketKey = floor(wallMs / SPARKLINE_BUCKET_MS).
+   * Keys older than SPARKLINE_BUCKETS are pruned on each ingest.
+   */
+  const errorBucketMapRef = useRef(new Map());
+  /**
+   * REST-polling watermark — how many records the previous fetch returned.
+   * -1 = uninitialized (first fetch: skip to avoid bulk-load spike).
+   */
+  const restWatermarkRef  = useRef(-1);
 
   // Inspector: { record, traces } snapshot pinned by clicking a row; null = closed.
   const [selectedRow, setSelectedRow] = useState(null);
@@ -893,6 +927,11 @@ export default function LogPanel({ featureName, onClose }) {
     setMarkers([]);
     setError(null);
     setSelectedRow(null);
+    ingestWindowRef.current   = [];
+    errorBucketMapRef.current = new Map();
+    restWatermarkRef.current  = -1;
+    setEvPerSec(0);
+    setErrorBuckets(Array(SPARKLINE_BUCKETS).fill(0));
   }, [featureName, source]);
 
   // Debounce filter input — 150ms
@@ -909,6 +948,29 @@ export default function LogPanel({ featureName, onClose }) {
       setFetchedAt(data.fetchedAt);
       if (Array.isArray(data.records)) {
         // Structured format: record objects (+ optional run markers).
+        // Track ingest delta vs previous fetch; skip the initial bulk load.
+        const prevWatermark = restWatermarkRef.current;
+        restWatermarkRef.current = data.records.length;
+        if (prevWatermark >= 0) {
+          const delta = Math.max(0, data.records.length - prevWatermark);
+          if (delta > 0) {
+            const newNonTrace = data.records.slice(-delta).filter(r => !r.isTrace);
+            if (newNonTrace.length > 0) {
+              ingestWindowRef.current.push({ t: performance.now(), count: newNonTrace.length });
+              const errCount = newNonTrace.filter(r => r.level === 'ERROR').length;
+              if (errCount > 0) {
+                const nowMs = performance.timeOrigin + performance.now();
+                const bucketKey = Math.floor(nowMs / SPARKLINE_BUCKET_MS);
+                const map = errorBucketMapRef.current;
+                map.set(bucketKey, (map.get(bucketKey) ?? 0) + errCount);
+                const oldestKey = bucketKey - SPARKLINE_BUCKETS + 1;
+                for (const k of [...map.keys()]) {
+                  if (k < oldestKey) map.delete(k);
+                }
+              }
+            }
+          }
+        }
         setRecords(data.records);
         setMarkers(data.markers ?? []);
         setBuffer('');
@@ -938,12 +1000,26 @@ export default function LogPanel({ featureName, onClose }) {
     };
     es.onmessage = (event) => {
       const rec = parseClientLine(event.data);
+      // Track ingest: pre-filter, non-trace records only.
+      if (!rec.isTrace) {
+        ingestWindowRef.current.push({ t: performance.now(), count: 1 });
+        if (rec.level === 'ERROR') {
+          const nowMs = performance.timeOrigin + performance.now();
+          const bucketKey = Math.floor(nowMs / SPARKLINE_BUCKET_MS);
+          const map = errorBucketMapRef.current;
+          map.set(bucketKey, (map.get(bucketKey) ?? 0) + 1);
+          const oldestKey = bucketKey - SPARKLINE_BUCKETS + 1;
+          for (const k of [...map.keys()]) {
+            if (k < oldestKey) map.delete(k);
+          }
+        }
+      }
       setRecords(prev => {
         const next = [...prev, rec];
         // Cap at ~500 records so the modal stays responsive
         return next.length > 500 ? next.slice(-500) : next;
       });
-      setFetchedAt(Date.now());
+      setFetchedAt(performance.timeOrigin + performance.now());
     };
     es.onerror = (event) => {
       console.error('[LogPanel] build-log SSE error', event);
@@ -964,6 +1040,30 @@ export default function LogPanel({ featureName, onClose }) {
     return () => clearInterval(id);
   }, [fetchLogs, autoTail, source]);
 
+  // 1-second tick — recompute ev/s and error sparkline from ingest refs.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = performance.now();
+      // Cull entries that have aged out of the rolling window.
+      ingestWindowRef.current = ingestWindowRef.current.filter(
+        e => now - e.t < INGEST_WINDOW_MS,
+      );
+      // ev/s = total events in window / window duration (seconds).
+      const total = ingestWindowRef.current.reduce((s, e) => s + e.count, 0);
+      setEvPerSec(Math.round((total / (INGEST_WINDOW_MS / 1000)) * 10) / 10);
+
+      // Rebuild sparkline: most-recent bucket is rightmost.
+      const nowMs = performance.timeOrigin + performance.now();
+      const nowBucket = Math.floor(nowMs / SPARKLINE_BUCKET_MS);
+      const buckets = Array.from({ length: SPARKLINE_BUCKETS }, (_, i) => {
+        const key = nowBucket - (SPARKLINE_BUCKETS - 1 - i);
+        return errorBucketMapRef.current.get(key) ?? 0;
+      });
+      setErrorBuckets(buckets);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // Auto-scroll to bottom when records change.
   // block:'end', inline:'nearest' scrolls only the vertical axis when tailing,
   // so horizontal position is preserved in no-wrap mode.
@@ -981,6 +1081,11 @@ export default function LogPanel({ featureName, onClose }) {
     setRecords([]);
     setMarkers([]);
     setSelectedRow(null);
+    ingestWindowRef.current   = [];
+    errorBucketMapRef.current = new Map();
+    restWatermarkRef.current  = -1;
+    setEvPerSec(0);
+    setErrorBuckets(Array(SPARKLINE_BUCKETS).fill(0));
   }
 
   function addHighlightTerm(term) {
@@ -1076,6 +1181,22 @@ export default function LogPanel({ featureName, onClose }) {
   const filteredLineCount = textFiltered.filter(r => !r.isTrace).length;
 
   const fetchedTime = fetchedAt ? new Date(fetchedAt).toLocaleTimeString() : '—';
+
+  // ── Footer throughput / sparkline derived values ──────────────────────────
+  // ev/s shows pre-filter ingest rate; '—' when autoTail is paused.
+  const displayEvPerSec = autoTail
+    ? (evPerSec < 0.05
+        ? '0 ev/s'
+        : `${evPerSec < 10 ? evPerSec.toFixed(1) : Math.round(evPerSec)} ev/s`)
+    : '—';
+
+  const hasAnyErrors = errorBuckets.some(v => v > 0);
+  const _errMax      = Math.max(...errorBuckets, 1);
+  // Sparkline: space for zero-count buckets; block char scaled to max bucket value.
+  // Pre-filter ERROR ingest (counts before level/text filter).
+  const sparklineStr = errorBuckets
+    .map(v => v === 0 ? ' ' : SPARK_CHARS[Math.max(0, Math.round((v / _errMax) * 8) - 1)])
+    .join('');
 
   return (
     <div
@@ -1487,13 +1608,47 @@ export default function LogPanel({ featureName, onClose }) {
           justifyContent: 'space-between',
           flexShrink:     0,
         }}>
-          <span style={{ color: 'var(--color-muted)', fontSize: '0.65rem' }}>
-            {/* Show "F of T lines" when text filter is active; plain "T lines" otherwise */}
-            {debouncedFilter
-              ? `${filteredLineCount} of ${totalLineCount} lines`
-              : `${totalLineCount} lines`
-            } | fetched {fetchedTime}
-            {loading && autoTail ? ' | refreshing…' : ''}
+          {/* Left: line count · ev/s · optional sparkline · fetched time */}
+          <span style={{
+            color:      'var(--color-muted)',
+            fontSize:   '0.65rem',
+            display:    'flex',
+            alignItems: 'center',
+            gap:        '0.5em',
+            minWidth:   0,
+          }}>
+            <span>
+              {/* "N of M lines" when text-filter active; plain "N lines" otherwise */}
+              {debouncedFilter
+                ? `${filteredLineCount} of ${totalLineCount} lines`
+                : `${totalLineCount} lines`
+              }
+              {' | '}
+              {/* ev/s: pre-filter ingest rate. Shows "—" when tail is paused. */}
+              {displayEvPerSec}
+              {' | fetched '}{fetchedTime}
+              {loading && autoTail ? ' | refreshing…' : ''}
+            </span>
+            {/* Error-rate sparkline — hidden on narrow widths.
+                ERROR count per 30 s bucket, last 5 min (pre-filter ingest).
+                Tints var(--color-danger) on errors; muted/faint when quiet. */}
+            {!isNarrow && (
+              <span
+                title={`ERROR count per 30 s, last ${SPARKLINE_BUCKETS * 30} s — pre-filter ingest`}
+                aria-label={`Error sparkline: ${errorBuckets.join(',')}`}
+                style={{
+                  fontFamily:    'var(--font-mono)',
+                  letterSpacing: 0,
+                  color:         hasAnyErrors ? 'var(--color-danger)' : 'var(--color-muted)',
+                  opacity:       hasAnyErrors ? 1 : 0.3,
+                  minWidth:      '10ch',
+                  display:       'inline-block',
+                  userSelect:    'none',
+                }}
+              >
+                {sparklineStr}
+              </span>
+            )}
           </span>
           <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
             {/* Jump to latest run — only shown when run markers are present */}
