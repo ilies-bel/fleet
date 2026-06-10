@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { getLogs } from '../api.js';
 import { Button } from './Button.jsx';
 
@@ -207,9 +207,235 @@ function highlightText(text, compiledHighlights) {
   return nodes;
 }
 
+// ── EventInspector ─────────────────────────────────────────────────────────
+
+/**
+ * Detail panel for a pinned log record.
+ * inline=false → rendered as a right-hand side panel in the log area split.
+ * inline=true  → rendered as an inline block below the selected row (narrow fallback).
+ */
+function EventInspector({ record, traces, onClose, inline }) {
+  const closeButtonRef = useRef(null);
+
+  // Focus the close button whenever a new record is selected.
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, [record]);
+
+  function handleCopy() {
+    if (!navigator.clipboard) {
+      console.warn('[EventInspector] clipboard API unavailable');
+      return;
+    }
+    navigator.clipboard.writeText(record.raw).catch(err => {
+      console.warn('[EventInspector] copy failed', err);
+    });
+  }
+
+  // Format full local timestamp (date + time) for the inspector header.
+  let fullTs = '—';
+  if (record.ts) {
+    try {
+      fullTs = new Date(record.ts.replace(' ', 'T')).toLocaleString(undefined, {
+        year:   'numeric',
+        month:  'short',
+        day:    'numeric',
+        hour:   '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch {
+      fullTs = record.ts;
+    }
+  }
+
+  const levelColor  = LEVEL_COLOR[record.level]  ?? 'var(--color-ink-dim)';
+  const sourceColor = SOURCE_COLOR[record.source] ?? 'var(--color-muted)';
+
+  const fields = [
+    ['ts',      record.ts],
+    ['level',   record.level],
+    ['source',  record.source],
+    ['message', record.message],
+  ].filter(([, v]) => v != null && v !== '');
+
+  // Shared inner content — used for both inline and side-panel layouts.
+  const inner = (
+    <>
+      {/* ── Header: timestamp · level · source · close ── */}
+      <div style={{
+        display:       'flex',
+        alignItems:    'center',
+        gap:           '0.5em',
+        flexShrink:    0,
+        paddingBottom: '0.4em',
+        borderBottom:  '1px solid var(--color-border)',
+        marginBottom:  '0.5em',
+      }}>
+        <span style={{
+          color:        'var(--color-ink-dim)',
+          flex:         1,
+          overflow:     'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace:   'nowrap',
+          fontSize:     '0.65rem',
+        }}>
+          {fullTs}
+        </span>
+        <span style={{ color: levelColor, fontWeight: 700, flexShrink: 0, fontSize: '0.65rem' }}>
+          {record.level ?? '·'}
+        </span>
+        <span style={{ color: sourceColor, flexShrink: 0, fontSize: '0.65rem' }}>
+          {record.source}
+        </span>
+        <button
+          ref={closeButtonRef}
+          onClick={onClose}
+          aria-label="Close inspector"
+          style={{
+            flexShrink: 0,
+            background: 'none',
+            border:     'none',
+            color:      'var(--color-ink-dim)',
+            cursor:     'pointer',
+            fontSize:   '1rem',
+            padding:    '0 2px',
+            lineHeight: 1,
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      {/* ── Raw line — scrollable mono block, selectable ── */}
+      <pre style={{
+        margin:     '0 0 0.5em',
+        padding:    '0.4em 0.5em',
+        background: 'rgba(0,0,0,0.4)',
+        border:     '1px solid var(--color-border)',
+        fontSize:   '0.63rem',
+        lineHeight: 1.4,
+        color:      '#ccc',
+        whiteSpace: 'pre-wrap',
+        wordBreak:  'break-all',
+        userSelect: 'text',
+        flexShrink: 0,
+        overflowY:  'auto',
+        maxHeight:  inline ? '5em' : '7em',
+      }}>
+        {record.raw}
+      </pre>
+
+      {/* ── Copy button ── */}
+      <div style={{ marginBottom: '0.5em', flexShrink: 0 }}>
+        <button
+          onClick={handleCopy}
+          style={{
+            background: 'none',
+            border:     '1px solid var(--color-border)',
+            color:      'var(--color-ink-dim)',
+            cursor:     'pointer',
+            fontSize:   '0.62rem',
+            padding:    '1px 6px',
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
+          [copy]
+        </button>
+      </div>
+
+      {/* ── Parsed fields ── */}
+      {fields.length > 0 && (
+        <div style={{ flexShrink: 0, marginBottom: '0.5em' }}>
+          {fields.map(([k, v]) => (
+            <div
+              key={k}
+              style={{
+                display:      'flex',
+                gap:          '0.5em',
+                fontSize:     '0.63rem',
+                lineHeight:   1.5,
+                wordBreak:    'break-all',
+                borderBottom: '1px solid rgba(255,255,255,0.04)',
+                padding:      '1px 0',
+              }}
+            >
+              <span style={{ color: 'var(--color-accent)', flexShrink: 0, minWidth: '6ch' }}>{k}</span>
+              <span style={{ color: '#aaa', flex: 1 }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Stack frames — ALL, not collapsed ── */}
+      {traces && traces.length > 0 && (
+        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+          <div style={{
+            color:        'var(--color-ink-dim)',
+            fontSize:     '0.6rem',
+            marginBottom: '0.25em',
+            flexShrink:   0,
+          }}>
+            {traces.length} stack frame{traces.length !== 1 ? 's' : ''}
+          </div>
+          {traces.map((frame, i) => (
+            <div
+              key={i}
+              style={{
+                fontSize:   '0.63rem',
+                lineHeight: 1.4,
+                color:      'var(--color-ink-faint)',
+                whiteSpace: 'pre-wrap',
+                wordBreak:  'break-all',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              {frame.raw}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  if (inline) {
+    return (
+      <div style={{
+        borderTop:  '1px solid var(--color-border)',
+        background: 'rgba(20,20,40,0.6)',
+        padding:    '0.5em var(--space-3)',
+        fontFamily: 'var(--font-mono)',
+        fontSize:   '0.7rem',
+      }}>
+        {inner}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      width:         '300px',
+      minWidth:      '220px',
+      maxWidth:      '42%',
+      borderLeft:    '1px solid var(--color-border)',
+      display:       'flex',
+      flexDirection: 'column',
+      overflow:      'hidden',
+      background:    '#090912',
+      fontFamily:    'var(--font-mono)',
+      fontSize:      '0.7rem',
+      padding:       'var(--space-2)',
+      flexShrink:    0,
+    }}>
+      {inner}
+    </div>
+  );
+}
+
 // ── LogRow ─────────────────────────────────────────────────────────────────
 
-function LogRow({ record, traces, showSource, wrap, compiledHighlights }) {
+function LogRow({ record, traces, showSource, wrap, compiledHighlights, onSelect, isSelected }) {
   const [expanded, setExpanded] = useState(false);
   const hasTraces = traces.length > 0;
 
@@ -220,9 +446,28 @@ function LogRow({ record, traces, showSource, wrap, compiledHighlights }) {
   const messageText     = record.message || record.raw;
   const renderedMessage = highlightText(messageText, compiledHighlights);
 
+  function handleClick() {
+    onSelect?.(record);
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      onSelect?.(record);
+    }
+  }
+
   return (
     <>
-      <div style={{
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
+        aria-label={`Inspect log event: ${(record.message || record.raw).slice(0, 80)}`}
+        aria-pressed={isSelected}
+        style={{
         display:    'flex',
         alignItems: 'baseline',
         gap:        '0.5em',
@@ -231,6 +476,14 @@ function LogRow({ record, traces, showSource, wrap, compiledHighlights }) {
         lineHeight: 1.5,
         fontFamily: 'var(--font-mono)',
         minWidth:   0,
+        cursor:     'pointer',
+        outline:    'none',
+        borderLeft: isSelected
+          ? '2px solid var(--color-accent)'
+          : '2px solid transparent',
+        background: isSelected
+          ? 'rgba(100,200,255,0.06)'
+          : 'transparent',
       }}>
         {/* Timestamp — muted, fixed width */}
         <span style={{ color: 'var(--color-ink-dim)', flexShrink: 0, minWidth: '7ch' }}>
@@ -272,10 +525,10 @@ function LogRow({ record, traces, showSource, wrap, compiledHighlights }) {
           {renderedMessage}
         </span>
 
-        {/* Stack-trace expand/collapse toggle — default collapsed */}
+        {/* Stack-trace expand/collapse toggle — stopPropagation so the row click does NOT fire */}
         {hasTraces && (
           <button
-            onClick={() => setExpanded(v => !v)}
+            onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
             aria-expanded={expanded}
             aria-label={`${expanded ? 'Collapse' : 'Expand'} ${traces.length} stack frames`}
             style={{
@@ -393,6 +646,11 @@ export default function LogPanel({ featureName, onClose }) {
   /** Monotonically-incrementing counter — drives palette cycling on add */
   const nextColorRef = useRef(0);
 
+  // Inspector: { record, traces } snapshot pinned by clicking a row; null = closed.
+  const [selectedRow, setSelectedRow] = useState(null);
+  // isNarrow: dialog width < 560px → inline fallback instead of side split.
+  const [isNarrow, setIsNarrow]       = useState(false);
+
   const sentinelRef  = useRef(null);
   const latestRunRef = useRef(null);
   const dialogRef    = useRef(null);
@@ -404,15 +662,33 @@ export default function LogPanel({ featureName, onClose }) {
     dialogRef.current?.focus();
   }, []);
 
+  // Track dialog width via ResizeObserver for narrow/wide layout switching.
+  useEffect(() => {
+    const el = dialogRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      setIsNarrow(w < 560);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Close the panel and restore focus to whoever opened it.
   const handleClose = useCallback(() => {
     prevFocusRef.current?.focus();
     onClose();
   }, [onClose]);
 
-  // Keyboard handler: Escape closes; Tab wraps within the dialog's focusable set.
+  // Keyboard handler:
+  //   Escape → close inspector first (if open), then close the modal.
+  //   Tab    → wrap within the dialog's focusable set.
   function handleKeyDown(e) {
-    if (e.key === 'Escape') { handleClose(); return; }
+    if (e.key === 'Escape') {
+      if (selectedRow) { setSelectedRow(null); return; }
+      handleClose();
+      return;
+    }
     if (e.key !== 'Tab') return;
 
     const dialog = dialogRef.current;
@@ -436,12 +712,13 @@ export default function LogPanel({ featureName, onClose }) {
     }
   }
 
-  // Reset records/markers/buffer when source or feature changes.
+  // Reset records/markers/buffer/selection when source or feature changes.
   useEffect(() => {
     setBuffer('');
     setRecords([]);
     setMarkers([]);
     setError(null);
+    setSelectedRow(null);
   }, [featureName, source]);
 
   // Debounce filter input — 150ms
@@ -529,6 +806,7 @@ export default function LogPanel({ featureName, onClose }) {
     setBuffer('');
     setRecords([]);
     setMarkers([]);
+    setSelectedRow(null);
   }
 
   function addHighlightTerm(term) {
@@ -919,69 +1197,110 @@ export default function LogPanel({ featureName, onClose }) {
             </div>
           )}
 
+          {/* ── List + inspector split ────────────────────────────────────── */}
+          {/* On wide widths: list | inspector side by side.                   */}
+          {/* On narrow widths: full-width list; inspector appears inline.     */}
           <div style={{
-            flex:               1,
-            overflowY:          'auto',
-            overflowX:          wrap ? undefined : 'auto',
-            overscrollBehavior: 'contain',
-            background:         '#050505',
-            border:             '1px solid var(--color-surface-header)',
-            margin:             'var(--space-2) var(--space-3) 0',
+            flex:       1,
+            overflow:   'hidden',
+            display:    'flex',
+            flexDirection: 'row',
+            background: '#050505',
+            border:     '1px solid var(--color-surface-header)',
+            margin:     'var(--space-2) var(--space-3) 0',
           }}>
-            {records.length === 0 && buffer ? (
-              /* Legacy plain-string fallback (older gateway responses). */
-              <pre style={{
-                margin:     0,
-                padding:    'var(--space-2) var(--space-3)',
-                fontSize:   '0.72rem',
-                lineHeight: 1.5,
-                color:      '#ccc',
-                ...(wrap
-                  ? { whiteSpace: 'pre-wrap', wordBreak: 'normal', overflowWrap: 'anywhere' }
-                  : { whiteSpace: 'pre' }),
-              }}>
-                {buffer}
-              </pre>
-            ) : (
-              <>
-                {rows.length === 0 && !hasMarkers && !loading && (
-                  <div style={{
-                    padding:    'var(--space-2) var(--space-3)',
-                    fontSize:   '0.72rem',
-                    color:      'var(--color-muted)',
-                    fontFamily: 'var(--font-mono)',
-                  }}>
-                    {debouncedFilter
-                      ? `// no lines match ${debouncedFilter}`
-                      : '// no output'}
-                  </div>
-                )}
+            {/* Scrollable log list */}
+            <div style={{
+              flex:               1,
+              overflowY:          'auto',
+              overflowX:          wrap ? undefined : 'auto',
+              overscrollBehavior: 'contain',
+              minWidth:           0,
+            }}>
+              {records.length === 0 && buffer ? (
+                /* Legacy plain-string fallback (older gateway responses). */
+                <pre style={{
+                  margin:     0,
+                  padding:    'var(--space-2) var(--space-3)',
+                  fontSize:   '0.72rem',
+                  lineHeight: 1.5,
+                  color:      '#ccc',
+                  ...(wrap
+                    ? { whiteSpace: 'pre-wrap', wordBreak: 'normal', overflowWrap: 'anywhere' }
+                    : { whiteSpace: 'pre' }),
+                }}>
+                  {buffer}
+                </pre>
+              ) : (
+                <>
+                  {rows.length === 0 && !hasMarkers && !loading && (
+                    <div style={{
+                      padding:    'var(--space-2) var(--space-3)',
+                      fontSize:   '0.72rem',
+                      color:      'var(--color-muted)',
+                      fontFamily: 'var(--font-mono)',
+                    }}>
+                      {debouncedFilter
+                        ? `// no lines match ${debouncedFilter}`
+                        : '// no output'}
+                    </div>
+                  )}
 
-                {/* Merged timeline: run-marker separators interleaved with log rows,
-                    ordered by timestamp. */}
-                {timeline.map((item, i) => (
-                  item._type === 'marker' ? (
-                    <RunMarkerSeparator
-                      key={`marker-${item.marker.run}-${item.marker.ts}`}
-                      label={`run #${item.marker.run} · ${formatTime(item.marker.ts)} · ${item.marker.reason === 'started' ? 'started' : 'restarted'}`}
-                      isCurrent={item.marker.run === maxRun}
-                      markerRef={item.marker.run === maxRun ? latestRunRef : undefined}
-                    />
-                  ) : (
-                    <LogRow
-                      key={`row-${i}`}
-                      record={item.row.record}
-                      traces={item.row.traces}
-                      showSource={showSource}
-                      wrap={wrap}
-                      compiledHighlights={compiledHighlights}
-                    />
-                  )
-                ))}
-              </>
+                  {/* Merged timeline: run-marker separators interleaved with log rows,
+                      ordered by timestamp. */}
+                  {timeline.map((item, i) => {
+                    if (item._type === 'marker') {
+                      return (
+                        <RunMarkerSeparator
+                          key={`marker-${item.marker.run}-${item.marker.ts}`}
+                          label={`run #${item.marker.run} · ${formatTime(item.marker.ts)} · ${item.marker.reason === 'started' ? 'started' : 'restarted'}`}
+                          isCurrent={item.marker.run === maxRun}
+                          markerRef={item.marker.run === maxRun ? latestRunRef : undefined}
+                        />
+                      );
+                    }
+
+                    // Pin by object identity — stable across SSE appends.
+                    const isSelected = selectedRow !== null &&
+                      item.row.record === selectedRow.record;
+
+                    return (
+                      <Fragment key={`row-${i}`}>
+                        <LogRow
+                          record={item.row.record}
+                          traces={item.row.traces}
+                          showSource={showSource}
+                          wrap={wrap}
+                          compiledHighlights={compiledHighlights}
+                          isSelected={isSelected}
+                          onSelect={rec => setSelectedRow({ record: rec, traces: item.row.traces })}
+                        />
+                        {/* Narrow fallback: inline inspector below the selected row */}
+                        {isSelected && isNarrow && selectedRow && (
+                          <EventInspector
+                            record={selectedRow.record}
+                            traces={selectedRow.traces}
+                            onClose={() => setSelectedRow(null)}
+                            inline
+                          />
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </>
+              )}
+
+              <div ref={sentinelRef} />
+            </div>
+
+            {/* Wide-mode side panel — only when an event is selected and not narrow */}
+            {selectedRow && !isNarrow && (
+              <EventInspector
+                record={selectedRow.record}
+                traces={selectedRow.traces}
+                onClose={() => setSelectedRow(null)}
+              />
             )}
-
-            <div ref={sentinelRef} />
           </div>
         </div>
 

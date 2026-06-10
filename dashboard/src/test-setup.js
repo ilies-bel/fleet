@@ -13,3 +13,16 @@ if (typeof globalThis.EventSource === 'undefined') {
     close() {}
   };
 }
+
+// jsdom does not implement ResizeObserver. LogPanel observes its dialog width
+// to switch between wide (side-panel) and narrow (inline) inspector layouts.
+// Provide a no-op stub so components that use ResizeObserver do not throw
+// "ResizeObserver is not defined" in the test environment.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class NoOpResizeObserver {
+    constructor() {}
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
