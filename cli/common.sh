@@ -927,15 +927,27 @@ railpack_extract_run_meta() {
 
   local run_cmd artifact_path
   run_cmd=$(jq -r '.deploy.startCommand // empty' "${plan_path}" 2>/dev/null)
-  artifact_path=$(jq -r \
-    '(.deploy.inputs // [])[] | select(.step == "build") | (.include // [])[0] // empty' \
-    "${plan_path}" 2>/dev/null | head -1)
+  # Select the first relative-path include across all build inputs.  Absolute
+  # paths like /app/node_modules or /root/.cache are dependency/cache dirs, not
+  # the application payload — skip them.  This handles plans with multiple build
+  # inputs (e.g. real Vite plans that emit a deps input before the source input).
+  artifact_path=$(jq -r '
+    [ (.deploy.inputs // [])[]
+      | select(.step == "build")
+      | (.include // [])[]
+      | select(startswith("/") | not)
+    ][0] // empty
+  ' "${plan_path}" 2>/dev/null)
 
-  [ -n "${run_cmd}" ] && [ -n "${artifact_path}" ] || return 1
+  # A valid artifact path is required; startCommand is optional (static builds
+  # produced by e.g. Vite legitimately have no long-running start command).
+  [ -n "${artifact_path}" ] || return 1
 
   # Use printf %q so the output is always safely sourceable by bash regardless
   # of spaces or shell metacharacters in the values.
-  printf 'RUN_CMD=%q\n' "${run_cmd}"
+  # Omit RUN_CMD entirely when startCommand is absent so consumers can detect
+  # "static build, no server" vs "has a start command" without parsing empties.
+  [ -n "${run_cmd}" ] && printf 'RUN_CMD=%q\n' "${run_cmd}"
   printf 'ARTIFACT_PATH=%q\n' "${artifact_path}"
 }
 export -f railpack_extract_run_meta

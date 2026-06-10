@@ -72,7 +72,7 @@ printf '%s' \"\$ARTIFACT_PATH\"
   [ "$status" -ne 0 ]
 }
 
-@test "railpack_extract_run_meta returns non-zero for a plan without startCommand" {
+@test "railpack_extract_run_meta succeeds with only ARTIFACT_PATH when startCommand is absent" {
   cat > "${FIXTURE_DIR}/no-cmd.json" <<'JSON'
 {
   "deploy": {
@@ -81,7 +81,48 @@ printf '%s' \"\$ARTIFACT_PATH\"
 }
 JSON
   run bash -c "source '${WORKTREE_ROOT}/cli/common.sh' && railpack_extract_run_meta '${FIXTURE_DIR}/no-cmd.json'"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ARTIFACT_PATH=.+ ]]
+  [[ "$output" != *"RUN_CMD"* ]]
+}
+
+@test "railpack_extract_run_meta selects relative payload path over absolute dep-dir includes in multi-input build plan" {
+  # Mirrors the real two-input shape emitted by railpack 0.26.1 against a Vite
+  # project: first build input is the node_modules cache (absolute path), second
+  # is the project tree (".").  The function must pick "." not "/app/node_modules".
+  cat > "${FIXTURE_DIR}/two-build-inputs.json" <<'JSON'
+{
+  "deploy": {
+    "inputs": [
+      { "step": "build", "include": ["/app/node_modules"] },
+      { "step": "build", "include": ["/root/.cache", "."], "exclude": ["node_modules", ".yarn"] }
+    ]
+  }
+}
+JSON
+  run bash -c "
+source '${WORKTREE_ROOT}/cli/common.sh'
+eval \"\$(railpack_extract_run_meta '${FIXTURE_DIR}/two-build-inputs.json')\"
+printf '%s' \"\$ARTIFACT_PATH\"
+"
+  [ "$status" -eq 0 ]
+  [ "$output" = "." ]
+}
+
+@test "railpack_extract_run_meta emits no RUN_CMD for a multi-input Vite plan with no startCommand" {
+  cat > "${FIXTURE_DIR}/two-build-inputs-no-cmd.json" <<'JSON'
+{
+  "deploy": {
+    "inputs": [
+      { "step": "build", "include": ["/app/node_modules"] },
+      { "step": "build", "include": ["/root/.cache", "."], "exclude": ["node_modules", ".yarn"] }
+    ]
+  }
+}
+JSON
+  run bash -c "source '${WORKTREE_ROOT}/cli/common.sh' && railpack_extract_run_meta '${FIXTURE_DIR}/two-build-inputs-no-cmd.json'"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RUN_CMD"* ]]
 }
 
 @test "railpack_extract_run_meta returns non-zero for a plan without build step inputs" {
