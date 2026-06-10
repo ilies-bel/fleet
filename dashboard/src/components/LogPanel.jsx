@@ -119,7 +119,10 @@ export default function LogPanel({ featureName, onClose }) {
     setLoading(true);
     setError(null);
     const es = new EventSource(`/_fleet/api/features/${featureName}/build-log`);
-    es.onopen = () => setLoading(false);
+    es.onopen = () => {
+      setLoading(false);
+      setError(null); // clear any previous soft hint on successful reconnect
+    };
     es.onmessage = (event) => {
       setBuffer(prev => {
         const next = prev ? `${prev}\n${event.data}` : event.data;
@@ -129,9 +132,12 @@ export default function LogPanel({ featureName, onClose }) {
       });
       setFetchedAt(Date.now());
     };
-    es.onerror = () => {
-      // EventSource will reconnect on its own; surface a soft hint only
+    es.onerror = (event) => {
+      console.error('[LogPanel] build-log SSE error', event);
       setLoading(false);
+      // Surface a soft hint without tearing down the stream; EventSource auto-reconnects.
+      // Only set if not already showing to avoid state churn during rapid retry cycles.
+      setError(prev => prev ? prev : 'build log stream interrupted — reconnecting…');
     };
     return () => es.close();
   }, [featureName, source]);
