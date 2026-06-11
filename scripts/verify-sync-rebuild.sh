@@ -88,9 +88,29 @@ cat > "${PROJECT_DIR}/frontend/package.json" <<'PKG'
   "scripts": {
     "dev":   "vite",
     "build": "vite build"
+  },
+  "dependencies": {
+    "vite": "^6.0.0"
   }
 }
 PKG
+
+# index.html — vite build requires an HTML entry point in the project root
+cat > "${PROJECT_DIR}/frontend/index.html" <<'HTML'
+<!DOCTYPE html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><title>Verify App</title></head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+HTML
+
+# Minimal JS entry point imported by index.html
+cat > "${PROJECT_DIR}/frontend/src/main.js" <<'JS'
+document.getElementById('root').textContent = 'Hello fleet — edit App.jsx to verify sync-rebuild'
+JS
 
 # Source file the operator will edit to exercise sync-rebuild
 SOURCE_FILE="${PROJECT_DIR}/frontend/src/App.jsx"
