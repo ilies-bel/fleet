@@ -56,16 +56,30 @@ PG_DATA="/var/lib/postgresql/16/main"
 if [ "${NEEDS_DB}" = "true" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   echo "[fleet] First start — initialising PostgreSQL cluster..."
 
-  # Run initdb directly as the current user (no su: OpenShift restricted SCC
-  # drops CAP_SETUID, so su would fail; postgres binaries refuse UID 0 but
-  # accept any other non-root UID, which is exactly what we set).
-  /usr/lib/postgresql/16/bin/initdb -D "${PG_DATA}" -E UTF8 --locale=C --auth=trust
+  # PostgreSQL binaries (initdb, pg_ctl, postgres) refuse to run as UID 0.
+  # When the container is root (the default — no USER directive in the
+  # generated Dockerfile.feature-base), chown the data dir and drop to the
+  # system 'postgres' account via runuser for each PG binary invocation.
+  # In OpenShift restricted-SCC environments the container already runs as a
+  # non-root UID (CAP_SETUID is absent, so runuser would fail there); we fall
+  # through to direct exec — PG binaries accept any non-zero UID.
+  if [ "$(id -u)" = "0" ]; then
+    chown -R postgres:postgres "${PG_DATA}"
+    _pgbin() { runuser -u postgres -- "$@"; }
+    # psql defaults to the OS username as the PG role; override so the
+    # provisioning queries below run as the postgres superuser.
+    export PGUSER=postgres
+  else
+    _pgbin() { "$@"; }
+  fi
+
+  _pgbin /usr/lib/postgresql/16/bin/initdb -D "${PG_DATA}" -E UTF8 --locale=C --auth=trust
 
   # Allow local TCP connections
   echo "host all all 127.0.0.1/32 trust" >> "${PG_DATA}/pg_hba.conf"
 
   # Start temporarily to provision the database
-  /usr/lib/postgresql/16/bin/pg_ctl start -D "${PG_DATA}" -w -t 30 -o '-k /tmp'
+  _pgbin /usr/lib/postgresql/16/bin/pg_ctl start -D "${PG_DATA}" -w -t 30 -o '-k /tmp'
 
   # Idempotent: DB_NAME/DB_USER may already exist (e.g. the built-in `postgres`
   # superuser when DB_USER=postgres, or a re-provision). Guard so `set -e` does
@@ -79,7 +93,7 @@ if [ "${NEEDS_DB}" = "true" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   psql -h /tmp -c "ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};"
   psql -h /tmp -d "${DB_NAME}" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};"
 
-  /usr/lib/postgresql/16/bin/pg_ctl stop -D "${PG_DATA}" -w
+  _pgbin /usr/lib/postgresql/16/bin/pg_ctl stop -D "${PG_DATA}" -w
 
   echo "[fleet] PostgreSQL initialised (db=${DB_NAME}, user=${DB_USER})."
 elif [ "${NEEDS_DB}" = "true" ]; then
@@ -105,6 +119,7 @@ if [ "${NEEDS_DB}" = "true" ]; then
 
 [program:postgresql]
 command=/usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main
+user=postgres
 autostart=true
 autorestart=true
 priority=10
