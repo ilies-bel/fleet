@@ -1305,6 +1305,7 @@ with open(tmp_file, "w") as fh:
 
 os.replace(tmp_file, state_file)
 PYEOF
+}
 
 # rebuild_gateway — build the fleet-gateway image and (re)start the container.
 #
@@ -1354,4 +1355,3 @@ rebuild_gateway() {
   info "Gateway is up."
 }
 export -f rebuild_gateway
-}
