@@ -884,6 +884,16 @@ let _containerGitStreamImpl = (containerName) =>
 /** @internal — test seam, replaces the container git exec implementation. */
 export function _setContainerGitStreamImpl(fn) { _containerGitStreamImpl = fn; }
 
+/**
+ * Server-side timeout for the diff stream collection (ms).
+ * Prevents the endpoint from hanging when the exec stream never ends.
+ * @internal — overridable via _setDiffTimeoutMs for unit tests.
+ */
+let _diffTimeoutMs = 15_000;
+
+/** @internal — test seam, overrides the diff stream collection timeout. */
+export function _setDiffTimeoutMs(ms) { _diffTimeoutMs = ms; }
+
 router.get('/features/:key/diff', async (req, res) => {
   const { key } = req.params;
   const feature = getFeature(key);
@@ -914,11 +924,24 @@ router.get('/features/:key/diff', async (req, res) => {
     let originalBytes = 0;
     let truncated = false;
     let localCollected = 0;
+    let timedOut = false;
 
     await new Promise((resolve, reject) => {
       let settled = false;
-      const finish = () => { if (!settled) { settled = true; resolve(); } };
-      const fail = (err) => { if (!settled) { settled = true; reject(err); } };
+      let timer;
+      const finish = () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } };
+      const fail = (err) => { if (!settled) { settled = true; clearTimeout(timer); reject(err); } };
+
+      // Server-side guard: if the stream never ends (e.g. TTY exec hang), abort and
+      // surface a bounded error rather than leaving the HTTP request open indefinitely.
+      timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          timedOut = true;
+          abort();
+          resolve();
+        }
+      }, _diffTimeoutMs);
 
       stdout.on('data', (chunk) => {
         originalBytes += chunk.length;
@@ -940,6 +963,18 @@ router.get('/features/:key/diff', async (req, res) => {
       stdout.on('close', finish);
       stdout.on('error', fail);
     });
+
+    if (timedOut) {
+      exitCodePromise.catch(() => {}); // suppress unhandled rejection from aborted exec
+      return res.json({
+        status: 'unavailable',
+        reason: 'diff timed out',
+        patch: '',
+        isEmpty: true,
+        truncated: false,
+        originalBytes: 0,
+      });
+    }
 
     // Wait for exec exit code.
     let exitCode;

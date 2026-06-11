@@ -3,6 +3,7 @@
  * No npm dependencies — uses Node.js built-in http module.
  */
 import http from 'http';
+import { Transform } from 'node:stream';
 
 const SOCKET = '/var/run/docker.sock';
 const API_VERSION = 'v1.43';
@@ -149,7 +150,10 @@ export async function dockerExecStreamWithExitCode(containerName, cmd) {
   const createRes = await dockerRequest({
     method: 'POST',
     path: `/${API_VERSION}/containers/${containerName}/exec`,
-    body: { AttachStdin: false, AttachStdout: true, AttachStderr: true, Tty: true, Cmd: cmd },
+    // Tty:false — Docker sends stdcopy-framed output (8-byte headers per frame).
+    // This produces a proper HTTP response that emits reliable end/close events,
+    // unlike Tty:true which hijacks the connection in raw mode and often hangs.
+    body: { AttachStdin: false, AttachStdout: true, AttachStderr: true, Tty: false, Cmd: cmd },
   });
 
   if (createRes.status === 404) {
@@ -164,7 +168,7 @@ export async function dockerExecStreamWithExitCode(containerName, cmd) {
 
   const { Id: execId } = JSON.parse(createRes.buffer.toString('utf8'));
 
-  const reqBody = JSON.stringify({ Detach: false, Tty: true });
+  const reqBody = JSON.stringify({ Detach: false, Tty: false });
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -187,6 +191,7 @@ export async function dockerExecStreamWithExitCode(containerName, cmd) {
         let resolveExitCode, rejectExitCode;
         const exitCode = new Promise((rs, rj) => { resolveExitCode = rs; rejectExitCode = rj; });
 
+        // Inspect the exec after the raw HTTP response closes to obtain the exit code.
         res.on('close', () => {
           dockerRequest({ method: 'GET', path: `/${API_VERSION}/exec/${execId}/json` })
             .then((inspectRes) => {
@@ -200,7 +205,29 @@ export async function dockerExecStreamWithExitCode(containerName, cmd) {
             .catch(rejectExitCode);
         });
 
-        resolve({ stdout: res, abort: () => res.destroy(), exitCode });
+        // Inline stdcopy demux: Docker's non-TTY stream prefixes each chunk with an
+        // 8-byte header [streamType(1B), 0,0,0, size(4B big-endian)].  Strip headers
+        // and emit only the payload so callers receive plain text output.
+        let demuxBuf = Buffer.alloc(0);
+        const demux = new Transform({
+          transform(chunk, _enc, cb) {
+            demuxBuf = Buffer.concat([demuxBuf, chunk]);
+            while (demuxBuf.length >= 8) {
+              const frameSize = demuxBuf.readUInt32BE(4);
+              if (demuxBuf.length < 8 + frameSize) break;
+              const type = demuxBuf[0]; // 1=stdout, 2=stderr
+              if (frameSize > 0 && (type === 1 || type === 2)) {
+                this.push(demuxBuf.slice(8, 8 + frameSize));
+              }
+              demuxBuf = demuxBuf.slice(8 + frameSize);
+            }
+            cb();
+          },
+          flush(cb) { cb(); },
+        });
+        res.pipe(demux);
+
+        resolve({ stdout: demux, abort: () => res.destroy(), exitCode });
       },
     );
     req.on('error', (err) => {

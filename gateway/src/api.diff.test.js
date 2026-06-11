@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'http';
 import { PassThrough } from 'node:stream';
+import { EventEmitter } from 'node:events';
 import express from 'express';
 
 // ── mock child_process before importing api.js ────────────────────────────────
@@ -57,7 +58,7 @@ vi.mock('./host-metrics.js', () => ({
 
 // ── import after mocks are in place ──────────────────────────────────────────
 import { getFeature } from './registry.js';
-import { _setContainerGitStreamImpl, default as router } from './api.js';
+import { _setContainerGitStreamImpl, _setDiffTimeoutMs, default as router } from './api.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default: empty diff, successful exit.
   _setContainerGitStreamImpl(() => makeGitResult(''));
+  // Reset timeout to a safe high value so normal tests never hit it.
+  _setDiffTimeoutMs(15_000);
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -280,5 +283,38 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     const body = await res.json();
     expect(body.status).toBe('ok');
     expect(body.patch).toBe(diffOutput);
+  });
+
+  it('resolves within a bounded time when the stream never ends (server-side timeout)', async () => {
+    getFeature.mockReturnValue({
+      key: 'app-feat',
+      worktreePath: '/tmp/worktrees/app-feat',
+      branch: 'feat',
+    });
+
+    // A stream that emits data but never calls end/close — simulates a hanging TTY exec.
+    const hangingStdout = new EventEmitter();
+    _setContainerGitStreamImpl(() => ({
+      stdout: hangingStdout,
+      abort: vi.fn(),
+      // exitCode promise never resolves (exec hangs)
+      exitCode: new Promise(() => {}),
+    }));
+
+    // Set a short timeout so the test completes quickly.
+    _setDiffTimeoutMs(150);
+
+    const start = Date.now();
+    const res = await fetch(`${baseUrl}/features/app-feat/diff`);
+    const elapsed = Date.now() - start;
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('unavailable');
+    expect(body.reason).toMatch(/timed out/i);
+    expect(body.patch).toBe('');
+    expect(body.isEmpty).toBe(true);
+    // Should resolve close to the timeout, well within 3s.
+    expect(elapsed).toBeLessThan(3_000);
   });
 });
