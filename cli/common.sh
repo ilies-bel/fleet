@@ -1079,8 +1079,13 @@ build_feature_image() {
       -t "${image_tag}" \
       "${context_dir}"
   else
-    echo "no railpack plan for ${sub_name}" >&2
-    return 1
+    local legacy_dockerfile="${fleet_dir}/Dockerfile.feature-base"
+    if [[ -f "${legacy_dockerfile}" ]]; then
+      docker build -f "${legacy_dockerfile}" -t "${image_tag}" "${context_dir}"
+    else
+      echo "no railpack plan and no legacy Dockerfile.feature-base for ${sub_name:-<project>}" >&2
+      return 1
+    fi
   fi
 }
 export -f build_feature_image
