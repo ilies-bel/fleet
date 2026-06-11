@@ -42,6 +42,25 @@ echo "[fleet] ================================================================"
 echo "[fleet] Feature:  ${APP_NAME}  |  Branch: ${BRANCH}"
 echo "[fleet] ================================================================"
 
+# ─── OpenShift restricted-SCC: synthesize a passwd entry via nss_wrapper ──────
+# PostgreSQL's getpwuid() aborts when the running UID has no /etc/passwd entry.
+# /etc/passwd is root-owned and not writable here, so use libnss_wrapper to
+# inject a fake entry for the current UID at runtime.  Export the vars before
+# any PG binary call so the supervisord-launched postgres daemon inherits them.
+if ! id -un >/dev/null 2>&1; then
+  _nss_lib="$(find /usr/lib -name libnss_wrapper.so 2>/dev/null | head -1)"
+  if [ -n "${_nss_lib}" ]; then
+    export NSS_WRAPPER_PASSWD=/tmp/fleet-passwd
+    export NSS_WRAPPER_GROUP=/tmp/fleet-group
+    cp /etc/passwd "${NSS_WRAPPER_PASSWD}"
+    cp /etc/group  "${NSS_WRAPPER_GROUP}"
+    printf 'fleetpg:x:%s:0:fleet pg:/tmp:/bin/bash\n' "$(id -u)" >> "${NSS_WRAPPER_PASSWD}"
+    export LD_PRELOAD="${_nss_lib}"
+  else
+    echo "[fleet] WARN: UID $(id -u) not in /etc/passwd and libnss_wrapper.so absent — PostgreSQL init will fail" >&2
+  fi
+fi
+
 # ─── Determine if postgres is required ───────────────────────────────────────
 NEEDS_DB=$("${PYBIN}" -c "
 import sys, json
@@ -50,11 +69,15 @@ needs = any(s.get('stack','') in ('spring','gradle') for s in svcs)
 print('true' if needs else 'false')
 " "${FLEET_SERVICES_JSON}")
 
-PG_DATA="/var/lib/postgresql/16/main"
+# pgdata/ is a subdirectory created at runtime so the running UID owns it and
+# initdb's internal chmod 0700 succeeds (only owner may chmod).
+PG_DATA="/var/lib/postgresql/16/main/pgdata"
 
 # ─── 1. Initialise PostgreSQL cluster (first boot only) ──────────────────────
 if [ "${NEEDS_DB}" = "true" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   echo "[fleet] First start — initialising PostgreSQL cluster..."
+  # Create the data dir as the running UID so initdb's chmod 0700 succeeds.
+  mkdir -p "${PG_DATA}"
 
   # PostgreSQL binaries (initdb, pg_ctl, postgres) refuse to run as UID 0.
   # When the container is root (the default — no USER directive in the
@@ -62,7 +85,8 @@ if [ "${NEEDS_DB}" = "true" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   # system 'postgres' account via runuser for each PG binary invocation.
   # In OpenShift restricted-SCC environments the container already runs as a
   # non-root UID (CAP_SETUID is absent, so runuser would fail there); we fall
-  # through to direct exec — PG binaries accept any non-zero UID.
+  # through to direct exec — PG binaries accept any non-zero UID (nss_wrapper
+  # synthesizes a passwd entry above so getpwuid() succeeds).
   if [ "$(id -u)" = "0" ]; then
     chown -R postgres:postgres "${PG_DATA}"
     _pgbin() { runuser -u postgres -- "$@"; }
@@ -115,17 +139,18 @@ SUPEREOF
 
 # PostgreSQL program block
 if [ "${NEEDS_DB}" = "true" ]; then
-  cat >> "${SUPERVISORD_CONF}" <<SUPEREOF
-
-[program:postgresql]
-command=/usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main
-user=postgres
-autostart=true
-autorestart=true
-priority=10
-stdout_logfile=/var/log/supervisor/postgresql.log
-stderr_logfile=/var/log/supervisor/postgresql.log
-SUPEREOF
+  # Write the program block piece-by-piece so the user= directive is only
+  # emitted when running as root (supervisord requires root to switch users;
+  # under OpenShift's restricted SCC the daemon runs as an arbitrary non-root
+  # UID and must not carry a user= line).
+  {
+    printf '\n[program:postgresql]\n'
+    printf 'command=/usr/lib/postgresql/16/bin/postgres -D %s\n' "${PG_DATA}"
+    [ "$(id -u)" = "0" ] && printf 'user=postgres\n'
+    printf 'autostart=true\nautorestart=true\npriority=10\n'
+    printf 'stdout_logfile=/var/log/supervisor/postgresql.log\n'
+    printf 'stderr_logfile=/var/log/supervisor/postgresql.log\n'
+  } >> "${SUPERVISORD_CONF}"
 fi
 
 # Service program blocks — one per [[services]] entry

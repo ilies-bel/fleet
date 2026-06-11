@@ -47,7 +47,7 @@ echo "[smoke] Container started: ${CONTAINER}"
 echo "[smoke] Waiting for PostgreSQL (up to 90s)..."
 PG_UP=""
 for i in $(seq 1 90); do
-  if docker exec "${CONTAINER}" /usr/lib/postgresql/16/bin/pg_ctl status -D /var/lib/postgresql/16/main 2>/dev/null | grep -q "server is running"; then
+  if docker exec "${CONTAINER}" /usr/lib/postgresql/16/bin/pg_ctl status -D /var/lib/postgresql/16/main/pgdata 2>/dev/null | grep -q "server is running"; then
     echo "[smoke] PostgreSQL ready (attempt ${i})"
     PG_UP=1
     break
