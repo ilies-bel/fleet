@@ -169,13 +169,14 @@ describe('GET /_fleet/api/features/:key/diff — linked-worktree feature', () =>
     expect(body.isEmpty).toBe(true);
   });
 
-  it('returns 422 when a linked-worktree feature has no worktreePath', async () => {
+  it('returns 200 unavailable when a linked-worktree feature has no worktreePath', async () => {
     getFeature.mockReturnValue({ ...LINKED_FEATURE, worktreePath: null });
 
     const res = await fetch(`${baseUrl}/features/app-feat/diff`);
 
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toMatch(/worktree/i);
+    expect(body.status).toBe('unavailable');
+    expect(body.reason).toMatch(/worktree/i);
   });
 });

@@ -27,7 +27,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  */
 export default defineConfig({
   test: {
-    include: ['test/**/*.test.js'],
+    include: ['test/**/*.test.js', 'src/api.diff*.test.js'],
     exclude: [
       'test/proxy-injection.test.js',
       'test/api.services-health.test.js',

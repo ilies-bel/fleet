@@ -890,8 +890,11 @@ router.get('/features/:key/diff', async (req, res) => {
   if (!feature) {
     return res.status(404).json({ error: 'Feature not registered' });
   }
-  // Cluster-hosted features have no local git working tree — skip docker exec entirely.
-  if (!feature.gitDir) {
+  // Cluster-hosted features have no local worktreePath — skip docker exec entirely.
+  // Locally-hosted features always have worktreePath set; the in-container exec
+  // is the source of truth for whether git is available (the gateway process runs
+  // inside Docker and cannot statSync host paths, so gitDir is not a reliable gate).
+  if (!feature.worktreePath) {
     return res.json({
       status: 'unavailable',
       reason: 'no local worktree',
@@ -900,9 +903,6 @@ router.get('/features/:key/diff', async (req, res) => {
       truncated: false,
       originalBytes: 0,
     });
-  }
-  if (!feature.worktreePath) {
-    return res.status(422).json({ error: 'Feature has no worktree path' });
   }
 
   const containerName = `fleet-${key}`;

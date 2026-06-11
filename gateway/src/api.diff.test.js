@@ -169,7 +169,7 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(capturedContainers).toEqual(['fleet-app-feat']);
   });
 
-  it('returns 422 when the feature has no worktreePath', async () => {
+  it('returns 200 unavailable when the feature has no worktreePath', async () => {
     getFeature.mockReturnValue({
       key: 'app-cluster',
       gitDir: '/repo/.git',
@@ -179,15 +179,16 @@ describe('GET /_fleet/api/features/:key/diff', () => {
 
     const res = await fetch(`${baseUrl}/features/app-cluster/diff`);
 
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toMatch(/worktree/i);
+    expect(body.status).toBe('unavailable');
+    expect(body.reason).toMatch(/worktree/i);
   });
 
-  it('returns 200 unavailable without executing docker for a cluster-hosted feature with no gitDir', async () => {
+  it('returns 200 unavailable without executing docker for a cluster-hosted feature with no worktreePath', async () => {
     getFeature.mockReturnValue({
       key: 'app-cluster',
-      // no gitDir — cluster-hosted feature, no local worktree on this host
+      // no worktreePath — cluster-hosted feature, no local worktree on this host
       host: 'k8s.example.internal',
       branch: 'feat/cluster-branch',
     });
@@ -251,5 +252,33 @@ describe('GET /_fleet/api/features/:key/diff', () => {
     expect(body.reason).toMatch(/Container not running/i);
     expect(body.patch).toBe('');
     expect(body.isEmpty).toBe(true);
+  });
+
+  it('attempts in-container exec even when gitDir is undefined (gateway-in-container condition)', async () => {
+    // Regression: the gateway runs inside Docker and cannot statSync host paths,
+    // so resolveGitContext() always returns gitDir=undefined in production.
+    // The diff endpoint must gate on worktreePath (host-independent), not gitDir,
+    // so locally-hosted features are not permanently broken in production.
+    getFeature.mockReturnValue({
+      key: 'app-feat',
+      gitDir: undefined,           // as resolveGitContext returns when statSync fails in container
+      worktreePath: '/Users/host/projects/app/.worktrees/feat',
+      branch: 'feat',
+    });
+    const diffOutput = 'diff --git a/App.java b/App.java\n+  // fix\n';
+    let execCalledWith = null;
+    _setContainerGitStreamImpl((name) => {
+      execCalledWith = name;
+      return makeGitResult(diffOutput);
+    });
+
+    const res = await fetch(`${baseUrl}/features/app-feat/diff`);
+
+    // Exec must be attempted despite gitDir being undefined.
+    expect(execCalledWith).toBe('fleet-app-feat');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('ok');
+    expect(body.patch).toBe(diffOutput);
   });
 });
