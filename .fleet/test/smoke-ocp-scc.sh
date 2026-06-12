@@ -63,10 +63,17 @@ if [ -z "${PG_UP}" ]; then
 fi
 
 # ── Verify postgres accepts connections ────────────────────────────────────────
-if ! docker exec "${CONTAINER}" psql -h /tmp -U "$(docker exec "${CONTAINER}" id -un 2>/dev/null || echo postgres)" -c "SELECT 1;" postgres 2>/dev/null; then
-  # Try without -U (uses current UID's username, which may not exist in /etc/passwd)
-  # Fall back to checking via pg_isready on TCP
-  if ! docker exec "${CONTAINER}" pg_isready -h 127.0.0.1 -p 5432 -q; then
+# Use the role/db that the entrypoint provisions (DB_USER/DB_NAME default to
+# 'fleet').  We cannot rely on `id -un` inside `docker exec` here: docker exec
+# does NOT inherit the entrypoint's LD_PRELOAD/NSS_WRAPPER_* env, so getpwuid()
+# fails for the SCC UID 9876 and libpq has no username to send → pg_isready
+# returns rc=3 ("no attempt"), not rc=0.  Pass -U explicitly to give libpq a
+# username — pg_isready treats any startup-packet response (auth-ok or not) as
+# "accepting connections", so role existence does not matter for the probe.
+if ! docker exec "${CONTAINER}" psql -h /tmp -U fleet -d fleet -c "SELECT 1;" 2>/dev/null; then
+  # Fall back to TCP connectivity probe via pg_isready (any -U makes libpq
+  # send a startup packet; rc=0 if the server responds at all).
+  if ! docker exec "${CONTAINER}" pg_isready -h 127.0.0.1 -p 5432 -U postgres -q; then
     echo "[smoke] FAIL: PostgreSQL not accepting connections"
     docker logs "${CONTAINER}" 2>&1 | tail -30
     exit 1

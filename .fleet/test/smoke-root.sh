@@ -62,7 +62,7 @@ echo "[smoke] initdb root-error check: clean ✓"
 echo "[smoke] Waiting for PostgreSQL on 127.0.0.1:5432 (up to 90s)..."
 PG_UP=""
 for i in $(seq 1 90); do
-  if docker exec "${CONTAINER}" pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null; then
+  if docker exec "${CONTAINER}" pg_isready -h 127.0.0.1 -p 5432 -U postgres -q 2>/dev/null; then
     echo "[smoke] PostgreSQL ready (attempt ${i})"
     PG_UP=1
     break
@@ -85,7 +85,7 @@ if [ -z "${PG_UP}" ]; then
 fi
 
 # ── Verify postgres accepts TCP connections ────────────────────────────────────
-if ! docker exec "${CONTAINER}" pg_isready -h 127.0.0.1 -p 5432 -q; then
+if ! docker exec "${CONTAINER}" pg_isready -h 127.0.0.1 -p 5432 -U postgres -q; then
   echo "[smoke] FAIL: PostgreSQL not accepting TCP connections on 127.0.0.1:5432"
   docker logs "${CONTAINER}" 2>&1 | tail -30
   exit 1
