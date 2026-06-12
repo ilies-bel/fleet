@@ -47,14 +47,21 @@ echo "[fleet] ================================================================"
 # /etc/passwd is root-owned and not writable here, so use libnss_wrapper to
 # inject a fake entry for the current UID at runtime.  Export the vars before
 # any PG binary call so the supervisord-launched postgres daemon inherits them.
+#
+# PG_RUNTIME_USER names the PostgreSQL superuser that initdb will create.  Root
+# uses the system `postgres` account; non-root (nss_wrapper) synthesizes a user
+# named `fleetpg`.  The variable is the single source of truth — the passwd
+# entry and the PGUSER export both derive from it so they can never drift.
+PG_RUNTIME_USER=postgres
 if ! id -un >/dev/null 2>&1; then
   _nss_lib="$(find /usr/lib -name libnss_wrapper.so 2>/dev/null | head -1)"
   if [ -n "${_nss_lib}" ]; then
+    PG_RUNTIME_USER=fleetpg
     export NSS_WRAPPER_PASSWD=/tmp/fleet-passwd
     export NSS_WRAPPER_GROUP=/tmp/fleet-group
     cp /etc/passwd "${NSS_WRAPPER_PASSWD}"
     cp /etc/group  "${NSS_WRAPPER_GROUP}"
-    printf 'fleetpg:x:%s:0:fleet pg:/tmp:/bin/bash\n' "$(id -u)" >> "${NSS_WRAPPER_PASSWD}"
+    printf '%s:x:%s:0:fleet pg:/tmp:/bin/bash\n' "${PG_RUNTIME_USER}" "$(id -u)" >> "${NSS_WRAPPER_PASSWD}"
     export LD_PRELOAD="${_nss_lib}"
   else
     echo "[fleet] WARN: UID $(id -u) not in /etc/passwd and libnss_wrapper.so absent — PostgreSQL init will fail" >&2
@@ -92,9 +99,15 @@ if [ "${NEEDS_DB}" = "true" ] && [ ! -f "${PG_DATA}/PG_VERSION" ]; then
     _pgbin() { runuser -u postgres -- "$@"; }
     # psql defaults to the OS username as the PG role; override so the
     # provisioning queries below run as the postgres superuser.
-    export PGUSER=postgres
+    export PGUSER="${PG_RUNTIME_USER}"
   else
     _pgbin() { "$@"; }
+    # nss_wrapper synthesized the superuser as `fleetpg` (PG_RUNTIME_USER);
+    # initdb names the superuser after the OS user, but the default *database*
+    # is still `postgres`.  Point libpq at both so the provisioning psql calls
+    # below do not default role+dbname to `fleetpg` (role exists, db does not).
+    export PGUSER="${PG_RUNTIME_USER}"
+    export PGDATABASE=postgres
   fi
 
   _pgbin /usr/lib/postgresql/16/bin/initdb -D "${PG_DATA}" -E UTF8 --locale=C --auth=trust
@@ -145,7 +158,11 @@ if [ "${NEEDS_DB}" = "true" ]; then
   # UID and must not carry a user= line).
   {
     printf '\n[program:postgresql]\n'
-    printf 'command=/usr/lib/postgresql/16/bin/postgres -D %s\n' "${PG_DATA}"
+    # -k /tmp: unix socket in /tmp so any non-root UID (e.g. OpenShift's 9876:0)
+    # can create it.  /var/run/postgresql is postgres:postgres owned and not
+    # group-0 writable, so it is off-limits for arbitrary non-root UIDs.
+    # This is consistent with the provisioning pg_ctl start above (also -k /tmp).
+    printf 'command=/usr/lib/postgresql/16/bin/postgres -D %s -k /tmp\n' "${PG_DATA}"
     [ "$(id -u)" = "0" ] && printf 'user=postgres\n'
     printf 'autostart=true\nautorestart=true\npriority=10\n'
     printf 'stdout_logfile=/var/log/supervisor/postgresql.log\n'
