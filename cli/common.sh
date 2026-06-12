@@ -1105,6 +1105,7 @@ show_help() {
   echo -e "  ${BLUE}restart${RESET} <name>                       Restart a feature container"
   echo -e "  ${BLUE}stop${RESET}    <name>|--all                 Stop feature container(s) without destroying them"
   echo -e "  ${BLUE}start${RESET}   <name>|--all                 Resume stopped feature container(s)"
+  echo -e "  ${BLUE}activate${RESET} <name>                       Set the active preview feature (served by the gateway proxy)"
   echo -e "  ${BLUE}ui${RESET}      [start|restart|stop] [--dev] [--port <n>]  Manage the dashboard UI (action defaults to start)"
   echo -e "  ${BLUE}push${RESET}    <name>                       Push service branches to remote"
   echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] [--rebuild]  Pull latest code and rebuild"
