@@ -867,16 +867,6 @@ export default function LogPanel({ featureName, onClose }) {
   const [filterInput, setFilterInput]         = useState('');
   /** Debounced filter — 150ms delay to avoid filtering on every keystroke */
   const [debouncedFilter, setDebouncedFilter] = useState('');
-  /** Controlled value of the "type to add" highlight input */
-  const [highlightInput, setHighlightInput]   = useState('');
-  /**
-   * Active highlight terms: [{ term: string, colorIndex: number }]
-   * colorIndex cycles through HIGHLIGHT_PALETTE (0–4 wrapping).
-   */
-  const [highlightTerms, setHighlightTerms]   = useState([]);
-  /** Monotonically-incrementing counter — drives palette cycling on add */
-  const nextColorRef = useRef(0);
-
   // ── Ingest-tracking refs ────────────────────────────────────────────────
   /**
    * Rolling window entries for ev/s: [{ t: performance.now(), count: number }].
@@ -1156,21 +1146,6 @@ export default function LogPanel({ featureName, onClose }) {
     setErrorBuckets(Array(SPARKLINE_BUCKETS).fill(0));
   }
 
-  function addHighlightTerm(term) {
-    const trimmed = term.trim();
-    if (!trimmed) return;
-    // Deduplicate case-insensitively
-    if (highlightTerms.some(h => h.term.toLowerCase() === trimmed.toLowerCase())) return;
-    const colorIndex = nextColorRef.current;
-    nextColorRef.current++;
-    setHighlightTerms(prev => [...prev, { term: trimmed, colorIndex }]);
-    setHighlightInput('');
-  }
-
-  function removeHighlightTerm(term) {
-    setHighlightTerms(prev => prev.filter(h => h.term !== term));
-  }
-
   // ── Derived filtered state ────────────────────────────────────────────────
 
   // Level filter applied first.
@@ -1190,40 +1165,19 @@ export default function LogPanel({ featureName, onClose }) {
   const rows = useMemo(() => groupIntoRows(textFiltered), [textFiltered]);
 
   /**
-   * Precomputed highlight regexes — stable per term-set; one object per term.
-   * re.lastIndex is reset before each use in highlightText/termCounts.
+   * Precomputed highlight regex — derived from the single combined filter input.
+   * Highlights the literal typed text (first palette color) in visible rows.
+   * re.lastIndex is reset before each use in highlightText.
    */
-  const compiledHighlights = useMemo(() =>
-    highlightTerms
-      .filter(({ term }) => term.trim().length > 0)
-      .map(({ term, colorIndex }) => ({
-        term,
-        colorIndex,
-        re: new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
-      })),
-    [highlightTerms],
-  );
-
-  /**
-   * Per-term occurrence count across the currently-visible (filtered) records.
-   * Recomputed only when the term set or visible records change.
-   */
-  const termCounts = useMemo(() => {
-    if (compiledHighlights.length === 0) return [];
-    return compiledHighlights.map(({ term, colorIndex, re }) => {
-      let count = 0;
-      for (const rec of textFiltered) {
-        const text = rec.raw || rec.message || '';
-        re.lastIndex = 0;
-        let m;
-        while ((m = re.exec(text)) !== null) {
-          count++;
-          if (m[0].length === 0) { re.lastIndex++; break; }
-        }
-      }
-      return { term, colorIndex, count };
-    });
-  }, [compiledHighlights, textFiltered]);
+  const compiledHighlights = useMemo(() => {
+    const term = debouncedFilter.trim();
+    if (!term) return [];
+    return [{
+      term,
+      colorIndex: 0,
+      re: new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+    }];
+  }, [debouncedFilter]);
 
   // Merge grouped rows and run markers into a single ts-sorted timeline.
   // A marker sorts before a record sharing its ts (stable ordering spec).
@@ -1429,13 +1383,13 @@ export default function LogPanel({ featureName, onClose }) {
             gap:        'var(--space-2)',
             flexWrap:   'wrap',
           }}>
-            {/* Filter text input — debounced 150ms */}
+            {/* Combined filter + highlight input — debounced 150ms */}
             <input
               type="text"
-              placeholder="filter…"
+              placeholder="filter &amp; highlight"
               value={filterInput}
               onChange={e => setFilterInput(e.target.value)}
-              aria-label="Filter log lines"
+              aria-label="Filter and highlight log lines"
               style={{
                 background: 'transparent',
                 border:     '1px solid var(--color-border)',
@@ -1443,83 +1397,10 @@ export default function LogPanel({ featureName, onClose }) {
                 fontFamily: 'var(--font-mono)',
                 fontSize:   '0.68rem',
                 padding:    '2px 6px',
-                width:      '220px',
+                flex:       1,
                 outline:    'none',
               }}
             />
-
-            {/* Highlight chip area + "highlight…" input */}
-            <div style={{
-              display:    'flex',
-              alignItems: 'center',
-              gap:        '0.3rem',
-              flexWrap:   'wrap',
-              flex:       1,
-            }}>
-              {/* Removable chips — one per active highlight term */}
-              {termCounts.map(({ term, colorIndex, count }) => {
-                const { bg, fg } = HIGHLIGHT_PALETTE[colorIndex % HIGHLIGHT_PALETTE.length];
-                return (
-                  <span
-                    key={term}
-                    style={{
-                      display:    'inline-flex',
-                      alignItems: 'center',
-                      gap:        '0.25em',
-                      background: bg,
-                      color:      fg,
-                      fontFamily: 'var(--font-mono)',
-                      fontSize:   '0.62rem',
-                      padding:    '1px 4px',
-                      border:     `1px solid ${fg}`,
-                    }}
-                  >
-                    <span>{term} ×{count}</span>
-                    <button
-                      onClick={() => removeHighlightTerm(term)}
-                      aria-label={`Remove highlight: ${term}`}
-                      style={{
-                        background: 'none',
-                        border:     'none',
-                        color:      'inherit',
-                        cursor:     'pointer',
-                        fontFamily: 'inherit',
-                        fontSize:   'inherit',
-                        padding:    '0 1px',
-                        lineHeight: 1,
-                      }}
-                    >
-                      ×
-                    </button>
-                  </span>
-                );
-              })}
-
-              {/* "highlight…" input — press Enter to add a term */}
-              <input
-                type="text"
-                placeholder="highlight…"
-                value={highlightInput}
-                onChange={e => setHighlightInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    e.stopPropagation(); // prevent dialog-level keyDown from firing
-                    addHighlightTerm(highlightInput);
-                  }
-                }}
-                aria-label="Add highlight term, press Enter to add"
-                style={{
-                  background: 'transparent',
-                  border:     '1px solid var(--color-border)',
-                  color:      'var(--color-ink)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize:   '0.68rem',
-                  padding:    '2px 6px',
-                  width:      '160px',
-                  outline:    'none',
-                }}
-              />
-            </div>
           </div>
         </div>
 
