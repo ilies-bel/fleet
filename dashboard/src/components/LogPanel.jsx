@@ -1137,7 +1137,7 @@ export default function LogPanel({ featureName, onClose }) {
   // so horizontal position is preserved in no-wrap mode.
   useEffect(() => {
     if (autoTail && sentinelRef.current) {
-      sentinelRef.current.scrollIntoView({ behavior: 'smooth', block: 'end', inline: 'nearest' });
+      sentinelRef.current.scrollIntoView({ behavior: 'auto', block: 'end', inline: 'nearest' });
     }
   }, [buffer, records, markers, autoTail]);
 
