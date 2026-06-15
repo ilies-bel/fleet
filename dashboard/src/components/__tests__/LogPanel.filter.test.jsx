@@ -1,13 +1,14 @@
 /**
- * Filter-box and multi-term highlight tests for LogPanel.
+ * Filter / highlight tests for LogPanel.
  *
  * Verifies:
  *   1. matchesFilter — pure predicate, case-insensitive substring on raw field
  *   2. applyTextFilter — trace-group preservation, AND with level filter
- *   3. Filter input hides non-matching rows and updates the footer count
+ *   3. The single combined input filters visible rows and updates the footer
  *   4. Empty-result placeholder shown when no rows match
- *   5. Highlight input adds removable chips with live occurrence counts
- *   6. Filter and highlight are independent (CloudWatch workflow)
+ *   5. The same input also highlights the typed text inside surviving rows
+ *      (single term, single colour — the "filter + highlight the same text"
+ *      behaviour).
  */
 
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
@@ -131,28 +132,32 @@ function makeLogResponse(messages) {
   };
 }
 
-describe('LogPanel — filter box', () => {
-  it('renders a filter input in the header', async () => {
+const FILTER_PLACEHOLDER = 'filter & highlight';
+
+describe('LogPanel — combined filter + highlight input', () => {
+  it('renders a single combined filter + highlight input in the header', async () => {
     getLogs.mockResolvedValue(makeLogResponse(['hello']));
     render(<LogPanel featureName="test" onClose={() => {}} />);
-    expect(screen.getByPlaceholderText('filter…')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(FILTER_PLACEHOLDER)).toBeInTheDocument();
+    // The old separate "highlight…" input must be gone.
+    expect(screen.queryByPlaceholderText('highlight…')).not.toBeInTheDocument();
   });
 
   it('hides rows that do not match the filter text', async () => {
     getLogs.mockResolvedValue(makeLogResponse(['connection timeout', 'request ok 200']));
     render(<LogPanel featureName="test" onClose={() => {}} />);
 
-    await waitFor(() => screen.getByText('connection timeout'));
+    await waitFor(() => screen.getByText(/connection timeout/));
 
-    const input = screen.getByPlaceholderText('filter…');
+    const input = screen.getByPlaceholderText(FILTER_PLACEHOLDER);
     await act(async () => {
       fireEvent.change(input, { target: { value: 'timeout' } });
       // advance past 150ms debounce
       await new Promise(r => setTimeout(r, 200));
     });
 
-    expect(screen.getByText('connection timeout')).toBeInTheDocument();
-    expect(screen.queryByText('request ok 200')).not.toBeInTheDocument();
+    expect(screen.getByText(/connection/)).toBeInTheDocument();
+    expect(screen.queryByText(/request ok 200/)).not.toBeInTheDocument();
   });
 
   it('shows "N of M lines" in the footer when a filter is active', async () => {
@@ -161,7 +166,7 @@ describe('LogPanel — filter box', () => {
 
     await waitFor(() => screen.getByText('alpha'));
 
-    const input = screen.getByPlaceholderText('filter…');
+    const input = screen.getByPlaceholderText(FILTER_PLACEHOLDER);
     await act(async () => {
       fireEvent.change(input, { target: { value: 'alpha' } });
       await new Promise(r => setTimeout(r, 200));
@@ -176,7 +181,7 @@ describe('LogPanel — filter box', () => {
 
     await waitFor(() => screen.getByText('hello world'));
 
-    const input = screen.getByPlaceholderText('filter…');
+    const input = screen.getByPlaceholderText(FILTER_PLACEHOLDER);
     await act(async () => {
       fireEvent.change(input, { target: { value: 'xxxxxxxx' } });
       await new Promise(r => setTimeout(r, 200));
@@ -191,7 +196,7 @@ describe('LogPanel — filter box', () => {
 
     await waitFor(() => screen.getByText('beta'));
 
-    const input = screen.getByPlaceholderText('filter…');
+    const input = screen.getByPlaceholderText(FILTER_PLACEHOLDER);
     await act(async () => {
       fireEvent.change(input, { target: { value: 'alpha' } });
       await new Promise(r => setTimeout(r, 200));
@@ -204,85 +209,61 @@ describe('LogPanel — filter box', () => {
     });
     expect(screen.getByText('beta')).toBeInTheDocument();
   });
-});
 
-describe('LogPanel — highlight chips', () => {
-  it('renders a highlight input in the header', () => {
-    getLogs.mockResolvedValue(makeLogResponse([]));
-    render(<LogPanel featureName="test" onClose={() => {}} />);
-    expect(screen.getByPlaceholderText('highlight…')).toBeInTheDocument();
-  });
+  it('highlights the typed text inside surviving rows via <mark>', async () => {
+    getLogs.mockResolvedValue(makeLogResponse(['connection timeout error', 'request ok 200']));
+    const { container } = render(<LogPanel featureName="test" onClose={() => {}} />);
 
-  it('adds a chip when Enter is pressed in the highlight input', async () => {
-    getLogs.mockResolvedValue(makeLogResponse(['timeout error occurred']));
-    render(<LogPanel featureName="test" onClose={() => {}} />);
+    await waitFor(() => screen.getByText(/connection timeout error/));
 
-    await waitFor(() => screen.getByText('timeout error occurred'));
-
-    const input = screen.getByPlaceholderText('highlight…');
-    fireEvent.change(input, { target: { value: 'timeout' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    // The chip shows "term ×count" — match on that pattern to distinguish from the highlighted row text.
-    expect(screen.getByText(/timeout ×/)).toBeInTheDocument();
-  });
-
-  it('chip shows a live occurrence count', async () => {
-    getLogs.mockResolvedValue(makeLogResponse(['timeout', 'another timeout here', 'ok']));
-    render(<LogPanel featureName="test" onClose={() => {}} />);
-
-    await waitFor(() => screen.getByText('another timeout here'));
-
-    const input = screen.getByPlaceholderText('highlight…');
-    fireEvent.change(input, { target: { value: 'timeout' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    // Chip should show "timeout ×2" (appears in 2 of the 3 lines)
-    expect(screen.getByText(/×2/)).toBeInTheDocument();
-  });
-
-  it('removes a chip when its × button is clicked', async () => {
-    getLogs.mockResolvedValue(makeLogResponse(['error 404']));
-    render(<LogPanel featureName="test" onClose={() => {}} />);
-
-    await waitFor(() => screen.getByText('error 404'));
-
-    const hlInput = screen.getByPlaceholderText('highlight…');
-    fireEvent.change(hlInput, { target: { value: 'error' } });
-    fireEvent.keyDown(hlInput, { key: 'Enter' });
-
-    // A remove button should appear
-    const removeBtn = screen.getByRole('button', { name: /remove highlight.*error/i });
-    fireEvent.click(removeBtn);
-
-    expect(screen.queryByRole('button', { name: /remove highlight.*error/i })).not.toBeInTheDocument();
-  });
-
-  it('filter and highlight are independent — both can be active simultaneously', async () => {
-    getLogs.mockResolvedValue(makeLogResponse([
-      'Error: connection timeout',
-      'GET /api 404 not found',
-      'Success: request completed',
-    ]));
-    render(<LogPanel featureName="test" onClose={() => {}} />);
-
-    await waitFor(() => screen.getByText('Success: request completed'));
-
-    // Apply filter: only Error lines
-    const filterInput = screen.getByPlaceholderText('filter…');
+    const input = screen.getByPlaceholderText(FILTER_PLACEHOLDER);
     await act(async () => {
-      fireEvent.change(filterInput, { target: { value: 'Error' } });
+      fireEvent.change(input, { target: { value: 'timeout' } });
       await new Promise(r => setTimeout(r, 200));
     });
 
-    // Apply highlight: 404
-    const hlInput = screen.getByPlaceholderText('highlight…');
-    fireEvent.change(hlInput, { target: { value: '404' } });
-    fireEvent.keyDown(hlInput, { key: 'Enter' });
+    // Surviving row should contain a <mark> wrapping the matched text.
+    const marks = container.querySelectorAll('mark');
+    expect(marks.length).toBeGreaterThan(0);
+    const matchedText = Array.from(marks).map(m => m.textContent).join('');
+    expect(matchedText.toLowerCase()).toContain('timeout');
+  });
 
-    // Filter should hide the 404 row (doesn't contain "Error")
-    expect(screen.queryByText('GET /api 404 not found')).not.toBeInTheDocument();
-    // Highlight chip for "404" still present (highlight is independent)
-    expect(screen.getByText(/×0/)).toBeInTheDocument(); // 0 occurrences in filtered set
+  it('matches the highlight case-insensitively', async () => {
+    getLogs.mockResolvedValue(makeLogResponse(['Connection TIMEOUT Error']));
+    const { container } = render(<LogPanel featureName="test" onClose={() => {}} />);
+
+    await waitFor(() => screen.getByText(/Connection TIMEOUT Error/));
+
+    const input = screen.getByPlaceholderText(FILTER_PLACEHOLDER);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'timeout' } });
+      await new Promise(r => setTimeout(r, 200));
+    });
+
+    const marks = container.querySelectorAll('mark');
+    expect(marks.length).toBeGreaterThan(0);
+    // The literal match preserves the source casing.
+    expect(Array.from(marks).some(m => m.textContent === 'TIMEOUT')).toBe(true);
+  });
+
+  it('removes highlights when the input is cleared', async () => {
+    getLogs.mockResolvedValue(makeLogResponse(['connection timeout']));
+    const { container } = render(<LogPanel featureName="test" onClose={() => {}} />);
+
+    await waitFor(() => screen.getByText(/connection timeout/));
+
+    const input = screen.getByPlaceholderText(FILTER_PLACEHOLDER);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'timeout' } });
+      await new Promise(r => setTimeout(r, 200));
+    });
+    expect(container.querySelectorAll('mark').length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '' } });
+      await new Promise(r => setTimeout(r, 200));
+    });
+    expect(container.querySelectorAll('mark').length).toBe(0);
   });
 });

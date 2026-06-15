@@ -1386,7 +1386,7 @@ export default function LogPanel({ featureName, onClose }) {
             {/* Combined filter + highlight input — debounced 150ms */}
             <input
               type="text"
-              placeholder="filter &amp; highlight"
+              placeholder="filter & highlight"
               value={filterInput}
               onChange={e => setFilterInput(e.target.value)}
               aria-label="Filter and highlight log lines"
