@@ -28,8 +28,6 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
   const editCancelledRef = useRef(false);
 
   useEffect(() => {
-    const controller = new AbortController();
-
     async function check() {
       try {
         const res = await getServicesHealth(key);
@@ -57,7 +55,6 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
     check();
     const poll = setInterval(check, 8000);
     return () => {
-      controller.abort();
       clearInterval(poll);
     };
   }, [key]);
