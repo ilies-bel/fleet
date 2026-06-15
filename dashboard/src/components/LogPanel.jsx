@@ -393,10 +393,23 @@ function highlightText(text, compiledHighlights) {
 
 /**
  * Detail panel for a pinned log record.
- * inline=false → rendered as a right-hand side panel in the log area split.
- * inline=true  → rendered as an inline block below the selected row (narrow fallback).
+ *
+ * Two layouts:
+ *   inline=false (default) → full-width bottom drawer in the log area, with a
+ *     drag handle on its top edge to resize height. The log list keeps its full
+ *     horizontal width above it, so wide stack traces are readable.
+ *   inline=true            → inline block rendered directly below the selected
+ *     row (narrow-width fallback when there isn't room for a drawer).
+ *
+ * @param {object}   props
+ * @param {object}   props.record   Parent log record { ts, level, source, message, raw }.
+ * @param {object[]} props.traces   Attached stack-frame records.
+ * @param {() => void} props.onClose
+ * @param {boolean}  [props.inline]   Render the narrow inline variant.
+ * @param {number}   [props.height]   Drawer pixel height (drawer variant only).
+ * @param {(e: React.PointerEvent) => void} [props.onResizeStart] Drag-handle pointerdown.
  */
-function EventInspector({ record, traces, onClose, inline }) {
+function EventInspector({ record, traces, onClose, inline, height, onResizeStart }) {
   const closeButtonRef = useRef(null);
 
   // Focus the close button whenever a new record is selected.
@@ -409,7 +422,9 @@ function EventInspector({ record, traces, onClose, inline }) {
       console.warn('[EventInspector] clipboard API unavailable');
       return;
     }
-    navigator.clipboard.writeText(record.raw).catch(err => {
+    // Copy the full event: parent line plus every attached stack frame.
+    const text = [record.raw, ...(traces ?? []).map(t => t.raw)].join('\n');
+    navigator.clipboard.writeText(text).catch(err => {
       console.warn('[EventInspector] copy failed', err);
     });
   }
@@ -434,183 +449,208 @@ function EventInspector({ record, traces, onClose, inline }) {
   const levelColor  = LEVEL_COLOR[record.level]  ?? 'var(--color-ink-dim)';
   const sourceColor = SOURCE_COLOR[record.source] ?? 'var(--color-muted)';
 
-  const fields = [
-    ['ts',      record.ts],
-    ['level',   record.level],
-    ['source',  record.source],
-    ['message', record.message],
-  ].filter(([, v]) => v != null && v !== '');
-
-  // Shared inner content — used for both inline and side-panel layouts.
-  const inner = (
-    <>
-      {/* ── Header: timestamp · level · source · close ── */}
-      <div style={{
-        display:       'flex',
-        alignItems:    'center',
-        gap:           '0.5em',
+  // Header summary line: LEVEL · source · full timestamp. The message itself is
+  // shown verbatim in the raw block below, so it is not duplicated as a field.
+  const header = (
+    <div style={{
+      display:       'flex',
+      alignItems:    'center',
+      gap:           '0.6em',
+      flexShrink:    0,
+      paddingBottom: '0.45em',
+      borderBottom:  '1px solid var(--color-border)',
+      marginBottom:  '0.55em',
+    }}>
+      <span style={{
+        color:         levelColor,
+        fontWeight:    700,
         flexShrink:    0,
-        paddingBottom: '0.4em',
-        borderBottom:  '1px solid var(--color-border)',
-        marginBottom:  '0.5em',
+        fontSize:      '0.7rem',
+        letterSpacing: '0.04em',
       }}>
-        <span style={{
-          color:        'var(--color-ink-dim)',
-          flex:         1,
-          overflow:     'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace:   'nowrap',
-          fontSize:     '0.65rem',
-        }}>
-          {fullTs}
-        </span>
-        <span style={{ color: levelColor, fontWeight: 700, flexShrink: 0, fontSize: '0.65rem' }}>
-          {record.level ?? '·'}
-        </span>
-        <span style={{ color: sourceColor, flexShrink: 0, fontSize: '0.65rem' }}>
-          {record.source}
-        </span>
-        <button
-          ref={closeButtonRef}
-          onClick={onClose}
-          aria-label="Close inspector"
+        {record.level ?? '·'}
+      </span>
+      <span style={{ color: 'var(--color-ink-faint)', flexShrink: 0 }}>·</span>
+      <span style={{ color: sourceColor, flexShrink: 0, fontSize: '0.68rem' }}>
+        {record.source}
+      </span>
+      <span style={{ color: 'var(--color-ink-faint)', flexShrink: 0 }}>·</span>
+      <span style={{
+        color:        'var(--color-ink-dim)',
+        flex:         1,
+        overflow:     'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace:   'nowrap',
+        fontSize:     '0.68rem',
+      }}>
+        {fullTs}
+      </span>
+      <button
+        onClick={handleCopy}
+        title="Copy event + stack frames"
+        style={{
+          flexShrink: 0,
+          background: 'none',
+          border:     '1px solid var(--color-border)',
+          color:      'var(--color-ink-dim)',
+          cursor:     'pointer',
+          fontSize:   '0.62rem',
+          padding:    '1px 7px',
+          fontFamily: 'var(--font-mono)',
+        }}
+      >
+        [copy]
+      </button>
+      <button
+        ref={closeButtonRef}
+        onClick={onClose}
+        aria-label="Close inspector"
+        style={{
+          flexShrink: 0,
+          background: 'none',
+          border:     'none',
+          color:      'var(--color-ink-dim)',
+          cursor:     'pointer',
+          fontSize:   '1rem',
+          padding:    '0 2px',
+          lineHeight: 1,
+          fontFamily: 'var(--font-mono)',
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+
+  // The raw event line — the primary message text, selectable.
+  const rawBlock = (
+    <pre style={{
+      margin:     '0 0 0.55em',
+      padding:    '0.45em 0.6em',
+      background: 'rgba(0,0,0,0.4)',
+      border:     '1px solid var(--color-border)',
+      fontSize:   '0.7rem',
+      lineHeight: 1.45,
+      color:      'var(--color-ink)',
+      whiteSpace: 'pre-wrap',
+      wordBreak:  'break-word',
+      userSelect: 'text',
+      flexShrink: 0,
+    }}>
+      {record.raw}
+    </pre>
+  );
+
+  // Stack frames — the part that most needs horizontal room. In the drawer it
+  // scrolls in both axes; in the inline fallback it wraps.
+  const traceBlock = traces && traces.length > 0 && (
+    <div style={{
+      flex:      1,
+      minHeight: 0,
+      overflowY: 'auto',
+      overflowX: inline ? undefined : 'auto',
+      border:    '1px solid var(--color-border)',
+      background: 'rgba(0,0,0,0.25)',
+    }}>
+      <div style={{
+        position:     'sticky',
+        top:          0,
+        zIndex:       1,
+        background:   '#0c0c14',
+        color:        'var(--color-ink-dim)',
+        fontSize:     '0.62rem',
+        padding:      '0.25em 0.6em',
+        borderBottom: '1px solid var(--color-border)',
+      }}>
+        {traces.length} stack frame{traces.length !== 1 ? 's' : ''}
+      </div>
+      {traces.map((frame, i) => (
+        <div
+          key={i}
           style={{
-            flexShrink: 0,
-            background: 'none',
-            border:     'none',
-            color:      'var(--color-ink-dim)',
-            cursor:     'pointer',
-            fontSize:   '1rem',
-            padding:    '0 2px',
-            lineHeight: 1,
+            fontSize:   '0.68rem',
+            lineHeight: 1.45,
+            color:      'var(--color-muted)',
+            padding:    '0 0.6em',
+            userSelect: 'text',
             fontFamily: 'var(--font-mono)',
+            ...(inline
+              ? { whiteSpace: 'pre-wrap', wordBreak: 'break-all' }
+              : { whiteSpace: 'pre' }),
           }}
         >
-          ×
-        </button>
-      </div>
-
-      {/* ── Raw line — scrollable mono block, selectable ── */}
-      <pre style={{
-        margin:     '0 0 0.5em',
-        padding:    '0.4em 0.5em',
-        background: 'rgba(0,0,0,0.4)',
-        border:     '1px solid var(--color-border)',
-        fontSize:   '0.63rem',
-        lineHeight: 1.4,
-        color:      '#ccc',
-        whiteSpace: 'pre-wrap',
-        wordBreak:  'break-all',
-        userSelect: 'text',
-        flexShrink: 0,
-        overflowY:  'auto',
-        maxHeight:  inline ? '5em' : '7em',
-      }}>
-        {record.raw}
-      </pre>
-
-      {/* ── Copy button ── */}
-      <div style={{ marginBottom: '0.5em', flexShrink: 0 }}>
-        <button
-          onClick={handleCopy}
-          style={{
-            background: 'none',
-            border:     '1px solid var(--color-border)',
-            color:      'var(--color-ink-dim)',
-            cursor:     'pointer',
-            fontSize:   '0.62rem',
-            padding:    '1px 6px',
-            fontFamily: 'var(--font-mono)',
-          }}
-        >
-          [copy]
-        </button>
-      </div>
-
-      {/* ── Parsed fields ── */}
-      {fields.length > 0 && (
-        <div style={{ flexShrink: 0, marginBottom: '0.5em' }}>
-          {fields.map(([k, v]) => (
-            <div
-              key={k}
-              style={{
-                display:      'flex',
-                gap:          '0.5em',
-                fontSize:     '0.63rem',
-                lineHeight:   1.5,
-                wordBreak:    'break-all',
-                borderBottom: '1px solid rgba(255,255,255,0.04)',
-                padding:      '1px 0',
-              }}
-            >
-              <span style={{ color: 'var(--color-accent)', flexShrink: 0, minWidth: '6ch' }}>{k}</span>
-              <span style={{ color: '#aaa', flex: 1 }}>{v}</span>
-            </div>
-          ))}
+          {frame.raw}
         </div>
-      )}
-
-      {/* ── Stack frames — ALL, not collapsed ── */}
-      {traces && traces.length > 0 && (
-        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-          <div style={{
-            color:        'var(--color-ink-dim)',
-            fontSize:     '0.6rem',
-            marginBottom: '0.25em',
-            flexShrink:   0,
-          }}>
-            {traces.length} stack frame{traces.length !== 1 ? 's' : ''}
-          </div>
-          {traces.map((frame, i) => (
-            <div
-              key={i}
-              style={{
-                fontSize:   '0.63rem',
-                lineHeight: 1.4,
-                color:      'var(--color-ink-faint)',
-                whiteSpace: 'pre-wrap',
-                wordBreak:  'break-all',
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              {frame.raw}
-            </div>
-          ))}
-        </div>
-      )}
-    </>
+      ))}
+    </div>
   );
 
   if (inline) {
     return (
       <div style={{
-        borderTop:  '1px solid var(--color-border)',
-        background: 'rgba(20,20,40,0.6)',
-        padding:    '0.5em var(--space-3)',
-        fontFamily: 'var(--font-mono)',
-        fontSize:   '0.7rem',
+        borderTop:     '1px solid var(--color-border)',
+        background:    'rgba(20,20,40,0.6)',
+        padding:       '0.5em var(--space-3)',
+        fontFamily:    'var(--font-mono)',
+        fontSize:      '0.7rem',
+        display:       'flex',
+        flexDirection: 'column',
+        maxHeight:     '50vh',
       }}>
-        {inner}
+        {header}
+        {rawBlock}
+        {traceBlock}
       </div>
     );
   }
 
+  // Drawer variant — docked along the bottom, full width, resizable height.
   return (
     <div style={{
-      width:         '300px',
-      minWidth:      '220px',
-      maxWidth:      '42%',
-      borderLeft:    '1px solid var(--color-border)',
-      display:       'flex',
-      flexDirection: 'column',
-      overflow:      'hidden',
+      height:        height,
+      flexShrink:    0,
+      borderTop:     '1px solid var(--color-border-strong)',
       background:    '#090912',
       fontFamily:    'var(--font-mono)',
       fontSize:      '0.7rem',
-      padding:       'var(--space-2)',
-      flexShrink:    0,
+      display:       'flex',
+      flexDirection: 'column',
+      minHeight:     0,
     }}>
-      {inner}
+      {/* Drag handle — pointer-driven vertical resize of the drawer. */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize event detail"
+        onPointerDown={onResizeStart}
+        style={{
+          flexShrink:  0,
+          height:      '9px',
+          cursor:      'ns-resize',
+          display:     'flex',
+          alignItems:  'center',
+          justifyContent: 'center',
+          background:  'var(--color-surface-header)',
+          borderBottom: '1px solid var(--color-border)',
+          userSelect:  'none',
+          touchAction: 'none',
+        }}
+      >
+        <span style={{ color: 'var(--color-ink-faint)', fontSize: '0.6rem', lineHeight: 1 }}>
+          ⋯
+        </span>
+      </div>
+      <div style={{
+        flex:          1,
+        minHeight:     0,
+        display:       'flex',
+        flexDirection: 'column',
+        padding:       'var(--space-2) var(--space-3)',
+      }}>
+        {header}
+        {rawBlock}
+        {traceBlock}
+      </div>
     </div>
   );
 }
@@ -856,13 +896,41 @@ export default function LogPanel({ featureName, onClose }) {
 
   // Inspector: { record, traces } snapshot pinned by clicking a row; null = closed.
   const [selectedRow, setSelectedRow] = useState(null);
-  // isNarrow: dialog width < 560px → inline fallback instead of side split.
+  // isNarrow: dialog width < 560px → inline fallback instead of bottom drawer.
   const [isNarrow, setIsNarrow]       = useState(false);
+  // Bottom-drawer height in px (drawer variant). Clamped on drag to [120, area-120].
+  const [drawerHeight, setDrawerHeight] = useState(260);
 
   const sentinelRef  = useRef(null);
   const latestRunRef = useRef(null);
   const dialogRef    = useRef(null);
   const prevFocusRef = useRef(null);
+  // Live geometry for the drawer drag — captured on pointerdown.
+  const logAreaRef   = useRef(null);
+  const dragRef      = useRef(null);
+
+  // Drawer resize: pointer-driven, pinned to window so the drag survives a
+  // fast cursor leaving the handle. Clamps so neither pane collapses below 120px.
+  const handleDrawerResizeStart = useCallback((e) => {
+    e.preventDefault();
+    const areaH = logAreaRef.current?.getBoundingClientRect().height ?? 0;
+    dragRef.current = { startY: e.clientY, startH: drawerHeight, areaH };
+    const onMove = (ev) => {
+      const d = dragRef.current;
+      if (!d) return;
+      // Drag up (smaller clientY) grows the drawer.
+      const next = d.startH + (d.startY - ev.clientY);
+      const max  = Math.max(120, d.areaH - 120);
+      setDrawerHeight(Math.min(max, Math.max(120, next)));
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [drawerHeight]);
 
   // Save previously-focused element and move focus into the dialog on mount.
   useEffect(() => {
@@ -1222,9 +1290,9 @@ export default function LogPanel({ featureName, onClose }) {
         onClick={e => e.stopPropagation()}
         onKeyDown={handleKeyDown}
         style={{
-          width:         '860px',
-          maxWidth:      '95vw',
-          height:        '80dvh',
+          width:         '1100px',
+          maxWidth:      '96vw',
+          height:        '88dvh',
           background:    'var(--color-bg)',
           border:        '1px solid var(--color-border-strong)',
           display:       'flex',
@@ -1493,17 +1561,20 @@ export default function LogPanel({ featureName, onClose }) {
           )}
 
           {/* ── List + inspector split ────────────────────────────────────── */}
-          {/* On wide widths: list | inspector side by side.                   */}
+          {/* On wide widths: full-width list above, detail in a bottom drawer.*/}
           {/* On narrow widths: full-width list; inspector appears inline.     */}
-          <div style={{
-            flex:       1,
-            overflow:   'hidden',
-            display:    'flex',
-            flexDirection: 'row',
-            background: '#050505',
-            border:     '1px solid var(--color-surface-header)',
-            margin:     'var(--space-2) var(--space-3) 0',
-          }}>
+          <div
+            ref={logAreaRef}
+            style={{
+              flex:       1,
+              overflow:   'hidden',
+              display:    'flex',
+              flexDirection: 'column',
+              background: '#050505',
+              border:     '1px solid var(--color-surface-header)',
+              margin:     'var(--space-2) var(--space-3) 0',
+            }}
+          >
             {/* Scrollable log list */}
             <div style={{
               flex:               1,
@@ -1588,12 +1659,14 @@ export default function LogPanel({ featureName, onClose }) {
               <div ref={sentinelRef} />
             </div>
 
-            {/* Wide-mode side panel — only when an event is selected and not narrow */}
+            {/* Wide-mode bottom drawer — only when an event is selected and not narrow */}
             {selectedRow && !isNarrow && (
               <EventInspector
                 record={selectedRow.record}
                 traces={selectedRow.traces}
                 onClose={() => setSelectedRow(null)}
+                height={drawerHeight}
+                onResizeStart={handleDrawerResizeStart}
               />
             )}
           </div>
