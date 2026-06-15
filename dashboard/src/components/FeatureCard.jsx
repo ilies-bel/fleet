@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { getHealth, removeFeature, stopFeature, startFeature, syncFeature, renameFeature } from '../api.js';
+import { getHealth, getServicesHealth, removeFeature, stopFeature, startFeature, syncFeature, renameFeature } from '../api.js';
 import { describeFeature } from './featurePresentation.js';
 import { Button } from './Button.jsx';
 import FeatureConfigModal from './FeatureConfigModal.jsx';
@@ -32,8 +32,23 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
 
     async function check() {
       try {
-        const res = await getHealth(key);
-        setHealth(res.status);
+        const res = await getServicesHealth(key);
+        const services = res.services;
+        if (!services || services.length === 0) {
+          // Empty services list — fall back to the root probe (cluster-hosted
+          // features or local features with no registered services).
+          const rootRes = await getHealth(key);
+          setHealth(rootRes.status);
+          return;
+        }
+        const upCount = services.filter(s => s.status === 'up').length;
+        if (upCount === services.length) {
+          setHealth('up');
+        } else if (upCount > 0) {
+          setHealth('degraded');
+        } else {
+          setHealth('down');
+        }
       } catch {
         setHealth('down');
       }

@@ -26,6 +26,7 @@ const STATUS_PRESENTATION = {
 /** Live health probe → presentation, used only when registry status is 'up'/'running'. */
 const HEALTH_PRESENTATION = {
   up: { color: 'var(--color-accent)', label: 'UP' },
+  degraded: { color: 'var(--color-warning)', label: 'DEGRADED' },
   starting: { color: 'var(--color-warning)', label: 'STARTING', blink: true },
   down: { color: 'var(--color-danger)', label: 'DOWN' },
   checking: { color: 'var(--color-warning)', label: '...', blink: true },

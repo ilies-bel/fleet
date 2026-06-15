@@ -12,6 +12,7 @@ import FeatureList from '../FeatureList.jsx';
 // FeatureCard calls several API functions on mount; mock the boundary.
 vi.mock('../../api.js', () => ({
   getHealth: vi.fn().mockResolvedValue({ status: 'up' }),
+  getServicesHealth: vi.fn().mockResolvedValue({ services: [] }),
   removeFeature: vi.fn().mockResolvedValue({}),
   stopFeature: vi.fn().mockResolvedValue({}),
   startFeature: vi.fn().mockResolvedValue({}),

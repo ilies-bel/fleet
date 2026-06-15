@@ -19,6 +19,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 vi.mock('../../api.js', () => ({
   getDiff: vi.fn(),
   getHealth: vi.fn().mockResolvedValue({ status: 'down' }),
+  getServicesHealth: vi.fn().mockResolvedValue({ services: [] }),
   removeFeature: vi.fn().mockResolvedValue({}),
   stopFeature: vi.fn().mockResolvedValue({}),
   startFeature: vi.fn().mockResolvedValue({}),

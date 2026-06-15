@@ -9,9 +9,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import FeatureList from '../FeatureList.jsx';
 
-// FeatureCard calls getHealth on mount; mock the api boundary so tests are hermetic.
+// FeatureCard calls getServicesHealth on mount; mock the api boundary so tests are hermetic.
 vi.mock('../../api.js', () => ({
   getHealth: vi.fn().mockResolvedValue({ status: 'up' }),
+  getServicesHealth: vi.fn().mockResolvedValue({ services: [] }),
   removeFeature: vi.fn().mockResolvedValue({}),
   stopFeature: vi.fn().mockResolvedValue({}),
   startFeature: vi.fn().mockResolvedValue({}),

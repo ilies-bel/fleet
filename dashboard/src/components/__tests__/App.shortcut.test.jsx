@@ -17,6 +17,7 @@ vi.mock('../../api.js', () => ({
   activateFeature: vi.fn(),
   getStatus: vi.fn(),
   getHealth: vi.fn(),
+  getServicesHealth: vi.fn(),
   getLogs: vi.fn(),
   getStats: vi.fn(),
   stopFeature: vi.fn(),
@@ -60,6 +61,7 @@ describe('App keyboard shortcuts (Cmd/Ctrl+1..9)', () => {
     api.activateFeature.mockResolvedValue({ ok: true });
     api.getStatus.mockResolvedValue({ featureCount: FEATURES.length });
     api.getHealth.mockResolvedValue({ status: 'up' });
+    api.getServicesHealth.mockResolvedValue({ services: [] });
     api.getLogs.mockResolvedValue({ lines: '' });
     api.getStats.mockResolvedValue({});
     api.stopFeature.mockResolvedValue({});

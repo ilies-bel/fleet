@@ -24,6 +24,7 @@ vi.mock('../../api.js', () => ({
   }),
   activateFeature: vi.fn().mockResolvedValue({ ok: true }),
   getHealth: vi.fn().mockResolvedValue({ status: 'up' }),
+  getServicesHealth: vi.fn().mockResolvedValue({ services: [] }),
   removeFeature: vi.fn().mockResolvedValue({}),
   stopFeature: vi.fn().mockResolvedValue({}),
   startFeature: vi.fn().mockResolvedValue({}),

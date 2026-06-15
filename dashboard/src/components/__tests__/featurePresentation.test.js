@@ -66,6 +66,13 @@ describe('describeFeature', () => {
     const p = describeFeature(f('up'), 'weird-value', false);
     expect(p.dotLabel).toBe('● ...');
   });
+
+  it('shows amber DEGRADED when aggregate health is degraded', () => {
+    const p = describeFeature(f('up'), 'degraded', false);
+    expect(p.dotLabel).toBe('● DEGRADED');
+    expect(p.dotColor).toBe('var(--color-warning)');
+    expect(p.blink).toBe(false);
+  });
 });
 
 describe('formatWorktree', () => {

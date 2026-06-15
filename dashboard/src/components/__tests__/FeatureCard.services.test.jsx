@@ -14,9 +14,10 @@ import FeatureCard from '../FeatureCard.jsx';
 import FeatureList from '../FeatureList.jsx';
 import * as api from '../../api.js';
 
-// Mock the api module — FeatureCard calls getHealth on mount via useEffect
+// Mock the api module — FeatureCard calls getServicesHealth on mount via useEffect
 vi.mock('../../api.js', () => ({
   getHealth: vi.fn().mockResolvedValue({ status: 'up' }),
+  getServicesHealth: vi.fn().mockResolvedValue({ services: [{ name: 'backend', port: 80, status: 'up' }, { name: 'frontend', port: 80, status: 'up' }] }),
   removeFeature: vi.fn().mockResolvedValue({}),
   stopFeature: vi.fn().mockResolvedValue({}),
   startFeature: vi.fn().mockResolvedValue({}),

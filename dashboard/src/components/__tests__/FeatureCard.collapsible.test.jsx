@@ -11,6 +11,7 @@ import FeatureCard from '../FeatureCard.jsx';
 
 vi.mock('../../api.js', () => ({
   getHealth: vi.fn().mockResolvedValue({ status: 'down' }),
+  getServicesHealth: vi.fn().mockResolvedValue({ services: [] }),
   removeFeature: vi.fn().mockResolvedValue({}),
   stopFeature: vi.fn().mockResolvedValue({}),
   startFeature: vi.fn().mockResolvedValue({}),
