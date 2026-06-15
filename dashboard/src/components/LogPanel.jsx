@@ -850,7 +850,7 @@ export default function LogPanel({ featureName, onClose }) {
   const [levelFilter, setLevelFilter] = useState('ALL');
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState(null);
-  const [autoTail, setAutoTail]       = useState(true);
+  const [autoTail, setAutoTail]       = useState(false);
   const [fetchedAt, setFetchedAt]     = useState(null);
 
   // ── Throughput / error-rate tracking ─────────────────────────────────────
