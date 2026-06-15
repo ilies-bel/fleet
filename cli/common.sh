@@ -1111,6 +1111,7 @@ show_help() {
   echo -e "  ${BLUE}sync${RESET}    <name> [--regenerate-sources] [--rebuild]  Pull latest code and rebuild"
   echo -e "  ${BLUE}migrate-names${RESET}                        Identify and remove pre-migration bare-named containers"
   echo -e "  ${BLUE}install-claude${RESET} [--local|--global] [--force]  Install Claude Code assets"
+  echo -e "  ${BLUE}logs${RESET}    [<name>] [--trace] [--tail <n>] [-f]  Error-focused diagnostic surface for feature containers"
   echo -e "  ${BLUE}doctor${RESET}                               Check fleet prerequisites (Docker, railpack, builder)"
   echo -e "  ${BLUE}help${RESET}    [<command>]                  Show this help, or help for <command>"
   echo ""

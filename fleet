@@ -30,6 +30,7 @@ case "$cmd" in
   push)            exec "$FLEET_ROOT/cli/cmd-push.sh" "$@" ;;
   sync)            exec "$FLEET_ROOT/cli/cmd-sync.sh" "$@" ;;
   migrate-names)   exec "$FLEET_ROOT/cli/cmd-migrate-names.sh" "$@" ;;
+  logs)            exec "$FLEET_ROOT/cli/cmd-logs.sh" "$@" ;;
   doctor)          exec "$FLEET_ROOT/cli/cmd-doctor.sh" "$@" ;;
   install-claude)
     command -v node >/dev/null 2>&1 || { echo "[fleet] ERROR: node is required for 'install-claude'" >&2; exit 1; }
@@ -53,6 +54,7 @@ case "$cmd" in
         push)           exec "$FLEET_ROOT/cli/cmd-push.sh" --help ;;
         sync)           exec "$FLEET_ROOT/cli/cmd-sync.sh" --help ;;
         migrate-names)  exec "$FLEET_ROOT/cli/cmd-migrate-names.sh" --help ;;
+        logs)           exec "$FLEET_ROOT/cli/cmd-logs.sh" --help ;;
         doctor)         exec "$FLEET_ROOT/cli/cmd-doctor.sh" --help ;;
         install-claude)
           command -v node >/dev/null 2>&1 || { echo "[fleet] ERROR: node is required for 'install-claude'" >&2; exit 1; }
