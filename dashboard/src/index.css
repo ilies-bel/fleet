@@ -159,6 +159,19 @@ input {
   min-width: 0;
 }
 
+/* ── Feature drawer: desktop base rule ────────────────────────────────────── */
+/* On desktop (≥768px) the <aside> is a flex item inside FeaturesPage's row
+   container, which already bounds its height.  Making the aside itself a flex
+   column propagates that bounded height down to the FeatureList root div so
+   the inner overflowY:auto scroll region can actually clip-and-scroll instead
+   of growing unbounded.  min-height:0 lets the flex child shrink below its
+   content size — required for the scroll region to engage. */
+.feature-drawer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* ── Responsive: off-canvas feature drawer (< 768px) ─────────────────────── */
 
 @media (max-width: 767px) {
