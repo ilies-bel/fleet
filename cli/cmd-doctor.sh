@@ -89,6 +89,52 @@ else
   fi
 fi
 
+# ── 4. fleet-gateway container ────────────────────────────────────────────────
+printf "  Checking fleet-gateway…  "
+if ! docker container inspect fleet-gateway >/dev/null 2>&1; then
+  echo -e "${FAIL} gateway container 'fleet-gateway' is NOT running"
+  echo "" >&2
+  echo "  Start it with: fleet ui start" >&2
+  echo "" >&2
+  all_ok=1
+else
+  _gw_running=$(docker container inspect -f '{{.State.Running}}' fleet-gateway 2>/dev/null || echo false)
+  if [ "${_gw_running}" != "true" ]; then
+    echo -e "${FAIL} gateway container 'fleet-gateway' exists but is NOT running"
+    echo "" >&2
+    echo "  Start it with: fleet ui start" >&2
+    echo "" >&2
+    all_ok=1
+  else
+    # Check required env vars are set inside the gateway container.
+    _gw_env=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' fleet-gateway 2>/dev/null || echo "")
+    _gw_project_root=$(printf '%s\n' "${_gw_env}" | grep '^FLEET_PROJECT_ROOT=' | cut -d= -f2-)
+    _gw_fleet_root=$(printf '%s\n' "${_gw_env}" | grep '^FLEET_ROOT=' | cut -d= -f2-)
+    _gw_ok=true
+    if [ -z "${_gw_project_root}" ]; then
+      echo -e "${FAIL} FLEET_PROJECT_ROOT not set in fleet-gateway container env"
+      echo "" >&2
+      echo "  Recreate the gateway: fleet ui restart" >&2
+      echo "  (requires fleet CLI ≥2.1.1 which passes FLEET_PROJECT_ROOT at docker run)" >&2
+      echo "" >&2
+      all_ok=1
+      _gw_ok=false
+    fi
+    if [ -z "${_gw_fleet_root}" ]; then
+      echo -e "${FAIL} FLEET_ROOT not set in fleet-gateway container env"
+      echo "" >&2
+      echo "  Recreate the gateway: fleet ui restart" >&2
+      echo "  (requires fleet CLI ≥2.1.1 which passes FLEET_ROOT at docker run)" >&2
+      echo "" >&2
+      all_ok=1
+      _gw_ok=false
+    fi
+    if [ "${_gw_ok}" = true ]; then
+      echo -e "${PASS} gateway running; FLEET_PROJECT_ROOT and FLEET_ROOT are set"
+    fi
+  fi
+fi
+
 echo ""
 
 if [ "${all_ok}" -eq 0 ]; then

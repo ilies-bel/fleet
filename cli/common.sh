@@ -1344,6 +1344,8 @@ rebuild_gateway() {
     -e PROXY_PORT="${PROXY_PORT}" \
     -e ADMIN_PORT="${ADMIN_PORT}" \
     -e BACKEND_PORT="${BACKEND_PORT:-8080}" \
+    -e FLEET_PROJECT_ROOT="${FLEET_PROJECT_ROOT}" \
+    -e FLEET_ROOT="${FLEET_ROOT}" \
     -p "${PROXY_PORT}:${PROXY_PORT}" \
     -p "${ADMIN_PORT}:${ADMIN_PORT}" \
     -p "${BACKEND_PORT:-8080}:${BACKEND_PORT:-8080}" \

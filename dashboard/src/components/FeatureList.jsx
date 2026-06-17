@@ -33,20 +33,8 @@ function readCollapsed() {
   }
 }
 
-function readCollapsedGroups() {
-  try {
-    if (typeof localStorage === 'undefined') return new Set();
-    const raw = localStorage.getItem('fleet.sidebar.collapsedGroups');
-    if (!raw) return new Set();
-    return new Set(JSON.parse(raw));
-  } catch {
-    return new Set();
-  }
-}
-
 export default function FeatureList({ features, activePreview, startingFeatures, onActivate, onRemoved, onLogs }) {
   const [collapsed, setCollapsed] = useState(readCollapsed);
-  const [collapsedGroups, setCollapsedGroups] = useState(readCollapsedGroups);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeStatuses, setActiveStatuses] = useState(() => new Set());
 
@@ -59,25 +47,6 @@ export default function FeatureList({ features, activePreview, startingFeatures,
         }
       } catch {
         /* ignore persistence errors (e.g. SSR / disabled storage) */
-      }
-      return next;
-    });
-  }
-
-  function toggleGroup(proj) {
-    setCollapsedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(proj)) {
-        next.delete(proj);
-      } else {
-        next.add(proj);
-      }
-      try {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('fleet.sidebar.collapsedGroups', JSON.stringify([...next]));
-        }
-      } catch {
-        /* ignore persistence errors */
       }
       return next;
     });
@@ -134,8 +103,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
   return (
     <div style={{
       width: collapsed ? '48px' : '280px',
-      flexGrow: 1,
-      minHeight: 0,
+      flexShrink: 0,
       borderRight: '1px solid var(--color-border)',
       display: 'flex',
       flexDirection: 'column',
@@ -285,46 +253,28 @@ export default function FeatureList({ features, activePreview, startingFeatures,
 
             {filteredFeatures.length > 0 && (
               isMultiProject ? (
-                groups.map(([proj, groupFeatures], idx) => {
-                  const isGroupCollapsed = collapsedGroups.has(proj);
-                  return (
-                    <div key={proj || '__ungrouped__'}>
-                      <button
-                        type="button"
-                        aria-expanded={!isGroupCollapsed}
-                        onClick={() => toggleGroup(proj)}
-                        style={{
-                          /* E-item rhythm: generous separation between groups; first group stays tight against search bar */
-                          paddingTop: idx === 0 ? 'var(--space-2)' : 'var(--space-4)',
-                          paddingRight: 'var(--space-3)',
-                          paddingBottom: 'var(--space-1)',
-                          paddingLeft: 'var(--space-3)',
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '0.6rem',
-                          color: 'var(--color-ink-dim)',
-                          letterSpacing: '0.08em',
-                          background: '#080808',
-                          width: '100%',
-                          textAlign: 'left',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          cursor: 'pointer',
-                          border: 'none',
-                          borderBottom: '1px solid var(--color-surface-header)',
-                        }}
-                      >
-                        <span>// {proj || 'unknown'}</span>
-                        <span aria-hidden="true" style={{ flexShrink: 0 }}>
-                          {isGroupCollapsed ? '›' : '‹'}
-                        </span>
-                      </button>
-                      {!isGroupCollapsed && groupFeatures.map(f => (
-                        <FeatureCard {...cardProps(f)} />
-                      ))}
+                groups.map(([proj, groupFeatures], idx) => (
+                  <div key={proj || '__ungrouped__'}>
+                    <div style={{
+                      /* E-item rhythm: generous separation between groups; first group stays tight against search bar */
+                      paddingTop: idx === 0 ? 'var(--space-2)' : 'var(--space-4)',
+                      paddingRight: 'var(--space-3)',
+                      paddingBottom: 'var(--space-1)',
+                      paddingLeft: 'var(--space-3)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '0.6rem',
+                      color: 'var(--color-ink-dim)',
+                      letterSpacing: '0.08em',
+                      borderBottom: '1px solid var(--color-surface-header)',
+                      background: '#080808',
+                    }}>
+                      // {proj || 'unknown'}
                     </div>
-                  );
-                })
+                    {groupFeatures.map(f => (
+                      <FeatureCard {...cardProps(f)} />
+                    ))}
+                  </div>
+                ))
               ) : (
                 filteredFeatures.map(f => (
                   <FeatureCard {...cardProps(f)} />
