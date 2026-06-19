@@ -302,7 +302,7 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       {/* Expanded body — hidden when collapsed */}
       {!collapsed && (
         <>
-          <div style={{ marginBottom: 'var(--space-2)' }}> {/* error cluster: branch→error→controls */}
+          <div style={{ marginBottom: 'var(--space-2)' }}> {/* error cluster: header→error→controls */}
             {presentation.showError && feature.error && (
               <div
                 role="alert"
