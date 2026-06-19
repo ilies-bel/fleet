@@ -302,18 +302,6 @@ export default function FeatureCard({ feature, isActive, isPreview, isStarting, 
       {/* Expanded body — hidden when collapsed */}
       {!collapsed && (
         <>
-          <div style={{
-            color: 'var(--color-muted)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.68rem',
-            marginBottom: 'var(--space-1)', /* tight identity cluster: branch→status */
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}>
-            {branch}
-          </div>
-
           <div style={{ marginBottom: 'var(--space-2)' }}> {/* error cluster: branch→error→controls */}
             {presentation.showError && feature.error && (
               <div

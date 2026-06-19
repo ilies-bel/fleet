@@ -69,7 +69,7 @@ describe('FeatureCard — services[] forward-compatibility', () => {
     ).not.toThrow();
   });
 
-  it('displays the feature name and branch regardless of services[]', () => {
+  it('displays the feature name regardless of services[]', () => {
     const feature = makeFeature({ name: 'auth-service', branch: 'feat/auth-v2' });
     render(
       <FeatureCard
@@ -84,7 +84,8 @@ describe('FeatureCard — services[] forward-compatibility', () => {
     );
 
     expect(screen.getByText('auth-service')).toBeInTheDocument();
-    expect(screen.getByText('feat/auth-v2')).toBeInTheDocument();
+    // Branch is no longer rendered as a standalone line in the card body;
+    // it appears in the 'fleet add {name} {branch}' hint for not-started features only.
   });
 
   it('renders with N=1 service (single-container mode)', () => {
