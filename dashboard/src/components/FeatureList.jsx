@@ -314,7 +314,7 @@ export default function FeatureList({ features, activePreview, startingFeatures,
                       >
                         <span>// {proj || 'unknown'}</span>
                         <span aria-hidden="true" style={{ flexShrink: 0 }}>
-                          {isGroupCollapsed ? '›' : '‹'}
+                          {isGroupCollapsed ? '▶' : '▼'}
                         </span>
                       </button>
                       {!isGroupCollapsed && groupFeatures.map(f => (
