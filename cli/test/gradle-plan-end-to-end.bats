@@ -103,6 +103,103 @@ TOML
   grep -q "BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend" "${DOCKER_LOG}"
 }
 
+@test "railpack plan for jOOQ gradle project adds -x generateJooq to build step command" {
+  # Arrange: gradle project with nu.studer.jooq plugin declared in build file
+  _write_gradle_toml
+  mkdir -p "${PROJ_DIR}/backend"
+  cat > "${PROJ_DIR}/backend/build.gradle.kts" <<'KTS'
+plugins {
+    kotlin("jvm") version "2.0.21"
+    id("org.springframework.boot") version "3.5.7"
+    id("nu.studer.jooq") version "9.0"
+}
+KTS
+
+  # Override railpack stub to emit a realistic plan with a gradlew build step
+  cat > "${STUB_BIN}/railpack" <<'STUB'
+#!/bin/bash
+case "${1:-}" in
+  --version) echo "railpack 0.1.0" ;;
+  plan) cat <<'JSON'
+{
+  "steps": [
+    {
+      "name": "build",
+      "commands": [{"cmd": "./gradlew clean build -x check -x test -Pproduction"}]
+    }
+  ],
+  "deploy": {
+    "startCommand": "java $JAVA_OPTS -jar app.jar",
+    "inputs": [{"step": "build", "include": ["build/libs/app.jar"]}]
+  }
+}
+JSON
+    ;;
+esac
+STUB
+  chmod +x "${STUB_BIN}/railpack"
+
+  # Act
+  run env PATH="${STUB_BIN}:${PATH}" bash -c "cd '${PROJ_DIR}' && bash '${SCRIPT_PATH}' 2>&1"
+  [ "$status" -eq 0 ]
+
+  # Assert: build step command must include -x generateJooq
+  local cmd
+  cmd=$(jq -r '
+    [.steps[] | select(.name == "build") | .commands[] | select(.cmd?) | .cmd][0] // ""
+  ' "${PROJ_DIR}/.fleet/backend/railpack-plan.json")
+  echo "build cmd: ${cmd}"
+  [[ "${cmd}" == *"-x generateJooq"* ]]
+}
+
+@test "railpack plan for non-jOOQ gradle project does not add -x generateJooq" {
+  # Arrange: plain gradle project, no jOOQ references
+  _write_gradle_toml
+  mkdir -p "${PROJ_DIR}/backend"
+  cat > "${PROJ_DIR}/backend/build.gradle.kts" <<'KTS'
+plugins {
+    kotlin("jvm") version "2.0.21"
+    id("org.springframework.boot") version "3.5.7"
+}
+KTS
+
+  # Override railpack stub to emit a plan with a build step
+  cat > "${STUB_BIN}/railpack" <<'STUB'
+#!/bin/bash
+case "${1:-}" in
+  --version) echo "railpack 0.1.0" ;;
+  plan) cat <<'JSON'
+{
+  "steps": [
+    {
+      "name": "build",
+      "commands": [{"cmd": "./gradlew clean build -x check -x test -Pproduction"}]
+    }
+  ],
+  "deploy": {
+    "startCommand": "java $JAVA_OPTS -jar app.jar",
+    "inputs": [{"step": "build", "include": ["build/libs/app.jar"]}]
+  }
+}
+JSON
+    ;;
+esac
+STUB
+  chmod +x "${STUB_BIN}/railpack"
+
+  # Act
+  run env PATH="${STUB_BIN}:${PATH}" bash -c "cd '${PROJ_DIR}' && bash '${SCRIPT_PATH}' 2>&1"
+  [ "$status" -eq 0 ]
+
+  # Assert: build step command must NOT include -x generateJooq
+  local cmd
+  cmd=$(jq -r '
+    [.steps[] | select(.name == "build") | .commands[] | select(.cmd?) | .cmd][0] // ""
+  ' "${PROJ_DIR}/.fleet/backend/railpack-plan.json")
+  echo "build cmd: ${cmd}"
+  [[ "${cmd}" != *"-x generateJooq"* ]]
+}
+
 @test "Dockerfile.feature-base.gradle is not referenced in cli/, gateway/src/, or dashboard/src/" {
   local match_count
   # Exclude this test file itself (its name and test-name strings mention the

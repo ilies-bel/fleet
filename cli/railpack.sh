@@ -47,5 +47,37 @@ railpack_emit_plan() {
     error "railpack emitted empty plan for '${subproject_dir}'"
   fi
 
+  # ── Gradle/jOOQ: skip codegen at image-build time ──────────────────────────
+  # The railpack builder (ghcr.io/railwayapp/railpack-builder) runs as root
+  # (uid 0).  Zonky embedded-postgres invokes initdb, which hard-refuses to
+  # run as root — so the :generateJooq task always fails in the build sandbox.
+  # There is no database at image-build time anyway; jOOQ codegen belongs at
+  # container-start time (config/entrypoint.sh provisions a local PG and the
+  # -PjooqUseLocalDb build property wires the generateJooq task to it).
+  #
+  # When the Gradle build file declares the nu.studer.jooq plugin or references
+  # the generateJooq task, patch the "build" step command in the generated plan
+  # to append -x generateJooq, preventing initdb from being invoked during the
+  # root image build.
+  local _jooq_build_file=""
+  for _f in "${subproject_dir}/build.gradle.kts" "${subproject_dir}/build.gradle"; do
+    [ -f "${_f}" ] && { _jooq_build_file="${_f}"; break; }
+  done
+  if [ -n "${_jooq_build_file}" ] && \
+     grep -qE '(nu\.studer\.jooq|generateJooq)' "${_jooq_build_file}" 2>/dev/null; then
+    info "jOOQ detected in '${_jooq_build_file}' — patching railpack plan to skip generateJooq at image-build time"
+    if command -v jq >/dev/null 2>&1; then
+      jq '
+        (.steps[] | select(.name == "build") | .commands[] |
+         select(.cmd? and (.cmd | test("gradlew")))).cmd |= . + " -x generateJooq"
+      ' "${out_path}" > "${out_path}.tmp" \
+        && mv "${out_path}.tmp" "${out_path}" \
+        || { rm -f "${out_path}.tmp"
+             warn "jOOQ railpack plan patch failed — plan left unmodified; image build may fail as root"; }
+    else
+      warn "jq not on PATH — cannot patch generateJooq out of railpack plan; image build will fail as root"
+    fi
+  fi
+
   info "Build plan written to '${out_path}'"
 }
