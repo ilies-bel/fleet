@@ -74,6 +74,64 @@ export const INJECTED_PICKER = String.raw`(() => {
   const EXPECTED_DASHBOARD_ORIGIN =
     (window.location.ancestorOrigins && window.location.ancestorOrigins[0]) || '';
 
+  // ── Scroll persistence (always on, independent of capture state) ───────────
+  // The dashboard iframe is remounted on every feature switch, scrolling the
+  // previewed app back to the top. The dashboard parent CANNOT read
+  // iframe.contentWindow.scrollY (cross-origin SecurityError), so scroll
+  // restoration is done cooperatively here — the picker runs same-origin
+  // inside the previewed app.
+  //
+  // Keyed strictly by pathname+search so a route change does NOT restore a
+  // stale offset (the SPA's own intentional in-app navigations are left
+  // alone). All sessionStorage access is try/catch'd — storage may be
+  // disabled/blocked in some embedding contexts; failures must be silent and
+  // must NOT break the picker.
+  const SCROLL_KEY = 'mars.scroll:' + location.pathname + location.search;
+
+  function _readSavedScroll() {
+    try {
+      var raw = sessionStorage.getItem(SCROLL_KEY);
+      if (raw == null) return null;
+      var n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    } catch (_) { return null; }
+  }
+
+  function _writeSavedScroll(y) {
+    try { sessionStorage.setItem(SCROLL_KEY, String(y)); } catch (_) { /* silent */ }
+  }
+
+  function _restoreSavedScroll() {
+    var saved = _readSavedScroll();
+    if (saved == null) return;
+    window.scrollTo(0, saved);
+    // SPAs may paint async — retry once on the next animation frame so the
+    // restore wins against late layout.
+    requestAnimationFrame(function() { window.scrollTo(0, saved); });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _restoreSavedScroll, { once: true });
+  } else {
+    _restoreSavedScroll();
+  }
+
+  // Throttle scroll-position writes via rAF. Uses its own listener; does NOT
+  // interfere with the capture-mode reposition() scroll listener registered
+  // later (separate function references, separate concerns).
+  var _scrollRafPending = false;
+  window.addEventListener('scroll', function() {
+    if (_scrollRafPending) return;
+    _scrollRafPending = true;
+    requestAnimationFrame(function() {
+      _scrollRafPending = false;
+      _writeSavedScroll(window.scrollY);
+    });
+  }, { passive: true });
+
+  window.addEventListener('beforeunload', function() { _writeSavedScroll(window.scrollY); });
+  window.addEventListener('pagehide', function() { _writeSavedScroll(window.scrollY); });
+
   ${computeRef.toString()}
 
   // Closed shadow root — cached in closure; attachShadow may only be called once

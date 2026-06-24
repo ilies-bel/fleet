@@ -139,6 +139,16 @@ const [logFeature, setLogFeature] = useState(null);
   }
 
   async function handleActivate(key) {
+    // Short-circuit when the requested key is already the active preview.
+    // ⌘1–9 dispatches handleActivate unconditionally; without this guard,
+    // pressing the number of the already-active feature would bump
+    // previewKey, remount the iframe, and scroll the previewed app back to
+    // the top for no reason. Still close the drawer so the keyboard
+    // shortcut visibly dismisses the off-canvas menu on narrow viewports.
+    if (key === activePreview) {
+      onDrawerClose();
+      return;
+    }
     try {
       pendingActivateRef.current = key;   // protect this selection from racing polls
       await activateFeature(key);
