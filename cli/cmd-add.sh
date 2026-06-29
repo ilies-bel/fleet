@@ -870,12 +870,34 @@ for svc in services:
   if [ "${_needs_sock}" = true ]; then
     echo "      - /var/run/docker.sock:/var/run/docker.sock"
   fi
+  # Healthcheck: nginx on :80 must serve AND every backend service must be
+  # actually answering on its own port. nginx comes up in seconds, but a
+  # spring/gradle backend only opens its port once the (slow, first-run)
+  # bootJar build finishes and the app has booted — so probing the backend
+  # port gates "healthy" on build-done AND a real HTTP 200, instead of the
+  # old nginx-only spider that flipped green while the backend was still
+  # compiling. The shell `&&` chain fails the whole healthcheck if any probe
+  # fails, so the container stays "starting"/"unhealthy" until the backend
+  # serves. Frontend-only stacks keep the plain nginx check.
+  _HC_CMD="wget -q --spider http://127.0.0.1:80/"
+  for i in "${!SVC_STACKS[@]}"; do
+    case "${SVC_STACKS[$i]}" in
+      spring|gradle)
+        # Spring Boot exposes a readiness endpoint; it returns 200 only once
+        # the context is fully up. The port itself does not listen until the
+        # build completes, so a connection failure here = build still running.
+        _HC_CMD="${_HC_CMD} && wget -q --spider http://127.0.0.1:${SVC_PORTS[$i]}/actuator/health"
+        ;;
+    esac
+  done
   echo "    healthcheck:"
-  echo "      test: [\"CMD\", \"wget\", \"-q\", \"--spider\", \"http://127.0.0.1:80/\"]"
+  echo "      test: [\"CMD-SHELL\", \"${_HC_CMD}\"]"
   echo "      interval: 10s"
   echo "      timeout: 5s"
   echo "      retries: 30"
-  echo "      start_period: 30s"
+  # First-run gradle bootJar can take 90-180s; keep the start_period generous
+  # so failing backend probes during the build don't burn the retry budget.
+  echo "      start_period: 180s"
   echo "    networks:"
   echo "      - fleet-net"
   # Emit host port mappings for services that declare host_port
@@ -986,30 +1008,63 @@ write_state "${FEATURE_DIR}" starting
 gateway_patch_status "${FLEET_PROJECT_NAME}-${NAME}" "starting"
 
 # ─── Wait for container health ───────────────────────────────────────────────
-# Uses the gateway's existing /features/:name/health endpoint (HEADs nginx on
-# port 80 inside the container). Times out after 180s → trap fires 'failed'.
+# Gate on Docker's OWN healthcheck status, not a one-shot nginx HEAD. The
+# healthcheck emitted above (see the `healthcheck:` block) requires nginx on
+# :80 AND every spring/gradle backend answering 200 on /actuator/health — so
+# `docker inspect`'s Health.Status only reaches "healthy" once the (slow,
+# first-run) bootJar build has finished and the backend is actually serving.
+# The old path polled the gateway's /health endpoint, which merely HEADed
+# nginx:80 — nginx comes up in seconds, so the stack flipped to "✓ started"
+# while the backend was still compiling. Honoring the container healthcheck
+# fixes that: build-done AND HTTP 200 before we report healthy.
+#
+# Docker Health.Status values: "starting" (within start_period), "healthy",
+# "unhealthy". We break on healthy, fail fast on unhealthy, and otherwise keep
+# waiting until the ceiling. Times out → trap fires 'failed'.
 info "Waiting for fleet-${FLEET_PROJECT_NAME}-${NAME} to become healthy..."
-# Gradle bootJar typically takes 90-120s on first run; 180s gives headroom.
-_HEALTH_MAX_WAIT=180
+# First-run gradle bootJar can take 90-180s; the healthcheck start_period is
+# 180s, so give the wait a ceiling beyond that for the build + first probes.
+_HEALTH_MAX_WAIT=300
 _HEALTH_ELAPSED=0
 _HEALTHY=false
+_HEALTH_FAILED=false   # set when docker reports the container outright unhealthy
+_HEALTH_STATUS=""
 while [ ${_HEALTH_ELAPSED} -lt ${_HEALTH_MAX_WAIT} ]; do
-  _HEALTH_BODY=$(curl -s "${GATEWAY_URL}/_fleet/api/features/${FLEET_PROJECT_NAME}-${NAME}/health" 2>/dev/null || echo '')
-  case "${_HEALTH_BODY}" in
-    *'"status":"up"'*) _HEALTHY=true; break ;;
+  # `.State.Health.Status` is empty for containers with no healthcheck; every
+  # fleet feature defines one, but guard anyway by falling back to running.
+  _HEALTH_STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+    "fleet-${FLEET_PROJECT_NAME}-${NAME}" 2>/dev/null || echo '')
+  case "${_HEALTH_STATUS}" in
+    healthy) _HEALTHY=true; break ;;
+    unhealthy)
+      # Docker has exhausted its own retries → the backend never came up.
+      # Break out and let the post-loop failure path fire the ERR trap; a bare
+      # `false` here would NOT propagate out of the case/while.
+      _HEALTH_FAILED=true; break ;;
+    none)
+      # No healthcheck defined — fall back to "container is running".
+      _RUNNING=$(docker inspect --format '{{.State.Running}}' \
+        "fleet-${FLEET_PROJECT_NAME}-${NAME}" 2>/dev/null || echo 'false')
+      [ "${_RUNNING}" = "true" ] && { _HEALTHY=true; break; }
+      ;;
   esac
   # Post health-check progress to build log so dashboard shows status
   curl -s -X POST \
     -H "Content-Type: text/plain" \
-    --data-binary "Waiting for health... (${_HEALTH_ELAPSED}s/${_HEALTH_MAX_WAIT}s)" \
+    --data-binary "Waiting for backend to serve... (${_HEALTH_ELAPSED}s/${_HEALTH_MAX_WAIT}s, docker=${_HEALTH_STATUS:-?})" \
     "${GATEWAY_URL}/_fleet/api/features/${FLEET_PROJECT_NAME}-${NAME}/build-log" >/dev/null 2>&1 || true
   sleep 2
   _HEALTH_ELAPSED=$((_HEALTH_ELAPSED + 2))
 done
 
 if [ "${_HEALTHY}" != true ]; then
-  echo "Health wait timed out after ${_HEALTH_MAX_WAIT}s — last health response: ${_HEALTH_BODY:-<empty>}" \
-    >> "${_FLEET_FAIL_LOG}"
+  if [ "${_HEALTH_FAILED}" = true ]; then
+    echo "Container reported unhealthy after ${_HEALTH_ELAPSED}s — backend did not start serving (last docker health status: ${_HEALTH_STATUS:-<empty>})." \
+      >> "${_FLEET_FAIL_LOG}"
+  else
+    echo "Health wait timed out after ${_HEALTH_MAX_WAIT}s — last docker health status: ${_HEALTH_STATUS:-<empty>}" \
+      >> "${_FLEET_FAIL_LOG}"
+  fi
   false
 fi
 
