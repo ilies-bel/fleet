@@ -719,9 +719,20 @@ COMPOSE_FILE="${FEATURE_DIR}/docker-compose.yml"
             _vol_slug=$(printf '%s' "${path_part}" | tr -c 'A-Za-z0-9' '-')
             vol_name="fleet-vol-${FLEET_PROJECT_NAME}-${SVC_NAMES[$i]}-${_vol_slug}${_scope_suffix}-${CONTAINER_ARCH}"
           fi
-          docker volume inspect "${vol_name}" >/dev/null 2>&1 \
-            || docker volume create "${vol_name}" >/dev/null \
-            || error "Failed to create named volume '${vol_name}'."
+          if ! docker volume inspect "${vol_name}" >/dev/null 2>&1; then
+            docker volume create "${vol_name}" >/dev/null \
+              || error "Failed to create named volume '${vol_name}'."
+            # A fresh named volume is root-owned and only group-r-x, but the
+            # feature image runs as a non-root UID in group 0 (OpenShift-style),
+            # so its `npm install` would hit EACCES writing into the volume.
+            # Initialise the volume group-0-writable from a throwaway root
+            # container (the entrypoint itself runs as the non-root UID and
+            # cannot chmod a root-owned mount). Matches the image's
+            # group-0-writable strategy; only runs once, at volume creation.
+            docker run --rm -v "${vol_name}:/v" busybox \
+              sh -c 'chgrp -R 0 /v && chmod -R g+rwX /v' >/dev/null 2>&1 \
+              || warn "Could not initialise permissions on volume '${vol_name}'; a non-root npm install may fail."
+          fi
           echo "      - ${vol_name}:${TARGET}"
           NODEMOD_VOLS+=("${vol_name}")
           ;;
