@@ -148,6 +148,16 @@ logfile=/var/log/supervisor/supervisord.log
 logfile_maxbytes=10MB
 loglevel=info
 pidfile=/tmp/supervisord.pid
+
+[unix_http_server]
+file=/tmp/supervisor.sock
+chmod=0700
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl=unix:///tmp/supervisor.sock
 SUPEREOF
 
 # PostgreSQL program block
