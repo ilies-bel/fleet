@@ -221,15 +221,23 @@ if [ -n \"\$JAR\" ]; then cp \"\$JAR\" /home/developer/''' + name + '''.jar; fi
             if port:
                 f.write('export SERVER_PORT=' + str(port) + '\n')
 
-        # Node/Vite services: reconcile node_modules against package.json on every
-        # start. Fast on a warm named volume; installs arch-correct native deps
-        # the first time (or after package-lock changes).
+        # Node/Vite services: reconcile node_modules against package.json on every start via
+        # the CRASH-SAFE staged reconcile in /usr/local/bin/fleet-node-reconcile.sh (baked
+        # into the feature-base image from config/node-reconcile.sh). It is a separate,
+        # image-baked script — NOT inlined here — because node_modules is a named-volume
+        # mountpoint and a bare in-place `npm install` corrupts the live tree when interrupted
+        # mid-rename (leaving e.g. vite/bin/vite.js missing -> gateway 502). Keeping the logic
+        # in its own file also avoids double-escaping `"`, `$`, `\;` and globs through this
+        # `python3 -c "..."` generator (a past source of a broken entrypoint). See that script
+        # for the full staged-install / verify / swap / self-heal rationale.
         if stack in ('vite', 'next', 'webpack') or (stack == '' and os.path.isfile(svc_dir + '/package.json')):
-            f.write('if [ -f package.json ]; then\n')
-            f.write('  echo \"[fleet] Reconciling ' + name + ' node_modules (arch=$(uname -m))...\"\n')
-            f.write('  if [ -d node_modules ]; then\n')
-            f.write('    find node_modules -maxdepth 3 -type d -name \".*-????????\" -exec rm -rf {} + 2>/dev/null || true\n')
-            f.write('  fi\n')
+            f.write('if [ -f package.json ] && [ -x /usr/local/bin/fleet-node-reconcile.sh ]; then\n')
+            f.write('  /usr/local/bin/fleet-node-reconcile.sh ' + name + '\n')
+            f.write('elif [ -f package.json ]; then\n')
+            # Fallback for images built before the reconcile script was baked in: the original
+            # best-effort in-place reconcile (kept minimal; the staged path is the real fix).
+            f.write('  echo \"[fleet] fleet-node-reconcile.sh missing; falling back to in-place npm install for ' + name + '\"\n')
+            f.write('  find node_modules -maxdepth 3 -type d -name \".*-????????\" -exec rm -rf {} + 2>/dev/null || true\n')
             f.write('  npm install --no-audit --no-fund --loglevel=error || echo \"[fleet] npm reconcile failed; continuing with existing node_modules\"\n')
             f.write('fi\n')
 
