@@ -227,7 +227,10 @@ if [ -n \"\$JAR\" ]; then cp \"\$JAR\" /home/developer/''' + name + '''.jar; fi
         if stack in ('vite', 'next', 'webpack') or (stack == '' and os.path.isfile(svc_dir + '/package.json')):
             f.write('if [ -f package.json ]; then\n')
             f.write('  echo \"[fleet] Reconciling ' + name + ' node_modules (arch=$(uname -m))...\"\n')
-            f.write('  npm install --no-audit --no-fund --loglevel=error\n')
+            f.write('  if [ -d node_modules ]; then\n')
+            f.write('    find node_modules -maxdepth 3 -type d -name \".*-????????\" -exec rm -rf {} + 2>/dev/null || true\n')
+            f.write('  fi\n')
+            f.write('  npm install --no-audit --no-fund --loglevel=error || echo \"[fleet] npm reconcile failed; continuing with existing node_modules\"\n')
             f.write('fi\n')
 
         if run_cmd:
